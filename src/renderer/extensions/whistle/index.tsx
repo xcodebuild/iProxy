@@ -388,7 +388,7 @@ export class WhistleExntension extends Extension {
                     }
                 });
             }, []);
-            return <>
+            return <React.Fragment>
                 <Dropdown overlay={menu}>
                     <div className="whistle-status-bar-item">
                         {t('Proxy')}
@@ -407,7 +407,7 @@ export class WhistleExntension extends Extension {
                         <MenuOutlined style={{ marginLeft: '10px' }} />
                     </div>
                 </Dropdown>
-            </>;
+            </React.Fragment>;
         };
 
         return WhistleStatusbarItem;
