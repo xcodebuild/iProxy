@@ -75,4 +75,5 @@ window.onload = () => {
             clearInterval(timerID);
         }
     }, totalTime / totalSteps);
+
 };
