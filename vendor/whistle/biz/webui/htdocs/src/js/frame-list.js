@@ -71,6 +71,9 @@ var FrameList = React.createClass({
         }
       }
     });
+    events.on('enableRecordFrame', function() {
+      self.refs.recordBtn.enable();
+    });
   },
   shouldComponentUpdate: function() {
     clearTimeout(this.filterTimer);
@@ -87,7 +90,15 @@ var FrameList = React.createClass({
       this.autoRefresh();
     }
     var reqData = this.props.reqData;
-    reqData && this.refs.recordBtn.enable(!reqData.stopRecordFrames);
+    if (reqData) {
+      if (reqData.pauseRecordFrames) {
+        this.refs.recordBtn.enable('pause');
+      } else if (reqData.stopRecordFrames) {
+        this.refs.recordBtn.enable('stop');
+      } else {
+        this.refs.recordBtn.enable();
+      }
+    }
   },
   replay: function() {
     var reqData = this.props.reqData;
@@ -234,7 +245,7 @@ var FrameList = React.createClass({
     var self = this;
     var props = self.props;
     var state = this.state;
-    var reqData = props.reqData || '';
+    var reqData = props.reqData || {};
     var onClickFrame = props.onClickFrame;
     var modal = self.props.modal;
     var keyword = state.keyword;

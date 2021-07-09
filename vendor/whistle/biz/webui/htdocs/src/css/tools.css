@@ -66,7 +66,7 @@
 }
 .w-textarea-bar .w-disabled {
   cursor: not-allowed;
-  color: #888!important;
+  color: #aaa!important;
 }
 .w-textarea-bar .w-refresh-menu-list {
   display: inline-block;
@@ -106,6 +106,7 @@
 .w-tool-box {
   overflow-x: hidden;
   overflow-y: auto;
+  padding-bottom: 20px;
 }
 .w-tool-box .w-detail-inspectors-title {
   border: none;

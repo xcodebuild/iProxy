@@ -59,7 +59,7 @@ function notAllowCache(resRules) {
 
 function pipeClient(req, client) {
   if (req._hasError) {
-    client.abort();
+    client.destroy();
   } else if (req.noReqBody) {
     util.drain(req, function() {
       if (!req._hasError) {
@@ -227,6 +227,7 @@ module.exports = function(req, res, next) {
             if (proxyUrl) {
               proxyOptions = url.parse(proxyUrl);
               proxyOptions.host = ip;
+              proxyOptions.auth = proxyOptions.auth || req._pacAuth;
               isSocks = proxyRule.isSocks;
               var proxyPort = proxyOptions.port;
               if (!proxyPort) {
@@ -249,7 +250,7 @@ module.exports = function(req, res, next) {
                   var curServerPort = options.port || (isHttps ? 443 : 80);
                   var proxyHeaders = {
                     host: options.hostname + ':' + curServerPort,
-                    'proxy-connection': 'keep-alive'
+                    'proxy-connection': req.disable.proxyConnection ? 'close' : 'keep-alive'
                   };
                   if (auth) {
                     proxyHeaders['proxy-authorization'] = auth;
@@ -370,6 +371,7 @@ module.exports = function(req, res, next) {
                   curClient.removeListener('error', retry);
                   curClient.removeListener('close', retry);
                   curClient.on('error', util.noop);
+                  curClient.destroy();
                   curClient = null;
                 }
                 if (req._hasError || req._hasRespond) {
@@ -530,8 +532,8 @@ module.exports = function(req, res, next) {
                 delete headers[prop];
               });
               var optHeaders = options.headers;
-              var isDelete = options.method === 'DELETE' && optHeaders['content-length'] == null;
-              if (isDelete) {
+              var transfer = options.method === 'DELETE' && optHeaders['transfer-encoding'];
+              if (transfer) {
                 delete optHeaders['transfer-encoding'];
               }
               if (proxyUrl) {
@@ -539,7 +541,9 @@ module.exports = function(req, res, next) {
               } else {
                 var clientId = optHeaders[config.CLIENT_ID_HEADER];
                 if (clientId) {
-                  util.removeClientId(optHeaders);
+                  if (!util.isEnable(req, 'keepClientId')) {
+                    util.removeClientId(optHeaders);
+                  }
                   req.setClientId && req.setClientId(clientId);
                 }
               }
@@ -552,8 +556,8 @@ module.exports = function(req, res, next) {
                 delete headers[config.HTTPS_FIELD];
                 delete headers[config.ALPN_PROTOCOL_HEADER];
               }
-              if (isDelete) {
-                optHeaders['Transfer-Encoding'] = 'chunked';
+              if (transfer) {
+                optHeaders['Transfer-Encoding'] = transfer;
               }
               if (options.isPlugin) {
                 optHeaders[config.PLUGIN_HOOK_NAME_HEADER] = config.PLUGIN_HOOKS.HTTP;
@@ -588,8 +592,9 @@ module.exports = function(req, res, next) {
     if (_res.realUrl) {
       req.realUrl = res.realUrl = _res.realUrl;
     }
-    res.headers = req.resHeaders = _res.headers;
-    res._originEncoding = _res.headers['content-encoding'];
+    var headers = _res.headers;
+    res.headers = req.resHeaders = headers;
+    res._originEncoding = headers['content-encoding'];
     req.statusCode = _res.statusCode;
     if (_res.rawHeaderNames) {
       res.rawHeaderNames = _res.rawHeaderNames;
@@ -600,6 +605,10 @@ module.exports = function(req, res, next) {
     _res.on('error', function(err) {
       res.emit('error', err);
     });
+    if (!req.isPluginReq && headers[config.PROXY_ID_HEADER] === 'h2') {
+      req.useH2 = true;
+      delete headers[config.PROXY_ID_HEADER];
+    }
     util.drain(req, function() {
       readFirstChunk(req, res, _res, function(firstChunk){
         pluginMgr.getResRules(req, _res, function() {
@@ -878,6 +887,9 @@ module.exports = function(req, res, next) {
                   Object.keys(resHeaders).forEach(function(prop) {
                     delete headers[prop];
                   });
+                  if (headers[config.ALPN_PROTOCOL_HEADER] === 'h2') {
+                    req.useH2 = true;
+                  }
                   res.src(_res, null, firstChunk);
                   var rawNames = res.rawHeaderNames || {};
 

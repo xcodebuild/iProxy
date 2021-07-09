@@ -186,30 +186,42 @@ module.exports = function init(_proxy) {
 *
 * @param options
 */
-  function formatFilter(filter, clientIp) {
+  function formatFilter(filter, clientIp, clientId) {
     if (!filter.url && !filter.name && !filter.value && !filter.ip) {
       return;
     }
     var url = util.trimStr(filter.url).toLowerCase();
     var ip = util.trimStr(filter.ip);
     var list = [];
+    var cid;
+    var result;
     if (ip === 'self') {
       ip = clientIp;
+    } if (ip === 'clientId') {
+      if (clientId) {
+        cid = clientId;
+      } else {
+        result = {clientIp: clientIp};
+      }
+      ip = null;
     } else if (ip && !net.isIP(ip)) {
       ip.split(',').forEach(function(item) {
         item = item.trim();
-        if (item === 'self') {
-          item = clientIp;
-        }
-        if (net.isIP(item) && list.indexOf(item) === -1) {
-          list.push(item);
+        if (item === 'clientId') {
+          cid = clientId;
+        } else {
+          if (item === 'self') {
+            item = clientIp;
+          }
+          if (net.isIP(item) && list.indexOf(item) === -1) {
+            list.push(item);
+          }
         }
       });
       ip = null;
     }
-    var result;
     if (url) {
-      result = {};
+      result = result || {};
       result.url = url;
     }
     var headers;
@@ -236,6 +248,10 @@ module.exports = function init(_proxy) {
       result = result || {};
       result.ip = ip;
     }
+    if (cid) {
+      result = result || {};
+      result.clientId = cid;
+    }
     if (list.length) {
       result = result || {};
       result.ipList = list.slice(0, 16);
@@ -246,12 +262,24 @@ module.exports = function init(_proxy) {
     return result;
   }
   function checkClientIp(item, filter) {
-    var clientIp = item.req.ip;
-    if (filter.ip && clientIp !== filter.ip) {
-      return false;
-    }
+    var clientId = getClientId(item);
     var ipList = filter.ipList;
-    if (!ipList) {
+    var clientIp = item.req.ip;
+    if (filter.clientIp) {
+      return clientId === filter.clientIp;
+    }
+    if (filter.ip) {
+      return clientIp === filter.ip;
+    }
+    // 有 clientId 过滤条件时，必须匹配 clientId
+    if (filter.clientId) {
+      if (clientId === filter.clientId) {
+        return true;
+      }
+      if (!ipList) {
+        return false;
+      }
+    } else if (!ipList) {
       return true;
     }
     var len = ipList.length;
@@ -290,6 +318,10 @@ module.exports = function init(_proxy) {
     return text.indexOf(keyword) !== -1 || text.indexOf(util.encodeURIComponent(keyword).toLowerCase()) !== -1;
   }
 
+  function getClientId(item) {
+    return item.req.headers[config.CLIENT_ID_HEADER] || item.clientId;
+  }
+
   function checkItem(item, filter) {
     if (!item || !checkClientIp(item, filter)) {
       return false;
@@ -298,10 +330,13 @@ module.exports = function init(_proxy) {
     if (filter.filterKey && h[filter.filterKey] != filter.filterValue) {
       return false;
     }
-    if (filter.filterClientId && (h[config.CLIENT_ID_HEADER] || item.clientId) != filter.filterClientId) {
+    if (filter.filterClientId && getClientId(item) != filter.filterClientId) {
       return false;
     }
     if (filter.name && !checkHeader(h[filter.name], filter.value, filter.exact)) {
+      return false;
+    }
+    if (filter.url && !checkHeader((item.isHttps ? 'tunnel://' : '') + item.url, filter.url)) {
       return false;
     }
     var headers = filter.headers;
@@ -341,9 +376,9 @@ module.exports = function init(_proxy) {
   proxy.getFrames = function(options) {
     return getFrames(options.curReqId, options.lastFrameId);
   };
-  proxy.getData = function(options, clientIp, key, value, clientId) {
+  proxy.getData = function(options, clientIp, key, value, filterClientId, clientId) {
     options = options || {};
-    var filter = formatFilter(options, clientIp);
+    var filter = formatFilter(options, clientIp, clientId);
     var data = {};
     var count = options.count;
     var startTime = options.startTime;
@@ -360,9 +395,9 @@ module.exports = function init(_proxy) {
       filter.filterKey = key;
       filter.filterValue = value;
     }
-    if (clientId) {
+    if (filterClientId) {
       filter = filter || {};
-      filter.filterClientId = clientId;
+      filter.filterClientId = filterClientId;
     }
     var newIds = (clearNetwork || startTime == -1) ? [] : getIds(startTime, count, options.lastRowId);
     var setData = function(item) {

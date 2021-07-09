@@ -593,6 +593,7 @@ var Composer = React.createClass({
     self.comTimer = setTimeout(function() {
       self.setState({ pending: false });
     }, 3000);
+    events.trigger('enableRecord');
     dataCenter.composer(JSON.stringify(params), function(data, xhr, em) {
       clearTimeout(self.comTimer);
       var state = {
@@ -744,7 +745,9 @@ var Composer = React.createClass({
             })}
           </select>
           <input readOnly={pending} defaultValue={state.url} onKeyUp={this.execute} onChange={this.onComposerChange} onKeyDown={this.onKeyDown} onFocus={this.selectAll} ref="url" type="text" maxLength="8192" placeholder="url" className="fill w-composer-input" />
-          <button disabled={pending} onClick={this.execute} className="btn btn-primary w-composer-execute">Go</button>
+          <button disabled={pending} onClick={this.execute} className="btn btn-primary w-composer-execute">
+            <span className="glyphicon glyphicon-send" />
+          </button>
         </div>
         <div className="w-detail-inspectors-title w-composer-tabs">
           <button onClick={this.onTabChange} name="Request" className={showRequest ? 'w-tab-btn w-active' : 'w-tab-btn'}>Request</button>

@@ -475,6 +475,10 @@ function removeDefaultPort(host, isHttps) {
   return host && host.replace(isHttps ? HTTPS_PORT_RE : HTTP_PORT_RE, '');
 }
 
+function isString(str) {
+  return str && typeof str === 'string';
+}
+
 function getFullUrl(req) {
   var headers = req.headers;
   var hostRule;
@@ -483,11 +487,16 @@ function getFullUrl(req) {
     delete headers['x-whistle-real-host'];
     delete headers['x-forwarded-host'];
   }
-  if (!host || typeof host !== 'string') {
+  if (!isString(host)) {
     host = headers.host;
   } else {
     hostRule = false;
-    headers.host = host;
+    if (headers.host !== host) {
+      if (isString(headers.host)) {
+        req._fwdHost = headers.host;
+      }
+      headers.host = host;
+    }
   }
   if (hasProtocol(req.url)) {
     var options = parseUrl(req.url);
@@ -496,7 +505,9 @@ function getFullUrl(req) {
     }
     req.url = options.path;
     if (options.host) {
-      if (!host || typeof host !== 'string') {
+      if (hostRule === false) {
+        req._fwdHost = req._fwdHost || options.host;
+      } else if (!isString(host)) {
         host = headers.host = options.host;
       } else if (hostRule !== false && host != options.host) {
         hostRule = options.host;
@@ -581,7 +592,7 @@ var addressList = [];
   setTimeout(updateSystyemInfo, 30000);
 })();
 
-if (hostname && typeof hostname === 'string') {
+if (isString(hostname)) {
   simpleHostname = hostname.replace(/[^\w.-]+/g, '').substring(0, 20);
   simpleHostname = simpleHostname ? simpleHostname + '.' : '';
 }
@@ -601,7 +612,7 @@ exports.setClientId = function(headers, enable, disable, clientIp, isInternalPro
   }
   enable = enable || '';
   if (enable.clientId || enable.clientID || enable.clientid || isInternalProxy) {
-    var id = clientId;
+    var id = getClientId(headers);
     if ((enable.multiClient || isInternalProxy ) && !enable.singleClient && !disable.multiClient) {
       if (headers[config.CLIENT_ID_HEADER]) {
         return;
@@ -613,6 +624,17 @@ exports.setClientId = function(headers, enable, disable, clientIp, isInternalPro
     headers[config.CLIENT_ID_HEADER] = id;
   }
 };
+
+function getClientId(headers) {
+  var id = headers[config.CLIENT_ID_HEADER];
+  var idKey = config.cidKey;
+  if (!idKey || (id && !config.overCidKey)) {
+    return id || clientId;
+  }
+  return headers[idKey] || id || clientId;
+}
+
+exports.getClientId = getClientId;
 
 exports.removeClientId = function(headers) {
   delete headers[config.CLIENT_ID_HEADER];
@@ -631,7 +653,7 @@ exports.hostname = getHostname;
 
 function getProxyTunnelPath(req, isHttps) {
   var host = req._proxyTunnel && req.headers.host;
-  if (host && typeof host === 'string') {
+  if (isString(host)) {
     return host.indexOf(':') !== -1 ? host : host + ':' + (isHttps ? 443 : 80);
   }
 }
@@ -686,7 +708,7 @@ function safeEncodeURIComponent(ch) {
 }
 
 exports.encodeNonLatin1Char = function(str) {
-  if (!str || typeof str != 'string') {
+  if (!isString(str)) {
     return '';
   }
   return str.replace(G_NON_LATIN1_RE, safeEncodeURIComponent);
@@ -835,7 +857,7 @@ function replaceCrLf(char) {
 }
 
 function parseLinesJSON(text) {
-  if (!text || typeof text != 'string' || !(text = text.trim())) {
+  if (!isString(text) || !(text = text.trim())) {
     return null;
   }
   var first = text[0];
@@ -1474,9 +1496,9 @@ function getCharset(str) {
 
 exports.getCharset = getCharset;
 
-function getForwardedFor(headers) {
-  var val = headers[config.CLIENT_IP_HEAD];
-  if (!val || typeof val !== 'string') {
+function getClientIpFH(headers, name) {
+  var val = headers[name];
+  if (!isString(val)) {
     return '';
   }
   var index = val.indexOf(',');
@@ -1486,25 +1508,32 @@ function getForwardedFor(headers) {
   val = removeIPV6Prefix(val.trim());
   return net.isIP(val) && !isLocalAddress(val) ? val : '';
 }
+
+function getForwardedFor(headers) {
+  var ip = getClientIpFH(headers, config.CLIENT_IP_HEAD);
+  var cipKey = config.cipKey;
+  if (cipKey && (!ip || config.overCipKey)) {
+    ip = getClientIpFH(headers, cipKey) || ip;
+  }
+  return ip;
+}
 exports.getForwardedFor = getForwardedFor;
 
 function isLocalIp(ip) {
-  if (!ip || typeof ip !== 'string') {
+  if (!isString(ip)) {
     return true;
   }
   return ip.length < 7 || ip === LOCALHOST;
 }
 
-function getClientIp(req) {
-  var ip;
-  var headers = req.headers || {};
+function getRemoteAddr(req) {
   try {
-    ip = getForwardedFor(headers);
-    if (!ip) {
-      ip = (req.connection || req.socket || req).remoteAddress;
-      ip = removeIPV6Prefix(ip);
-    }
+    return removeIPV6Prefix((req.socket || req).remoteAddress);
   } catch(e) {}
+}
+
+function getClientIp(req) {
+  var ip = getForwardedFor(req.headers || {}) || getRemoteAddr(req);
   return isLocalIp(ip) ? LOCALHOST : ip;
 }
 
@@ -2010,12 +2039,13 @@ function transformReq(req, res, port, host, useProxy) {
     }
   }
   if (useProxy) {
+    var disable = req.disable || '';
     if (req._proxyTunnel) {
       var proxyHeaders = {
         host: options.hostname + ':' + (reqPort || 80),
-        'proxy-connection': 'keep-alive'
+        'proxy-connection': disable.proxyConnection ? 'close' : 'keep-alive'
       };
-      var ua = !req.disable.proxyUA && headers['user-agent'];
+      var ua = !disable.proxyUA && headers['user-agent'];
       if (ua) {
         proxyHeaders['user-agent'] = ua;
       }
@@ -2063,7 +2093,18 @@ function transformReq(req, res, port, host, useProxy) {
       sendStatusCodeError(res, _res);
     }
   });
+  var destroyed;
+  var abort = function() {
+    if (!destroyed) {
+      destroyed = true;
+      client.destroy();
+    }
+  };
+  req.on('error', abort);
+  res.on('error', abort);
+  res.once('close', abort);
   client.on('error', function(err) {
+    abort();
     res.emit('error', err);
   });
   req.pipe(client);
@@ -2096,7 +2137,7 @@ function checkIfAddInterceptPolicy(proxyHeaders, headers) {
 exports.checkIfAddInterceptPolicy = checkIfAddInterceptPolicy;
 
 function getCgiUrl(url) {
-  if (!url || typeof url !== 'string' || !(url = url.trim())) {
+  if (!isString(url) || !(url = url.trim())) {
     return;
   }
   return url[0] === '/' ? url.substring(1) : url;
@@ -2104,7 +2145,7 @@ function getCgiUrl(url) {
 exports.getCgiUrl = getCgiUrl;
 
 function getString(str) {
-  if (!str || typeof str !== 'string') {
+  if (!isString(str)) {
     return;
   }
   return str.trim();
@@ -2144,34 +2185,66 @@ exports.getPluginMenu = function(menus, pluginName) {
 };
 
 var MAX_HINT_LEN = 512;
+var MAX_VAR_LEN = 100;
 
-exports.getHintList = function(conf) {
+function getHintList(conf, isVar) {
   var hintList = conf.hintList;
   if (!Array.isArray(hintList) || !hintList.length) {
     return;
   }
   var result;
+  var maxLen = isVar ? MAX_VAR_LEN : MAX_HINT_LEN;
   hintList.forEach(function(hint) {
     if (typeof hint === 'string') {
-      if (hint.length <= MAX_HINT_LEN) {
+      if (hint.length <= maxLen) {
         result = result || [];
         result.push(hint);
       }
-    } else if (hint && typeof hint.value === 'string') {
+    } else if (hint) {
+      var text = hint.text || hint.value;
+      text = typeof text === 'string' ? text.trim() : '';
+      if (!text) {
+        return;
+      }
       var help = hint.help;
+      var displayText = hint.display || hint.displayText || hint.label;
       if (typeof help !== 'string') {
         help = '';
       }
-      if (hint.value.length + help.length <= MAX_HINT_LEN) {
-        result = result || [];
+      if (typeof displayText !== 'string') {
+        displayText = '';
+      }
+      result = result || [];
+      if (!help && !displayText) {
+        result.push(text);
+      } else {
         result.push({
-          text: hint.value.trim(),
-          help: help.trim()
+          text: text,
+          help: help.trim(),
+          displayText: displayText
         });
       }
     }
   });
   return result;
+}
+
+exports.getHintList = getHintList;
+
+exports.getPluginVarsConf = function(conf) {
+  var pluginVars = conf.pluginVars;
+  if (!pluginVars) {
+    return;
+  }
+  var varHintList = getHintList(pluginVars, true);
+  var varHintUrl = varHintList ? undefined : getCgiUrl(pluginVars.hintUrl);
+  if (varHintList || varHintUrl) {
+    return {
+      hintUrl: varHintUrl,
+      hintList: varHintList
+    };
+  }
+  return true;
 };
 
 function toString(str) {
@@ -2206,7 +2279,7 @@ exports.getReqId = function() {
   return Date.now() +'-' + padReqId(index++);
 };
 
-exports.onSocketEnd = function(socket, callback) {
+function onSocketEnd(socket, callback) {
   var execCallback = function(err) {
     socket._hasError = true;
     if (callback) {
@@ -2219,7 +2292,10 @@ exports.onSocketEnd = function(socket, callback) {
   }
   socket.on('error', execCallback);
   socket.once('close', execCallback);
-};
+  socket.once('timeout', execCallback);
+}
+
+exports.onSocketEnd = onSocketEnd;
 
 exports.onResEnd = common.onResEnd;
 
@@ -2263,11 +2339,20 @@ function parseDeleteProperties(req) {
   };
 }
 
+
+exports.deleteReqHeaders = function(req) {
+  var delReqHeaders = parseDeleteProperties(req).reqHeaders;
+  var headers = req.headers;
+  Object.keys(delReqHeaders).forEach(function(name) {
+    delete headers[name];
+  });
+};
+
 exports.parseDeleteProperties = parseDeleteProperties;
 
 var URL_RE = /^https?:\/\/./;
 function parseOrigin(origin) {
-  if (!origin || typeof origin !== 'string') {
+  if (!isString(origin)) {
     return;
   }
   var index = origin.indexOf('//');
@@ -2414,7 +2499,7 @@ function escapeName(name) {
 var G_INVALID_VALUE_CHAR_RE = /[^\x00-\xFF]|[\r\n;%]/g;
 var INVALID_VALUE_CHAR_RE = /[\r\n;]/;
 function escapeValue(value) {
-  if (!value || typeof value !== 'string') {
+  if (!isString(value)) {
     return value = value == null ? '' : String(value);
   }
   if (!NON_LATIN1_RE.test(value) && !INVALID_VALUE_CHAR_RE.test(value)) {
@@ -2429,7 +2514,7 @@ exports.setReqCookies = function(data, cookies, curCookies) {
     return;
   }
   var result = {};
-  if (curCookies && typeof curCookies == 'string') {
+  if (isString(curCookies)) {
     curCookies.split(/;\s*/g).forEach(function(cookie) {
       var index = cookie.indexOf('=');
       if (index == -1) {
@@ -2521,7 +2606,7 @@ exports.checkTlsError = function(err) {
     return true;
   }
   var stack = err.stack || err.message;
-  if (!stack || typeof stack !== 'string') {
+  if (!isString(stack)) {
     return false;
   }
   if (stack.indexOf('TLSSocket.onHangUp') !== -1 || stack.indexOf('statusCode=502') !== -1) {
@@ -2951,3 +3036,36 @@ function readOneChunk(stream, callback, timeout) {
 
 exports.readOneChunk = readOneChunk;
 
+exports.getAuthByRules = function(rules) {
+  if (!rules.auth) {
+    return;
+  }
+  var auth = getMatcherValue(rules.auth);
+  if (/[\\\/]/.test(auth)) {
+    return;
+  }
+  var index = auth.indexOf(':');
+  return {
+    username: index == -1 ? auth : auth.substring(0, index),
+    password: index == -1 ? null : auth.substring(index + 1)
+  };
+};
+
+exports.getAuthBasic = function(auth) {
+  if (!auth ) {
+    return;
+  }
+  var basic;
+  if (auth.username == null) {
+    if (auth.password == null) {
+      return;
+    }
+    basic = [''];
+  } else {
+    basic = [auth.username];
+  }
+  if (auth.password != null) {
+    basic[1] = auth.password;
+  }
+  return basic && 'Basic ' + toBuffer(basic.join(':')).toString('base64');
+};

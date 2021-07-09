@@ -15,7 +15,17 @@ var BIG_NUM_RE = /[:\[][\s\n\r]*-?[\d.]{16,}[\s\n\r]*[,\}\]]/;
 var dragCallbacks = {};
 var dragTarget, dragOffset, dragCallback;
 var logTempId = 0;
+var RAW_CRLF_RE = /\\n|\\r/g;
+var NUM_RE = /^\d+$/;
+var DIG_RE = /^[+-]?[1-9]\d*$/;
+var INDEX_RE = /^\[(\d+)\]$/;
+var ARR_FILED_RE = /(.)?(?:\[(\d+)\])$/;
 var LEVELS = ['fatal', 'error', 'warn', 'info', 'debug'];
+var useCustomEditor = window.location.search.indexOf('useCustomEditor') !== -1;
+
+function replaceCrLf(char) {
+  return char === '\\r' ? '\r' : '\n';
+}
 
 function noop(_) {
   return _;
@@ -239,13 +249,11 @@ exports.showSystemError = function(xhr) {
   if (!status) {
     return alert('Please check the proxy settings or whether whistle has been started.');
   }
-  if (status == 401) {
-    return alert('You do not have permission to operate.');
+  var msg = STATUS_CODES[status];
+  if (msg) {
+    return alert('[' + status + '] ' + msg + '.');
   }
-  if (status == 413) {
-    return alert('The content is too large.');
-  }
-  alert('System error, try again later.');
+  alert('[' + status + '] Unknown error, try again later.');
 };
 
 exports.getClasses = function getClasses(obj) {
@@ -324,6 +332,9 @@ function isText(contentType) {
 exports.isText = isText;
 
 function getHost(url) {
+  if (!url) {
+    return '';
+  }
   var start = url.indexOf(':\/\/');
   start = start == -1 ? 0 : start + 3;
   var end = url.indexOf('\/', start);
@@ -387,7 +398,7 @@ exports.ensureVisible = function(elem, container, init) {
   }
 };
 
-exports.parseQueryString = function(str, delimiter, seperator, decode, donotAllowRepeat) {
+function parseQueryString(str, delimiter, seperator, decode, donotAllowRepeat) {
   var result = {};
   window.___hasFormData = false;
   if (!str || !(str = (str + '').trim())) {
@@ -425,7 +436,9 @@ exports.parseQueryString = function(str, delimiter, seperator, decode, donotAllo
     }
   });
   return result;
-};
+}
+
+exports.parseQueryString = parseQueryString;
 
 function objectToString(obj, rawNames, noEncoding) {
   if (!obj) {
@@ -477,6 +490,9 @@ function removeProtocol(url) {
 exports.removeProtocol = removeProtocol;
 
 exports.getPath = function(url) {
+  if (!url) {
+    return '';
+  }
   url = removeProtocol(url);
   var index = url.indexOf('/');
   return index == -1 ? '/' : url.substring(index);
@@ -513,6 +529,121 @@ function parseJSON(str, resolve) {
 }
 
 exports.parseJSON = parseJSON;
+
+function parseLinesJSON(text) {
+  if (typeof text !== 'string' || !(text = text.trim())) {
+    return null;
+  }
+  var first = text[0];
+  var last = text[text.length - 1];
+  if ((first === '[' && last === ']') || (first === '{' && last === '}')) {
+    return null;
+  }
+  var result;
+  text.split(/\r\n|\n|\r/g).forEach(function(line) {
+    if (!(line = line.trim())) {
+      return;
+    }
+    var index = line.indexOf(': ');
+    if (index === -1) {
+      index = line.indexOf(':');
+    }
+    var name, value, arrIndex;
+    if (index != -1) {
+      name = line.substring(0, index).trim();
+      value = line.substring(index + 1).trim();
+      if (value) {
+        var fv = value[0];
+        var lv = value[value.length - 1];
+        if (fv === lv) { 
+          if (fv === '"' || fv === '\'' || fv === '`') {
+            value = value.slice(1, -1);
+          }
+          if (value && fv === '`' && (value.indexOf('\\n') !== -1 || value.indexOf('\\r') !== -1)) {
+            value = value.replace(RAW_CRLF_RE, replaceCrLf);
+          }
+        } else if (value === '0') {
+          value = 0;
+        } else if (value.length < 16 && DIG_RE.test(value)) {
+          try {
+            value = parseInt(value, 10);
+          } catch (e) {}
+        }
+      }
+    } else {
+      name = line.trim();
+      value = '';
+    }
+    first = name[0];
+    last = name[name.length - 1];
+    if (first === last && last === '"') {
+      name = name.slice(1, -1);
+    } else if (first === '[' && last === ']') {
+      name = name.slice(1, -1).trim();
+      if (NUM_RE.test(name) || INDEX_RE.test(name)) {
+        name = RegExp.$1 || RegExp['$&'];
+        result = result || [];
+      } else {
+        var keys = name.split(/\s*\.\s*/);
+        name = keys.shift().trim();
+        if (ARR_FILED_RE.test(name)) {
+          var idx = RegExp.$2;
+          if (RegExp.$1) {
+            name = name.slice(0, -idx.length - 2);
+            arrIndex = idx;
+          } else {
+            name = idx;
+            result = result || [];
+          }
+        }
+        if (keys.length) {
+          keys.reverse().forEach(function(key) {
+            var obj;
+            if (ARR_FILED_RE.test(key)) {
+              var idx2 = RegExp.$2;
+              var arr = [];
+              if (RegExp.$1) {
+                obj = {};
+                obj[key.slice(0, -idx2.length - 2)] = arr;
+                arr[idx2] = value;
+                value = obj;
+              } else {
+                arr[idx2] = value;
+                value = arr;
+              }
+            } else {
+              obj = {};
+              obj[key] = value;
+              value = obj;
+            }
+          });
+        }
+      }
+    }
+    result = result || {};
+    var list = result[name];
+    if (list == null) {
+      if (arrIndex) {
+        var arr = [];
+        arr[arrIndex] = value;
+        result[name] = arr;
+      } else {
+        result[name] = value;
+      }
+    } else if (typeof list === 'object') {
+      if (arrIndex) {
+        list[arrIndex] = value;
+      } else if (typeof value === 'object') {
+        $.extend(true, list, value);
+      }
+    }
+  });
+  return result || {};
+}
+
+exports.parseJSON2 = function(str) {
+  return  parseJSON(str) || parseLinesJSON(str);
+};
 
 function resolveJSON(str, decode) {
   window._$hasBigNumberJson = false;
@@ -639,7 +770,7 @@ var STATUS_CODES = {
   511 : 'Network Authentication Required' // RFC 6585
 };
 
-exports.getStatusMessage = function(res) {
+function getStatusMessage(res) {
   if (!res.statusCode) {
     return '';
   }
@@ -647,7 +778,9 @@ exports.getStatusMessage = function(res) {
     return res.statusMessage;
   }
   return STATUS_CODES[res.statusCode] || 'unknown';
-};
+}
+
+exports.getStatusMessage = getStatusMessage;
 
 function isUrlEncoded(req) {
 
@@ -664,6 +797,10 @@ exports.toString = toString;
 
 
 function openEditor(value) {
+  if (useCustomEditor && typeof window.customWhistleEditor === 'function'
+    && window.customWhistleEditor(value) !== false) {
+    return;
+  }
   var win = window.open('editor.html');
   win.getValue = function() {
     return value;
@@ -733,10 +870,6 @@ exports.getMenuPosition = function(e, menuWidth, menuHeight) {
     top = Math.max(top - menuHeight, window.scrollY + 1);
   }
   return { top: top, left: left, marginRight: clientWidth - left };
-};
-
-exports.canReplay = function(item) {
-  return !item.isHttps || item.req.headers['x-whistle-policy'] === 'tunnel' || /^wss?:/.test(item.url);
 };
 
 function socketIsClosed(reqData) {
@@ -1454,6 +1587,14 @@ exports.getSize = function(size) {
   return (size / 1024).toFixed(2) + 'G';
 };
 
+function getQps(num) {
+  if (!num) {
+    return '0';
+  }
+  return (num / 100).toFixed(2);
+}
+
+exports.getQps = getQps;
 
 function indexOfList(list, subList, start) {
   var len = list.length;
@@ -1705,4 +1846,261 @@ exports.formatTime = function(time) {
   var hour = padding(time % 24);
   var day = Math.floor(time / 24);
   return (day ? padding(day) + ' ' : '') + hour + ':' + min + ':' + sec;
+};
+
+var EMPTY_OBJ = {};
+
+function parseResCookie(cookie) {
+  cookie = parseQueryString(cookie, /;\s*/, null, null, true);
+  var result = {
+    httpOnly: false,
+    secure: false
+  };
+  for (var i in cookie) {
+    switch(i.toLowerCase()) {
+    case 'domain':
+      result.domain = cookie[i];
+      break;
+    case 'path':
+      result.path = cookie[i];
+      break;
+    case 'expires':
+      result.expires = cookie[i];
+      break;
+    case 'max-age':
+      result['max-age'] = cookie[i];
+      result.maxAge = cookie[i];
+      result.maxage = cookie[i];
+      break;
+    case 'httponly':
+      result.httpOnly = true;
+      result.httponly = true;
+      break;
+    case 'secure':
+      result.secure = true;
+      break;
+    case 'samesite':
+      result.sameSite = cookie[i];
+      result.samesite = cookie[i];
+      break;
+    default:
+      if (!result[0]) {
+        result.name = i;
+        result.value = cookie[i];
+      }
+    }
+  }
+
+  return result;
+}
+
+function objectToArray(obj, rawNames) {
+  var result = [];
+  if (obj) {
+    rawNames = rawNames || EMPTY_OBJ;
+    Object.keys(obj).forEach(function(name) {
+      var value = obj[name];
+      name = rawNames[name] || name;
+      if (Array.isArray(value)) {
+        value.forEach(function(val) {
+          result.push({
+            name: name,
+            value: val + ''
+          });
+        });
+      } else {
+        result.push({
+          name: name,
+          value: value + ''
+        });
+      }
+    });
+  }
+  return result;
+}
+
+function stringToArray(str, delimiter) {
+  str = parseQueryString(str, delimiter);
+  return objectToArray(str);
+}
+
+function getPostData(req) {
+  var headers = req.headers || '';
+  return {
+    size: req.unzipSize || req.size || -1,
+    mimeType: headers['content-type'] || 'none',
+    params: [],
+    text: ''
+  };
+}
+
+function toHarReq(item) {
+  var req = item.req;
+  var url = item.url;
+  var headers = req.headers || '';
+  var cookies = stringToArray(headers.cookie, /;\s*/);
+  var index = url.indexOf('?');
+  var queryString = index === -1 ? [] : stringToArray(url.substring(index + 1));
+  var isForm = isUrlEncoded(req);
+  var postData;
+  if (isForm) {
+    var body = getBody(req, true);
+    postData = postData || getPostData(req);
+    postData.text = body;
+    postData.params = stringToArray(body);
+  } else if (req.base64) {
+    postData = postData || getPostData(req);
+    postData.base64 = req.base64;
+    postData.text = getBody(req, true);
+  } else if (req.body) {
+    postData = postData || getPostData(req);
+    postData.text = req.body;
+  }
+  return {
+    method: item.method,
+    url: url,
+    ip: req.ip,
+    port: req.port,
+    httpVersion: item.useH2 ? 'HTTP/2.0' : 'HTTP/1.1',
+    cookies: cookies,
+    headers: objectToArray(headers, req.rawHeaderNames),
+    queryString: queryString,
+    postData: postData,
+    headersSize: -1,
+    bodySize: req.size || -1,
+    comment: ''
+  };
+}
+
+function toHarRes(item) {
+  var res = item.res;
+  var headers = res.headers || '';
+  var cookies = headers['set-cookie'];
+  if (cookies) {
+    if (Array.isArray(cookies)) {
+      cookies = cookies.map(parseResCookie);
+    } else {
+      cookies = [parseResCookie(cookies)];
+    }
+  } else {
+    cookies = [];
+  }
+  return {
+    statusCode: res.statusCode,
+    status: parseInt(res.statusCode, 10) || 0,
+    ip: res.ip,
+    port: res.port,
+    statusText: getStatusMessage(res),
+    httpVersion: item.useH2 ? 'HTTP/2.0' : 'HTTP/1.1',
+    cookies: cookies,
+    headers: objectToArray(headers, res.rawHeaderNames),
+    content: {
+      size: res.unzipSize || res.size || -1,
+      mimeType: headers['content-type'] || '',
+      base64: res.base64,
+      text: getBody(res)
+    },
+    redirectURL: headers.location || '',
+    headersSize: -1,
+    bodySize: res.size || -1,
+    comment: ''
+  };
+}
+
+exports.toHar = function(item) {
+  var time = -1;
+  var dns = -1;
+  var send = -1;
+  var receive = -1;
+  if (item.dnsTime >= item.startTime) {
+    dns = item.dnsTime - item.startTime;
+    time = dns;
+    if (item.requestTime >= item.dnsTime) {
+      send = item.requestTime - item.dnsTime;
+      if (item.responseTime >= item.requestTime) {
+        receive = item.responseTime - item.requestTime;
+        if (item.endTime >= item.responseTime) {
+          time = item.endTime - item.startTime;
+        } else {
+          time = item.responseTime - item.startTime;
+        }
+      } else {
+        time = item.requestTime - item.startTime;
+      }
+    }
+  }
+  return {
+    startedDateTime: new Date(item.startTime).toISOString(),
+    time: time,
+    whistleRules: item.rules,
+    whistleFwdHost: item.fwdHost,
+    request: toHarReq(item),
+    response: toHarRes(item),
+    frames: item.frames,
+    cache: {},
+    timings: {
+      blocked: 0,
+      dns: dns,
+      connect: -1,
+      send: send,
+      wait: -1,
+      receive: receive,
+      ssl: -1,
+      comment: ''
+    },
+    clientIPAddress: item.clientIp,
+    serverIPAddress: item.hostIp
+  };
+};
+
+exports.getUrl = function(url) {
+  return url && url.indexOf('/') === -1 ? 'tunnel://' + url : url;
+};
+
+function expandAll(node) {
+  if (node.children) {
+    node.expand = true;
+    node.pExpand = true;
+    node.children.forEach(expandAll);
+  }
+}
+
+exports.expandAll = expandAll;
+
+function collapseAll(node) {
+  if (node.children) {
+    node.expand = false;
+    node.pExpand = false;
+    node.children.forEach(collapseAll);
+  }
+}
+
+exports.collapseAll = collapseAll;
+
+function setPExpand(node, pExpand) {
+  if (node.children) {
+    node.pExpand = pExpand;
+    pExpand = node.expand && pExpand;
+    node.children.forEach(function(child) {
+      setPExpand(child, pExpand);
+    });
+  }
+}
+
+function expand(node) {
+  node.expand = true;
+  setPExpand(node, true);
+}
+
+function collapse(node) {
+  node.expand = false;
+  setPExpand(node, false);
+}
+
+exports.expand = expand;
+exports.collapse = collapse;
+
+var PROTO_RE = /^((?:http|ws)s?:\/\/)[^/?]*/;
+exports.getRawUrl = function(item) {
+  return item.fwdHost && item.url.replace(PROTO_RE, '$1' + item.fwdHost);
 };

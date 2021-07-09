@@ -44,7 +44,7 @@ function isUnzipJs(r) {
 function emitDataEvents(req, res, proxy) {
   var now = Date.now();
   proxy.emit('_request', req.fullUrl);
-  var showHttpData = !req.isPluginReq && !config.rulesMode && (!req.filter.hide || req.disable.hide) && util.listenerCount(proxy, 'request');
+  var showHttpData = !req.isPluginReq && !config.rulesMode && (!req.filter.hide || req.disable.hide);
   if (!showHttpData) {
     return;
   }
@@ -70,6 +70,7 @@ function emitDataEvents(req, res, proxy) {
     req: reqData,
     res: resData,
     rules: req.rules,
+    fwdHost: req._fwdHost,
     pipe: req._pipeRule,
     rulesHeaders: req.rulesHeaders,
     abort: function(clear) {
@@ -219,6 +220,9 @@ function emitDataEvents(req, res, proxy) {
   }
 
   req.once('dest', function(_req) {
+    _req.once('finish', function() {
+      data.requestTime = Date.now();
+    });
     setReqStatus();
     reqEmitter.emit('send', data);
     !hasReqPipe && handleReqBody(_req, req);

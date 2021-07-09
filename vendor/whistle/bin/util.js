@@ -62,6 +62,7 @@ function showKillError() {
 exports.showKillError = showKillError;
 
 function showUsage(isRunning, options, restart) {
+  options = formatOptions(options);
   if (isRunning) {
     if (restart) {
       showKillError();
@@ -90,15 +91,20 @@ function showUsage(isRunning, options, restart) {
 
 exports.showUsage = showUsage;
 
-function getHomedir() {
-  //默认设置为`~`，防止Linux在开机启动时Node无法获取homedir
-  return (typeof os.homedir == 'function' ? os.homedir() :
-    process.env[process.platform == 'win32' ? 'USERPROFILE' : 'HOME']) || '~';
+function getDataDir() {
+  return path.resolve(config.getHomedir(), '.startingAppData');
 }
 
-function getDataDir() {
-  return path.resolve(getHomedir(), '.startingAppData');
+function formatOptions(options) {
+  if (!options || !/^(?:([\w.-]+):)?([1-9]\d{0,4})$/.test(options.port)) {
+    return options;
+  }
+  options.host = options.host || RegExp.$1;
+  options.port = parseInt(RegExp.$2, 10);
+  return options;
 }
+
+exports.formatOptions = formatOptions;
 
 function readConfig(storage) {
   var dataDir = getDataDir();
@@ -107,7 +113,9 @@ function readConfig(storage) {
     return;
   }
   try {
-    return fse.readJsonSync(configFile);
+    var conf = fse.readJsonSync(configFile);
+    conf && formatOptions(conf.options);
+    return conf;
   } catch(e) {}
 }
 

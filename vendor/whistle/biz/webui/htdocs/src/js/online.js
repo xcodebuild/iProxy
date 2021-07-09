@@ -8,6 +8,7 @@ var ReactDOM = require('react-dom');
 var Dialog = require('./dialog');
 var dataCenter = require('./data-center');
 var util = require('./util');
+var DNSDialog = require('./dns-servers-dialog');
 
 var dialog;
 
@@ -17,7 +18,8 @@ function createDialog() {
       '<h5><strong>Uptime:</strong> <span id="whistleUptime">-</span></h5>',
       '<h5><strong>Requests:</strong> <span id="whistleRequests">-</span></h5>',
       '<h5><strong>CPU:</strong> <span id="whistleCpu">-</span></h5>',
-      '<h5><strong>Memory:</strong> <span id="whistleMemory">-</span></h5>'
+      '<h5><strong>Memory:</strong> <span id="whistleMemory">-</span></h5>',
+      '<h5><strong>QPS:</strong> <span id="whistleQps">-</span></h5>'
     ];
     dialog = $('<div class="modal fade w-online-dialog">' +
           '<div class="modal-dialog">' +
@@ -26,6 +28,7 @@ function createDialog() {
               '<button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>' +
                 '<div class="w-online-dialog-ctn"></div>' +
                 '<div class="w-online-dialog-info">' + proxyInfoList.join('') + '</div>' +
+                '<a class="w-online-view-dns">View custom DNS servers</a>' +
               '</div>' +
               '<div class="modal-footer">' +
                 '<button type="button" class="btn btn-default" data-dismiss="modal">Close</button>' +
@@ -78,7 +81,9 @@ var Online = React.createClass({
       this.pluginsMode = data.pluginsMode;
       this.rulesMode = data.rulesMode;
       this.multiEnv = data.multiEnv;
+      this.rulesOnlyMode =  data.rulesOnlyMode;
     } else if (this.version !== data.version || this.baseDir !== data.baseDir
+      || this.rulesOnlyMode !== data.rulesOnlyMode
       || this.networkMode !== data.networkMode || this.pluginsMode !== data.pluginsMode
       || this.rulesMode !== data.rulesMode || this.multiEnv !== data.multiEnv) {
       this.refs.confirmReload.show();
@@ -143,9 +148,30 @@ var Online = React.createClass({
       this._initProxyInfo = true;
       var curServerInfo;
       var isHide = true;
+      var dnsElem = dialog.find('.w-online-view-dns');
+      var hideDns = true;
+      var self = this;
+      dnsElem.on('click', function() {
+        self.refs.dnsDialog.show(dataCenter.getServerInfo());
+      });
+      var toggleDns = function(svrInfo) {
+        if (svrInfo && svrInfo.dns) {
+          if (hideDns) {
+            hideDns = false;
+            dnsElem.show();
+          }
+        } else {
+          if (!hideDns) {
+            hideDns = true;
+            dnsElem.hide();
+          }
+        }
+      };
+      toggleDns(server);
       setInterval(function() {
         var info = dataCenter.getServerInfo();
         var pInfo = info && info.pInfo;
+        toggleDns(info);
         if (!pInfo) {
           if (isHide) {
             isHide = true;
@@ -161,6 +187,7 @@ var Online = React.createClass({
         var cpuElem = dialog.find('#whistleCpu');
         var memElem = dialog.find('#whistleMemory');
         var uptimeElem = dialog.find('#whistleUptime');
+        var qpsElem = dialog.find('#whistleQps');
         uptimeElem.text(util.formatTime(pInfo.uptime));
         uptimeElem.parent().attr('title', pInfo.uptime);
         reqElem.parent().attr('title', 'HTTP[S]: ' + pInfo.httpRequests + ' (Total: ' + pInfo.totalHttpRequests + ')'
@@ -169,25 +196,33 @@ var Online = React.createClass({
         memElem.parent().attr('title', Object.keys(pInfo.memUsage).map(function(key) {
           return key + ': ' + pInfo.memUsage[key];
         }).join('\n'));
+        qpsElem.parent().attr('title', [
+          'HTTP[s]: ' + util.getQps(pInfo.httpQps),
+          'WS[S]: ' + util.getQps(pInfo.wsQps),
+          'TUNNEL: ' + util.getQps(pInfo.tunnelQps)
+        ].join('\n'));
+        var totalCount = pInfo.httpRequests + pInfo.wsRequests + pInfo.tunnelRequests;
+        var allCount = pInfo.totalHttpRequests + pInfo.totalWsRequests + pInfo.totalTunnelRequests;
+        pInfo.totalCount = totalCount;
+        pInfo.allCount = allCount;
         if (!curServerInfo || !curServerInfo.pInfo) {
-          reqElem.text(pInfo.httpRequests + pInfo.wsRequests + pInfo.tunnelRequests +
-            ' (Total: ' + (pInfo.totalHttpRequests + pInfo.totalWsRequests + pInfo.totalTunnelRequests) + ')');
-          cpuElem.text(pInfo.cpuPercent);
-          memElem.text(util.getSize(pInfo.memUsage.rss));
+          reqElem.text(totalCount + ' (Total: ' + allCount + ')');
+          cpuElem.text(pInfo.cpuPercent + ' (Max: ' + pInfo.maxCpu + ')');
+          memElem.text(util.getSize(pInfo.memUsage.rss) + ' (Max: ' + util.getSize(pInfo.maxRss) + ')');
+          qpsElem.text(util.getQps(pInfo.totalQps) + ' (Max: ' + util.getQps(pInfo.maxQps) + ')');
         } else {
           var curPInfo = curServerInfo.pInfo;
-          if (pInfo.memUsage !== curPInfo.memUsage) {
-            memElem.text(util.getSize(pInfo.memUsage.rss));
+          if (pInfo.memUsage.rss !== curPInfo.memUsage.rss) {
+            memElem.text(util.getSize(pInfo.memUsage.rss) + ' (Max: ' + util.getSize(pInfo.maxRss) + ')');
           }
-          var totalCount = pInfo.httpRequests + pInfo.wsRequests + pInfo.tunnelRequests;
-          var allCount = pInfo.totalHttpRequests + pInfo.totalWsRequests + pInfo.totalTunnelRequests;
-          pInfo.totalCount = totalCount;
-          pInfo.allCount = allCount;
           if (totalCount !== curPInfo.totalCount || allCount !== curPInfo.allCount) {
             reqElem.text(totalCount + ' (Total: ' + allCount + ')');
           }
           if (pInfo.cpuPercent !== curPInfo.cpuPercent) {
-            cpuElem.text(pInfo.cpuPercent || '-');
+            cpuElem.text(pInfo.cpuPercent + ' (Max: ' + pInfo.maxCpu + ')');
+          }
+          if (pInfo.totalQps !== curPInfo.totalQps) {
+            qpsElem.text(util.getQps(pInfo.totalQps) + ' (Max: ' + util.getQps(pInfo.maxQps) + ')');
           }
         }
         curServerInfo = info;
@@ -237,6 +272,10 @@ var Online = React.createClass({
         + ' (Total: ' + (pInfo.totalHttpRequests + pInfo.totalWsRequests + pInfo.totalTunnelRequests) + ')'));
       pInfo.cpuPercent && info.push('CPU: ' + pInfo.cpuPercent);
       info.push('Memory: ' + util.getSize(pInfo.memUsage.rss));
+      info.push('QPS: ' + util.getQps(pInfo.totalQps));
+    }
+    if (server.dns) {
+      info.push('Use custom DNS servers');
     }
     return info.join('\n');
   },
@@ -249,8 +288,10 @@ var Online = React.createClass({
     return (
         <a ref="onlineMenu" draggable="false" onMouseEnter={this.setTitle}
           className={'w-online-menu w-online' + (server ? '' : ' w-offline')} onClick={this.showServerInfo}>
-          <span className="glyphicon glyphicon-stats"></span>{server ? 'Online' : 'Offline'}
-          <Dialog ref="confirmReload" wstyle="w-confirm-reload-dialog">
+          <span className="glyphicon glyphicon-stats"></span>
+          {server ? 'Online' : 'Offline'}
+          {server && server.dns ? <span>{server.doh ? '(DOH)' : (server.r6 ? '(IPv6)' : '(IPv4)')}</span> : null}
+          <Dialog ref="confirmReload" wstyle="w-confirm-reload-dialog w-confirm-reload-global">
             <div className="modal-body w-confirm-reload">
               <button type="button" className="close" data-dismiss="modal">
                 <span aria-hidden="true">&times;</span>
@@ -263,6 +304,7 @@ var Online = React.createClass({
               <button type="button" className="btn btn-primary" onClick={this.reload}>Reload</button>
             </div>
           </Dialog>
+          <DNSDialog ref="dnsDialog" />
         </a>
     );
   }

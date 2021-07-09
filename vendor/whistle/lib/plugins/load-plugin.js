@@ -48,6 +48,8 @@ var REQ_INTERVAL = 16;
 var pluginOpts, storage;
 var pluginKeyMap = {};
 var MASK_OPTIONS = { mask: true };
+var BINARY_MASK_OPTIONS = { mask: true, binary: true };
+var BINARY_OPTIONS = { binary: true };
 /* eslint-disable no-undef */
 var REQ_ID_KEY = typeof Symbol === 'undefined' ? '$reqId_' + Date.now() : Symbol();
 var SESSION_KEY = typeof Symbol === 'undefined' ? '$session_' + Date.now() : Symbol();
@@ -400,6 +402,17 @@ var initReq = function(req, res, isServer) {
   oReq.pacValue = getValue(req, pluginOpts.PAC_VALUE_HEADER);
   oRes.serverIp = getValue(req, pluginOpts.HOST_IP_HEADER) || '127.0.0.1';
   oRes.statusCode = getValue(req, pluginOpts.STATUS_CODE_HEADER);
+  var pluginVars = toBuffer(req.headers[pluginOpts.PLUGIN_VARS_HEAD]);
+  if (pluginVars) {
+    delete req.headers[pluginOpts.PLUGIN_VARS_HEAD];
+    try {
+      pluginVars = JSON.parse(pluginVars.toString());
+      if (Array.isArray(pluginVars)) {
+        oReq.pluginVars = pluginVars;
+      }
+    } catch (e) {}
+  }
+  oReq.pluginVars = oReq.pluginVars || [];
 };
 var toBuffer = function(base64) {
   if (base64) {
@@ -670,6 +683,12 @@ var initConnectReq = function(req, res) {
     res.once('data', function(chunk) {
       if (!req._hasError) {
         res.pause();
+        var on = res.on;
+        res.on = function() {
+          res.on = on;
+          res.resume();
+          return on.apply(this, arguments);
+        };
         chunk.length > 1 && res.unshift(chunk.slice(1));
         cb();
       }
@@ -765,15 +784,18 @@ function addFrameHandler(req, socket, maxWsPayload, fromClient, toServer) {
   var emit = socket.emit;
   var write = socket.write;
   var end = socket.end;
+  var lastOpts;
   var sender = wsParser.getSender(socket, toServer);
-  var getOptions = function(opts) {
-    if (typeof opts !== 'object') {
-      opts = null; 
-    } else if (opts) {
+  var getOptions = function(opts, binary) {
+    if (opts) {
       opts.mask = toServer;
       opts.binary = opts.binary || opts.opcode == 2;
+      return opts;
     }
-    return opts || (toServer ? MASK_OPTIONS : '');
+    if (toServer) {
+      return binary ? BINARY_MASK_OPTIONS : MASK_OPTIONS;
+    }
+    return binary ? BINARY_OPTIONS : '';
   };
   handleError(socket, sender, receiver);
   socket.emit = function(type, chunk) {
@@ -783,6 +805,10 @@ function addFrameHandler(req, socket, maxWsPayload, fromClient, toServer) {
     return emit.apply(this, arguments);
   };
   receiver.onData = function(chunk, opts) {
+    if (opts && opts.opcode == 2) {
+      opts.binary = true;
+    }
+    lastOpts = opts;
     emit.call(socket, 'data', chunk, opts);
   };
   socket.write = function(chunk, opts, cb) {
@@ -790,7 +816,17 @@ function addFrameHandler(req, socket, maxWsPayload, fromClient, toServer) {
       if (opts === 'binary') {
         return write.call(this, chunk, opts, cb);
       }
-      sender.send(chunk, getOptions(opts));
+      sender.send(chunk, getOptions(opts || lastOpts));
+    }
+  };
+  socket.writeText = function(chunk) {
+    if (chunk = toBinary(chunk)) {
+      sender.send(chunk, getOptions());
+    }
+  };
+  socket.writeBin = function(chunk) {
+    if (chunk = toBinary(chunk)) {
+      sender.send(chunk, getOptions(null, true));
     }
   };
   socket.end = function(chunk) {
@@ -855,6 +891,7 @@ module.exports = function(options, callback) {
   options.Storage = Storage;
   options.parseUrl = parseUrl;
   options.formatHeaders = formatRawHeaders;
+  options.wsParser = wsParser;
   var config = options.config;
   var boundIp = config.host;
   var PROXY_ID_HEADER = config.PROXY_ID_HEADER;
@@ -1657,7 +1694,10 @@ module.exports = function(options, callback) {
       callbackHandler();
     });
   };
-  var initial = loadModule(path.join(options.value, 'initial.js'));
+  var initial = loadModule(path.join(options.value, 'initial.js')) || loadModule(path.join(options.value, 'initialize.js'));
+  if (initial && typeof initial !== 'function') {
+    initial = initial.default;
+  }
   if (typeof initial === 'function') {
     if (initial.length === 2) {
       ctx = initial(options, initServers);

@@ -186,15 +186,26 @@ function exportInterfaces(obj) {
   obj.getRuntimeInfo = function() {
     return proc;
   };
+  obj.getShadowRules = function() {
+    return config.shadowRules;
+  };
+  obj.setShadowRules = function(shadowRules) {
+    if (typeof shadowRules === 'string') {
+      config.shadowRules = shadowRules;
+      rulesUtil.parseRules();
+    }
+  };
   return obj;
 }
 
 process.on('uncaughtException', function(err){
   var code = err && err.code;
-  if (code === 'EPIPE' || code === 'ERR_HTTP2_ERROR') {
+  if (code === 'EPIPE' || code === 'ERR_HTTP2_ERROR' ||
+    code === 'ERR_HTTP_TRAILER_INVALID' || code === 'ERR_INTERNAL_ASSERTION' ||
+    (err && err.message === 'Cannot read property \'finishWrite\' of null')) {
     return;
   }
-  if (!err || code !== 'ERR_IPC_CHANNEL_CLOSED') {
+  if (!err || (code !== 'ERR_IPC_CHANNEL_CLOSED' && code !== 'ERR_IPC_DISCONNECTED')) {
     var stack = util.getErrorStack(err);
     fs.writeFileSync(path.join(process.cwd(), config.name + '.log'), '\r\n' + stack + '\r\n', {flag: 'a'});
     /*eslint no-console: "off"*/

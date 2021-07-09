@@ -71,6 +71,7 @@ function resolveWebsocket(socket, wss) {
     id: socket.reqId,
     url: fullUrl,
     startTime: now,
+    fwdHost: socket._fwdHost,
     rules: _rules,
     req: reqData,
     res: resData,
@@ -91,6 +92,7 @@ function resolveWebsocket(socket, wss) {
     var resHeaders = resData.headers = {};
     var body = '';
     var statusMsg;
+    util.deleteReqHeaders(socket);
     if (status === 101) {
       statusMsg = 'HTTP/1.1 101 Switching Protocols';
       var protocol = (headers['sec-websocket-protocol'] || '').split(/, */);
@@ -126,7 +128,7 @@ function resolveWebsocket(socket, wss) {
       var end = function() {
         data.responseTime = data.endTime = Date.now();
         socket.write(rawData);
-        reqEmitter.emit('end', data);
+        execCallback(null, socket);
       };
       var reqDelay = util.getMatcherValue(_rules.reqDelay) | 0;
       var resDelay = util.getMatcherValue(_rules.resDelay) | 0;
@@ -143,6 +145,7 @@ function resolveWebsocket(socket, wss) {
   };
 
   var plugin = pluginMgr.resolveWhistlePlugins(socket);
+  abortIfUnavailable(socket);
   pluginMgr.getRules(socket, function(rulesMgr) {
     if (pluginRules = rulesMgr) {
       socket.curUrl = fullUrl;
@@ -250,6 +253,7 @@ function resolveWebsocket(socket, wss) {
               proxyUrl = 'http:' + util.removeProtocol(proxyUrl);
               getServerIp(proxyUrl, function(ip) {
                 var proxyOptions = url.parse(proxyUrl);
+                proxyOptions.auth = proxyOptions.auth || socket._pacAuth;
                 hostPort = proxyOptions.port;
                 hostIp = ip;
                 var proxyPort = proxyOptions.port = parseInt(hostPort, 10) || (isSocks ? 1080 : (isHttpsProxy ? 443 : 80));
@@ -483,7 +487,9 @@ function resolveWebsocket(socket, wss) {
     } else {
       var clientId = headers[config.CLIENT_ID_HEADER];
       if (clientId) {
-        util.removeClientId(headers);
+        if (!util.isEnable(socket, 'keepClientId')) {
+          util.removeClientId(headers);
+        }
         data.clientId = clientId;
       }
     }
@@ -501,6 +507,7 @@ function resolveWebsocket(socket, wss) {
         headers[config.CLIENT_IP_HEAD] = clientIp;
       }
     }
+    util.deleteReqHeaders(socket);
     reqSocket.write(socket.getBuffer(headers, options.path));
     reqSocket.resume();
     delete headers[config.HTTPS_FIELD];
@@ -513,8 +520,9 @@ function resolveWebsocket(socket, wss) {
   }
 
   function setupSocket(cb) {
-    var list = [_rules.reqHeaders, _rules.reqCors, _rules.reqCookies, _rules.params, _rules.urlReplace, _rules.urlParams];
-    util.parseRuleJson(list, function(reqHeaders, reqCors, reqCookies, params, urlReplace, urlParams) {
+    var authObj = util.getAuthByRules(_rules);
+    var list = [_rules.reqHeaders, _rules.reqCors, _rules.reqCookies, _rules.params, _rules.urlReplace, _rules.urlParams, authObj ? null : _rules.auth];
+    util.parseRuleJson(list, function(reqHeaders, reqCors, reqCookies, params, urlReplace, urlParams, auth) {
       if (params && urlParams) {
         extend(params, urlParams);
       } else {
@@ -539,6 +547,10 @@ function resolveWebsocket(socket, wss) {
         extend(headers, reqHeaders);
         headers.host = headers.host || host;
       }
+      auth = util.getAuthBasic(auth || authObj);
+      if (auth) {
+        headers['authorization'] = auth;
+      }
       var reqRuleData = { headers: headers };
       util.setReqCors(reqRuleData, reqCors);
       util.setReqCookies(reqRuleData, reqCookies, headers.cookie);
@@ -546,10 +558,6 @@ function resolveWebsocket(socket, wss) {
         headers.referer = util.getMatcherValue(_rules.referer);
       }
           
-      var delReqHeaders = util.parseDeleteProperties(socket).reqHeaders;
-      Object.keys(delReqHeaders).forEach(function(name) {
-        delete headers[name];
-      });
       util.disableReqProps(socket);
       pluginMgr.postStats(socket);
       cb();
@@ -744,9 +752,9 @@ function formatRawHeaders(obj, isH2) {
   return formatHeaders(headers, rawNames);
 }
 
-function addStreamEvents(stream, handleError, handleAbort) {
+function addStreamEvents(stream, handleAbort) {
   if (stream) {
-    stream.on('error', handleError);
+    stream.on('error', handleAbort);
     stream.on('aborted', handleAbort);
     stream.on('close', handleAbort);
   }
@@ -762,13 +770,11 @@ function toHttp1(req, res) {
       client = null;
     }
   };
-  var handleError = function(e) {
-    e && handleAbort();
-  };
   addReqInfo(req);
-  addStreamEvents(req.stream, handleError, handleAbort);
-  req.on('error', handleError);
-  res.on('error', handleError);
+  addStreamEvents(req.stream, handleAbort);
+  req.on('error', handleAbort);
+  res.on('error', handleAbort);
+  res.once('close', handleAbort);
   var host = req.headers[':authority'];
   var headers = req.headers;
   if (host) {
@@ -795,9 +801,9 @@ function toHttp1(req, res) {
   }
   options.method = req.method;
   client = http.request(options);
-  client.on('error', handleError);
+  client.on('error', handleAbort);
   client.on('response', function(svrRes) {
-    svrRes.on('error', handleError);
+    svrRes.on('error', handleAbort);
     svrRes.once('end', function() {
       var trailers = svrRes.trailers;
       if (!util.isEmptyObject(trailers)) {
@@ -811,12 +817,15 @@ function toHttp1(req, res) {
       var code = svrRes.statusCode;
       res.writeHead(code, getStatusMessage(svrRes), formatRawHeaders(svrRes, isH2));
       var write = res.write;
+      var handleError = function(e) {
+        e && handleAbort();
+      };
       res.write = function(chunk) {
         return write.call(res, chunk, handleError);
       };
       svrRes.pipe(res);
     } catch (e) {
-      handleError(e);
+      handleAbort();
     }
   });
   req.pipe(client);
@@ -858,20 +867,22 @@ function addClientInfo(socket, chunk, statusLine, clientIp, clientPort) {
 module.exports = function(socket, next, isWebPort) {
   var reqSocket, reqDestroyed, resDestroyed;
   var headersStr, statusLine;
-  function destroy(err) {
+  var destroy = function (err) {
     if (reqSocket) {
-      if (resDestroyed) {
+      if (!resDestroyed) {
         resDestroyed = true;
         reqSocket.destroy(err);
       }
-    } else if (reqDestroyed) {
+    } else if (!reqDestroyed) {
       reqDestroyed = true;
       socket.destroy(err);
     }
-  }
+  };
 
-  function abortIfUnavailable(socket) {
-    return socket.on('error', destroy);
+  util.onSocketEnd(socket, destroy);
+
+  function abortIfUnavailable(s) {
+    return s.on('error', destroy);
   }
   var clientIp = socket.clientIp;
   var clientPort = socket.clientPort;
@@ -949,12 +960,17 @@ module.exports = function(socket, next, isWebPort) {
             return destroy(err);
           }
           var headers = socket.headers;
+          var tunnelData = headers[config.TUNNEL_DATA_HEADER];
+          var tdKey = config.tdKey;
+          if (tdKey && (!tunnelData || config.overTdKey)) {
+            tunnelData = headers[tdKey] || tunnelData;
+          }
           tunnelTmplData.set(reqSocket.localPort + ':' + reqSocket.remotePort, {
             clientIp: clientIp,
             clientPort: clientPort,
             clientId: headers[config.CLIENT_ID_HEADER],
             proxyAuth:headers['proxy-authorization'],
-            tunnelData: headers[config.TUNNEL_DATA_HEADER]
+            tunnelData: tunnelData
           });
           receiveData = function(data) {
             clearTimeout(authTimer);

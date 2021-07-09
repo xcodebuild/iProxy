@@ -56,8 +56,9 @@ var COMMENT_RE = /#.*$/;
 var TPL_RE = /^((?:[\w.-]+:)?\/\/)?(`.*`)$/;
 // url:  protocol, host, port, hostname, search, query, pathname, path, href, query.key
 // req|res: ip, method, statusCode, headers?.key, cookies?.key
-var PLUGIN_NAME_RE = /^[a-z\d_\-]+(?:\.replace\(.+\))?$/;
-var TPL_VAR_RE = /(\$)?\$\{(\{)?(id|reqId|whistle|now|port|realPort|version|url|hostname|query|search|queryString|searchString|path|pathname|clientId|ip|clientIp|serverIp|method|status(?:Code)|reqCookies?|resCookies?|re[qs]H(?:eaders?)?)(?:\.([^{}]+))?\}(\})?/ig;
+var PLUGIN_NAME_RE = /^[a-z\d_\-]+(?:\.var(?:\$|\d*))?(?:\.replace\(.+\))?$/;
+var VAR_INDEX_RE = /^([a-z\d_\-]+)\.var(\$|\d*)/;
+var TPL_VAR_RE = /(\$)?\$\{(\{)?(id|reqId|whistle|now|port|realPort|version|url|hostname|query|search|queryString|searchString|path|pathname|clientId|localClientId|ip|clientIp|serverIp|method|status(?:Code)|reqCookies?|resCookies?|re[qs]H(?:eaders?)?)(?:\.([^{}]+))?\}(\})?/ig;
 var REPLACE_PATTERN_RE = /(^|\.)replace\((.+)\)$/i;
 var SEP_RE = /^[?/]/;
 var COMMA1_RE = /\\,/g;
@@ -70,6 +71,8 @@ var inlineValues;
 var CONTROL_RE = /[\u001e\u001f\u200e\u200f\u200d\u200c\u202a\u202d\u202e\u202c\u206e\u206f\u206b\u206a\u206d\u206c]+/g;
 var HTTP_PROXY_RE = /^x?(?:proxy|http-proxy|http2https-proxy|https2http-proxy|internal-proxy|internal-https?-proxy):\/\//;
 var ENABLE_PROXY_RE = /\bproxy(?:Host|First|Tunnel)|clientId|multiClient|singleClient\b/i;
+var PLUGIN_VAR_RE = /^%([a-z\d_\-]+)=([^\s]*)/;
+var MAX_VAR_LEN = 30;
 
 function filterHttpProxy(rule) {
   return HTTP_PROXY_RE.test(rule.matcher);
@@ -365,7 +368,7 @@ function resolvePropValue(obj, key) {
 }
 
 function resolveUrlVar(req, key, escape) {
-  var url = req.fullUrl;
+  var url = req.fullUrl || req.curUrl;
   if (!key) {
     return url;
   }
@@ -477,30 +480,38 @@ function resolveMethodVar(req, key) {
 function resolveStatusCodeVar(req, key) {
   return req.statusCode || '';
 }
-function resolveReqHeadersVar(req, key) {
-  var value = resolvePropValue(req.headers, key);
-  return !value && key === 'x-whistle-client-id' ? config.clientId : value;
-}
+
 function resolveResHeadersVar(req, key) {
   return resolvePropValue(req.resHeaders, key);
 }
 function resolveRuleValue(req, key) {
-  var plugin = key && req.rules && req.rules.plugin;
-  var matcher;
-  key = key + '://';
-  if (plugin) {
-    var list = Array.isArray(plugin.list) ? plugin.list : [plugin];
-    var name = 'whistle.' + key;
-    for (var i = 0, len = list.length; i < len; i++) {
-      matcher = list[i].matcher;
-      if (!matcher.indexOf(name)) {
-        return matcher.substring(name.length);
+  var curRules = key && req.rules;
+  if (curRules) {
+    if (VAR_INDEX_RE.test(key)) {
+      var index = RegExp.$2 || 0;
+      var vars = req._pluginRawVars && req._pluginRawVars[RegExp.$1];
+      if (vars && index === '$') {
+        index = vars.length - 1;
+      }
+      return vars && vars[index] || '';
+    }
+    var plugin = curRules.plugin;
+    var matcher;
+    key = key + '://';
+    if (plugin) {
+      var list = Array.isArray(plugin.list) ? plugin.list : [plugin];
+      var name = 'whistle.' + key;
+      for (var i = 0, len = list.length; i < len; i++) {
+        matcher = list[i].matcher;
+        if (!matcher.indexOf(name)) {
+          return matcher.substring(name.length);
+        }
       }
     }
-  }
-  matcher = req.rules.rule && req.rules.rule.matcher;
-  if (matcher && !matcher.indexOf(key)) {
-    return matcher.substring(key.length);
+    matcher = curRules.rule && curRules.rule.matcher;
+    if (matcher && !matcher.indexOf(key)) {
+      return matcher.substring(key.length);
+    }
   }
   return '';
 }
@@ -545,6 +556,8 @@ function resolveVarValue(req, escape, name, key) {
   case 'clientip':
     return resolveClientIpVar(req, key);
   case 'clientid':
+    return util.getClientId(req.headers);
+  case 'localclientid':
     return config.clientId;
   case 'statuscode':
   case 'status':
@@ -554,7 +567,7 @@ function resolveVarValue(req, escape, name, key) {
   case 'reqh':
   case 'reqheader':
   case 'reqheaders':
-    return resolveReqHeadersVar(req, key);
+    return resolvePropValue(req.headers, key);
   case 'hostname':
     return util.hostname();
   default:
@@ -704,6 +717,12 @@ function removeFilters(rule) {
   }
 }
 
+function replaceSubMatcher(url, regExp) {
+  if (!regExp || !SUB_MATCH_RE.test(url)) {
+    return url;
+  }
+  return util.replacePattern(url, regExp);
+}
 
 function resolveRuleList(req, list, vals, index, isFilter, isEnableProxy) {
   var curUrl = formatUrl(req.curUrl);
@@ -730,8 +749,9 @@ function resolveRuleList(req, list, vals, index, isFilter, isEnableProxy) {
     }
     results.push(result);
   };
-  var getExactRule = function(relPath) {
+  var getExactRule = function(relPath, regObj) {
     origMatcher = resolveVar(rule, vals, req);
+    origMatcher = replaceSubMatcher(origMatcher, regObj);
     matcher = setProtocol(origMatcher, curUrl);
     result = extend({
       files: getFiles(matcher),
@@ -772,21 +792,11 @@ function resolveRuleList(req, list, vals, index, isFilter, isEnableProxy) {
       }
       if (matchedRes && checkFilter() && --index < 0) {
         regExp['0'] = curUrl;
-        var replaceSubMatcher = function(url) {
-          if (!SUB_MATCH_RE.test(url)) {
-            return url;
-          }
-          return util.replacePattern(url, regExp);
-        };
         matcher = resolveVar(rule, vals, req);
+        // 支持 $x 包含 `|` 的情形
+        matcher = setProtocol(replaceSubMatcher(matcher, regExp), curUrl);
         files = getFiles(matcher);
-        matcher = setProtocol(replaceSubMatcher(matcher), curUrl);
-        result = extend({
-          url: matcher,
-          files: files && files.map(function(file) {
-            return replaceSubMatcher(file);
-          })
-        }, rule);
+        result = extend({ url: matcher, files: files }, rule);
         result.matcher = matcher;
         removeFilters(result);
         if (isIndex) {
@@ -797,15 +807,20 @@ function resolveRuleList(req, list, vals, index, isFilter, isEnableProxy) {
     } else if (rule.wildcard) {
       var wildcard = rule.wildcard;
       var hostname = null; // 不能去掉
+      var regObj;
       if (wildcard.preMatch.test(curUrl)) {
         hostname = RegExp.$1;
+        regObj = { '0': hostname };
+        for (var k = 1; k < 9; k++) {
+          regObj[k] = RegExp['$' + (k + 1)];
+        }
       }
       if (hostname != null && checkFilter()) {
         filePath = curUrl.substring(hostname.length);
         var wPath = wildcard.path;
         if (wildcard.isExact) {
           if ((filePath === wPath || filePath.replace(QUERY_RE, '') === wPath) && --index < 0) {
-            if (result = getExactRule(getRelativePath(wPath, filePath, rule.matcher))) {
+            if (result = getExactRule(getRelativePath(wPath, filePath, rule.matcher), regObj)) {
               return result;
             }
           }
@@ -814,6 +829,7 @@ function resolveRuleList(req, list, vals, index, isFilter, isEnableProxy) {
           filePath = filePath.substring(wpLen);
           if ((wildcard.hasQuery || !filePath || wPath[wpLen - 1] === '/' || SEP_RE.test(filePath)) && --index < 0) {
             origMatcher = resolveVar(rule, vals, req);
+            origMatcher = replaceSubMatcher(origMatcher, regObj);
             matcher = setProtocol(origMatcher, curUrl);
             files = getFiles(matcher);
             if (wildcard.hasQuery && filePath) {
@@ -1019,7 +1035,6 @@ function parseRule(rulesMgr, pattern, matcher, raw, root, options) {
     isRules: isRules,
     statusCode: statusCode,
     name: protocol,
-    isTpl: protocol === 'log' || protocol === 'weinre' ? false : undefined,
     root: root,
     wildcard: wildcard,
     isRegExp: isRegExp,
@@ -1034,6 +1049,11 @@ function parseRule(rulesMgr, pattern, matcher, raw, root, options) {
     filters: options.filters,
     lineProps: options.lineProps
   };
+  if (protocol === 'proxy' || protocol === 'host') {
+    rule.rawProps = options.rawProps;
+  } else if (protocol === 'log' || protocol === 'weinre') {
+    rule.isTpl = false;
+  }
   if (useRealPort) {
     rule.realPort = config.realPort;
     rule.matcher = rule.matcher.replace('realPort', config.realPort || config.port);
@@ -1072,7 +1092,10 @@ function parseRule(rulesMgr, pattern, matcher, raw, root, options) {
 }
 
 function parse(rulesMgr, text, root, append) {
-  !append && protoMgr.resetRules(rulesMgr._rules);
+  if (!append) {
+    protoMgr.resetRules(rulesMgr._rules);
+    rulesMgr._pluginVars = {};
+  }
   if (Array.isArray(text)) {
     text.forEach(function(item) {
       item && parseText(rulesMgr, item.text, item.root);
@@ -1213,12 +1236,15 @@ function resolveFilterPattern(matcher) {
 function resolveMatchFilter(list) {
   var matchers = [];
   var lineProps = {};
-  var filters, filter, not, isInclude, hasBodyFilter, orgVal;
+  var rawProps = [];
+  var filters, hasBodyFilter;
   list.forEach(function(matcher) {
     if (LINE_PROPS_RE.test(matcher)) {
+      rawProps.push(matcher);
       extend(lineProps, util.parseLineProps(matcher));
       return;
     }
+    var filter, not, isInclude, orgVal;
     if (PROPS_FILTER_RE.test(matcher) || PURE_FILTER_RE.test(matcher)) {
       filters = filters || [];
       var raw = RegExp['$&'];
@@ -1329,6 +1355,7 @@ function resolveMatchFilter(list) {
     }
   });
   return {
+    rawProps: rawProps,
     hasBodyFilter: hasBodyFilter,
     matchers: matchers,
     filters: filters,
@@ -1337,11 +1364,31 @@ function resolveMatchFilter(list) {
 }
 
 function parseText(rulesMgr, text, root) {
+  var pluginVars = rulesMgr._pluginVars;
   getLines(text, root).forEach(function(line) {
     var raw = line;
     line = line.replace(COMMENT_RE, '').trim();
     line = line && line.split(/\s+/);
     var len = line && line.length;
+    if (len && PLUGIN_VAR_RE.test(line[0])) {
+      var name = RegExp.$1;
+      var value = RegExp.$2;
+      if (value && value.length <= 100) {
+        var vars = pluginVars[name];
+        if (!vars) {
+          vars = [value];
+          pluginVars[name] = vars;
+        } else if (vars.length < MAX_VAR_LEN) {
+          vars.push(value);
+        }
+      }
+      if (len <= 2) {
+        len = 0;
+      } else {
+        --len;
+        line = line.slice(1);
+      }
+    }
     if (!len || len < 2) {
       return;
     }
@@ -1510,6 +1557,8 @@ function matchExcludeFilters(url, rule, options) {
 
 function Rules(values) {
   this._rules = protoMgr.getRules();
+  this._pluginVars = {};
+  this._pluginBase64Vars = {};
   this._pureHttpProxyRules = [];
   this._xRules = [];
   this._orgValues = this._values = values || {};
@@ -1612,7 +1661,7 @@ proto.resolveHost = function(req, callback, pluginRulesMgr, rulesFileMgr, header
   if (host) {
     return callback(null, util.removeProtocol(host.matcher, true), host.port, host);
   }
-  if (req.rules) {
+  if (!req._enableProxyHost && req.rules) {
     delete req.rules.host;
   }
   this.lookupHost(req, callback);
@@ -1688,6 +1737,7 @@ function resolveRules(req, isReq, isRes) {
   var vals = this._values;
   var filter = this.resolveFilter(req);
   var protos = req.isPluginReq ? pluginProtocols : (isRes ? pureResProtocols : (isReq ? reqProtocols : protocols));
+  req._inlineValues = vals;
   protos.forEach(function(name) {
     if (name !== 'pipe' && (name === 'proxy' || name === 'rule' || name === 'plugin'
       || !filter[name]) && (rule = getRule(req, rules[name], vals))) {
@@ -1789,25 +1839,37 @@ proto.resolveProxyProps = function(req) {
   };
 };
 
-proto.resolvePipe = function(req) {
-  if (req.isPluginReq) {
-    return;
-  }
+function resolveSingleRule(req, protocol, multi) {
   req.curUrl = req.curUrl || req.fullUrl;
   var filter = this.resolveFilter(req);
-  if (util.isIgnored(filter, 'pipe')) {
+  if (util.isIgnored(filter, protocol)) {
     return;
   }
-  return getRule(req, this._rules.pipe, this._values);
+  if (multi) {
+    return getRuleList(req, this._rules[protocol], this._values);
+  }
+  return getRule(req, this._rules[protocol], this._values);
+}
+
+proto.resolvePipe = function(req) {
+  return req.isPluginReq ? null : resolveSingleRule.call(this, req, 'pipe');
 };
 
 proto.resolvePac = function(req) {
-  req.curUrl = req.curUrl || req.fullUrl;
-  var filter = this.resolveFilter(req);
-  if (util.isIgnored(filter, 'pac')) {
-    return;
+  return resolveSingleRule.call(this, req, 'pac');
+};
+
+var WHISTLE_INTERNAL_HOST = /^reqHeaders:\/\/whistleInternalHost=([a-z\d.-]+(?::\d{1,5})?)$/;
+proto.resolveInternalHost = function(req) {
+  var list = resolveSingleRule.call(this, req, 'reqHeaders', true);
+  if (list) {
+    for (var i = 0, len = list.length; i < len; i++) {
+      var item = list[i];
+      if (WHISTLE_INTERNAL_HOST.test(item.matcher)) {
+        return RegExp.$1;
+      }
+    }
   }
-  return getRule(req, this._rules.pac, this._values);
 };
 
 proto.hasReqScript = function(req) {

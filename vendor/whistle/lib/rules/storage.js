@@ -6,6 +6,27 @@ var RecycleBin = require('./recycle-bin');
 
 var ENCODING = {encoding: 'utf8'};
 var RETRY_INTERVAL = 16000;
+var ASCII_RE = /[\x00-\x7f]/g;
+var MAX_FILENAME_LEN = 254;
+
+function encodeName(index, name) {
+  var filename;
+  try {
+    filename = index + '.' + encodeURIComponent(name);
+    if (filename.length <= MAX_FILENAME_LEN) {
+      return filename;
+    }
+  } catch (e) {}
+  try {
+    filename = index + '.' + name.replace(ASCII_RE, encodeURIComponent);
+    if (filename.length <= MAX_FILENAME_LEN) {
+      return filename;
+    }
+  } catch(e) {
+    logger.error(e);
+  }
+  return index + '.' + name;
+}
 
 function readFileSafe(file, retry) {
   try {
@@ -91,16 +112,19 @@ function Storage(dir, filters) {
     if (filters[filename]) {
       return;
     }
+    var filePath = path.join(self._files, file);
+    if (files[filename]) {
+      return fs.unlinkSync(filePath);
+    }
     if (index > maxIndex) {
       maxIndex = index;
     }
-    fileNames[file] = true;
-    var filePath = path.join(self._files, file);
     var data = readFileSafe(filePath);
+    var backFile = path.join(backupDir, file);
     if (data) {
-      fs.writeFileSync(path.join(backupDir, file), data);
+      fs.writeFileSync(backFile, data);
     } else {
-      data = readFileSafe(path.join(backupDir, file));
+      data = readFileSafe(backFile);
       if (data) {
         fs.writeFileSync(filePath, data);
       }
@@ -110,6 +134,13 @@ function Storage(dir, filters) {
       name: filename,
       data: data
     };
+    var newFile = encodeName(index, filename);
+    fileNames[newFile] = true;
+    if (file !== newFile) {
+      fs.writeFileSync(path.join(self._files, newFile), data);
+      fs.writeFileSync(path.join(backupDir, newFile), data);
+      fs.unlinkSync(filePath);
+    }
   });
 
   var properties = readJsonSafe(self._properties);
@@ -231,13 +262,7 @@ proto._writeFile = function(file) {
 
 proto._getFilePath = function(file, backup) {
   file = typeof file == 'string' ? this._cache.files[file] : file;
-  var name = file.name;
-  try {
-    name = encodeURIComponent(file.name);
-  } catch(e) {
-    logger.error(e);
-  }
-  name = file.index + '.' + name;
+  var name = encodeName(file.index, file.name);
   return path.join(backup ? this._backupDir : this._files, name);
 };
 

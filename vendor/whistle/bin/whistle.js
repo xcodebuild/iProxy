@@ -18,7 +18,8 @@ function showStartupInfo(err, options, debugMode, restart) {
     return showUsage(err, options, restart);
   }
   if (/listen EADDRINUSE/.test(err)) {
-    error('[!] Failed to bind proxy port ' + (options.port || config.port) + ': The port is already in use');
+    options = util.formatOptions(options);
+    error('[!] Failed to bind proxy port ' + (options.host ? options.host + ':' : '') + (options.port || config.port) + ': The port is already in use');
     info('[i] Please check if ' + config.name + ' is already running, you can ' + (debugMode ? 'stop whistle with `w2 stop` first' : 'restart whistle with `w2 restart`'));
     info('    or if another application is using the port, you can change the port with ' + (debugMode ? '`w2 run -p newPort`\n' : '`w2 start -p newPort`\n'));
   } else if (err.code == 'EACCES' || err.code == 'EPERM') {
@@ -114,6 +115,7 @@ program
   .option('-R, --reqCacheSize [reqCacheSize]', 'set the cache size of request data (600 by default)', String, undefined)
   .option('-F, --frameCacheSize [frameCacheSize]', 'set the cache size of webSocket and socket\'s frames (512 by default)', String, undefined)
   .option('-A, --addon [pluginPaths]', 'add custom plugin paths', String, undefined)
+  .option('--dnsServer [dnsServer]', 'set custom dns servers', String, undefined)
   .option('--socksPort [socksPort]', 'set the socksv5 server port', String, undefined)
   .option('--httpPort [httpPort]', 'set the http server port', String, undefined)
   .option('--httpsPort [httpsPort]', 'set the https server port', String, undefined)

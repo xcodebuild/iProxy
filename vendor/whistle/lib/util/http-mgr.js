@@ -53,7 +53,7 @@ function triggerChange(data, body) {
 
 function parseOptions(options) {
   if (typeof options === 'string') {
-    options = parseUrl(fullUrl);
+    options = parseUrl(options);
   } else {
     var fullUrl = options.url || options.uri;
     if (fullUrl && typeof fullUrl === 'string') {
@@ -65,7 +65,9 @@ function parseOptions(options) {
     options.maxLength = 0;
   }
   options.agent = false;
-  options.rejectUnauthorized = false;
+  if (options.rejectUnauthorized !== true) {
+    options.rejectUnauthorized = false;
+  }
   return options;
 }
 
@@ -111,26 +113,33 @@ function request(options, callback) {
   addTimeout();
   var maxLength = options.maxLength;
   options.agent = false;
-  var client = httpModule.request(options, function(r) {
-    res = r;
-    res.on('error', callbackHandler);
-    res.on('data', function(data) {
-      body = body ? Buffer.concat([body, data]) : data;
-      addTimeout();
-      if (maxLength && body.length > maxLength) {
-        var err;
-        if (!options.ignoreExceedError) {
-          err = new Error('The response body exceeded length limit');
-          err.code = EXCEED;
+  if (options.headers && options.headers.trailer) {
+    delete options.headers.trailer;
+  }
+  try {
+    var client = httpModule.request(options, function(r) {
+      res = r;
+      res.on('error', callbackHandler);
+      res.on('data', function(data) {
+        body = body ? Buffer.concat([body, data]) : data;
+        addTimeout();
+        if (maxLength && body.length > maxLength) {
+          var err;
+          if (!options.ignoreExceedError) {
+            err = new Error('The response body exceeded length limit');
+            err.code = EXCEED;
+          }
+          callbackHandler(err);
         }
-        callbackHandler(err);
-      }
+      });
+      res.on('end', callbackHandler);
     });
-    res.on('end', callbackHandler);
-  });
-  client.on('error', callbackHandler);
-  client.end(toString(options.body));
-  return client;
+    client.on('error', callbackHandler);
+    client.end(toString(options.body));
+    return client;
+  } catch (e) {
+    callbackHandler(e);
+  }
 }
 
 exports.request = request;

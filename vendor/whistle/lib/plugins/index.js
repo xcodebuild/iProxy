@@ -25,6 +25,7 @@ var PLUGIN_MAIN = path.join(__dirname, './load-plugin');
 var PIPE_PLUGIN_RE = /^pipe:\/\/(?:whistle\.|plugin\.)?([a-z\d_\-]+)(?:\(([\s\S]*)\))?$/;
 var REQ_FROM_HEADER = config.WHISTLE_REQ_FROM_HEADER;
 var RULE_VALUE_HEADER = 'x-whistle-rule-value';
+var PLUGIN_VARS_HEAD = 'x-whistle-plugin-vars' + config.uid;
 var RULE_URL_HEADER = 'x-whistle-rule-url';
 var ETAG_HEADER = 'x-whistle-etag';
 var MAX_AGE_HEADER = 'x-whistle-max-age';
@@ -47,15 +48,22 @@ var INTERVAL = 6000;
 var CHECK_INTERVAL = 1000 * 60 * 60;
 var portsField = typeof Symbol === 'undefined' ? '_ports' : Symbol('_ports'); // eslint-disable-line
 var UTF8_OPTIONS = {encoding: 'utf8'};
-var allPlugins = config.networkMode ? {} : getPluginsSync();
+var notLoadPlugins = config.networkMode || config.rulesOnlyMode;
+var allPlugins = notLoadPlugins ? {} : getPluginsSync();
 var LOCALHOST = '127.0.0.1';
 var MAX_RULES_LENGTH = 1024 * 256;
 var rulesCache = new LRU({max: 36});
 var PLUGIN_HOOKS = config.PLUGIN_HOOKS;
 var PLUGIN_HOOK_NAME_HEADER = config.PLUGIN_HOOK_NAME_HEADER;
 var conf = {};
+var EXCLUDE_NAMES = {
+  password: 1,
+  shadowRules: 1,
+  rules: 1,
+  values: 1
+};
 
-if (config.networkMode) {
+if (notLoadPlugins) {
   getPlugin = function(cb) {
     cb({});
   };
@@ -63,7 +71,7 @@ if (config.networkMode) {
 
 /*eslint no-console: "off"*/
 Object.keys(config).forEach(function(name) {
-  if (name === 'password') {
+  if (EXCLUDE_NAMES[name]) {
     return;
   }
   var value = config[name];
@@ -213,6 +221,7 @@ function readPackages(obj, callback) {
           newPkg[util.PLUGIN_MENU_CONFIG] = util.getPluginMenuConfig(conf);
           newPkg.hintUrl = hintList ? undefined : util.getCgiUrl(conf.hintUrl);
           newPkg.hintList = hintList;
+          newPkg.pluginVars = util.getPluginVarsConf(conf);
           newPkg.hideShortProtocol = !!conf.hideShortProtocol,
           newPkg.hideLongProtocol = !!conf.hideLongProtocol,
           newPkg.homepage = pluginUtil.getHomePageFromPackage(result);
@@ -335,17 +344,43 @@ function addRealUrl(req, newHeaders) {
   }
 }
 
-function addRuleHeaders(req, rules, headers) {
-  rules = rules || '';
+function addPluginVars(req, headers, rule) {
+  if (!rule) {
+    delete headers[RULE_VALUE_HEADER];
+    delete headers[PLUGIN_VARS_HEAD];
+    return;
+  }
+  var plugin = rule.plugin;
+  var name;
+  var value;
+  if (plugin) {
+    name = plugin.moduleName.split('.', 2)[1];
+    value = rule.value;
+  } else {
+    name = rule.matcher.split(':', 1)[0];
+    value = util.getMatcherValue(rule);
+  }
+  if (value) {
+    headers[RULE_VALUE_HEADER] = encodeURIComponent(value);
+  } else {
+    delete headers[RULE_VALUE_HEADER];
+  }
+  value = req._pluginVars && req._pluginVars[name];
+  if (value) {
+    headers[PLUGIN_VARS_HEAD] = value;
+  } else {
+    delete headers[PLUGIN_VARS_HEAD];
+  }
+}
+
+function addRuleHeaders(req, rules, headers, isPipe) {
+  rules = rules || {};
   headers = headers || req.headers;
   var localHost = getValue(rules.host);
   if (localHost) {
     headers[LOCAL_HOST_HEADER] = localHost;
   }
-  var ruleValue = util.getMatcherValue(rules.rule);
-  if (ruleValue) {
-    headers[RULE_VALUE_HEADER] = encodeURIComponent(ruleValue);
-  }
+  addPluginVars(req, headers, isPipe ? req._pipePlugin && { plugin: req._pipePlugin } : rules.rule);
   addRealUrl(req, headers);
   var proxyRule = getValue(rules.proxy);
   if (proxyRule) {
@@ -375,7 +410,7 @@ function addRuleHeaders(req, rules, headers) {
     headers[config.CLIENT_PORT_HEAD] = req.clientPort;
   }
   if (req.globalValue) {
-    headers[config.GLOBAL_VALUE_HEAD] = encodeURIComponent(req.globalValue);
+    headers[GLOBAL_VALUE_HEAD] = encodeURIComponent(req.globalValue);
   }
   return headers;
 }
@@ -401,6 +436,7 @@ function loadPlugin(plugin, callback) {
       value: plugin.path,
       REQ_FROM_HEADER: REQ_FROM_HEADER,
       RULE_VALUE_HEADER: RULE_VALUE_HEADER,
+      PLUGIN_VARS_HEAD: PLUGIN_VARS_HEAD,
       RULE_URL_HEADER: RULE_URL_HEADER,
       MAX_AGE_HEADER: MAX_AGE_HEADER,
       ETAG_HEADER: ETAG_HEADER,
@@ -474,6 +510,9 @@ function _getPlugin(protocol) {
 
 pluginMgr.isDisabled = pluginIsDisabled;
 pluginMgr.getPlugin = _getPlugin;
+rulesMgr.getPlugin = function(name) {
+  return pluginIsDisabled(name) ? null : allPlugins[name + ':'];
+};
 
 function getPluginByName(name) {
   return name && allPlugins[name + ':'];
@@ -581,11 +620,7 @@ function getRulesFromPlugins(type, req, res, callback) {
       var opts = extend({}, options);
       opts.headers = extend({}, options.headers);
       opts.port = item.port;
-      if (item.value) {
-        opts.headers[RULE_VALUE_HEADER] = encodeURIComponent(item.value);
-      } else {
-        opts.headers[RULE_VALUE_HEADER] = '';
-      }
+      addPluginVars(req, opts.headers, item);
       addRealUrl(req, opts.headers);
       var cacheKey = plugin.moduleName + '\n' + type;
       var data = rulesCache.get(cacheKey);
@@ -674,7 +709,7 @@ function getRulesFromPlugins(type, req, res, callback) {
   });
 }
 
-function getOptions(req, res, type) {
+function getOptions(req, res, type, isPipe) {
   var fullUrl = req.fullUrl;
   var options = util.parseUrl(fullUrl);
   var isResRules = res && type === 'resRules';
@@ -682,7 +717,7 @@ function getOptions(req, res, type) {
   delete headers.upgrade;
   delete headers.connection;
 
-  options.headers = addRuleHeaders(req, req.rules, headers);
+  options.headers = addRuleHeaders(req, req.rules, headers, isPipe);
   delete headers['content-length'];
   headers[METHOD_HEADER] = encodeURIComponent(req.method || 'GET');
 
@@ -803,7 +838,7 @@ function getPipe(type, hookName) {
       if (!port || req._hasClosed || req._hasError) {
         return callback();
       }
-      var options = getOptions(req, res, isRes && 'resRules');
+      var options = getOptions(req, res, isRes && 'resRules', true);
       options.headers[PLUGIN_HOOK_NAME_HEADER] = hookName;
       options.headers['x-whistle-request-tunnel-ack'] = 1;
       options.proxyHost = LOCALHOST;
@@ -946,6 +981,7 @@ function postStats(req, res) {
         return;
       }
       return {
+        plugin: plugin.plugin,
         port: statsPort,
         value: plugin.value,
         url: plugin.url
@@ -961,9 +997,7 @@ function postStats(req, res) {
       var opts = extend({}, options);
       opts.headers = extend({}, options.headers);
       opts.port = item.port;
-      if (item.value) {
-        opts.headers[RULE_VALUE_HEADER] = encodeURIComponent(item.value);
-      }
+      addPluginVars(req, opts.headers, item);
       addRealUrl(req, opts.headers);
       var request = http.request(opts, function(response) {
         response.on('error', util.noop);
