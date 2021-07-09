@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { StatusBar } from '../status-bar';
 import { getAllExtensions } from '../../extensions';
-import { Icon } from 'antd';
+import { Icon as LegacyIcon } from '@ant-design/compatible';
 import classnames from 'classnames';
 import { useTranslation } from 'react-i18next';
 import { Provider, KeepAlive } from 'react-keep-alive';
@@ -61,7 +61,7 @@ export const App = () => {
 
                             return (
                                 <div className={className} key={panel.title} onClick={() => handleClickPanel(index)}>
-                                    <Icon style={{ fontSize: '22px' }} type={panel.icon}></Icon>
+                                    <LegacyIcon style={{ fontSize: '22px' }} type={panel.icon}></LegacyIcon>
                                     <span className="iproxy-dock-title">{t(panel.title)}</span>
                                 </div>
                             );

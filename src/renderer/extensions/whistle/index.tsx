@@ -1,7 +1,9 @@
 import { Extension } from '../../extension';
 import logger from 'electron-log';
 import React, { useEffect, useRef, useState } from 'react';
-import { Icon, Dropdown, Menu, message } from 'antd';
+import { DesktopOutlined, KeyOutlined, MenuOutlined, RetweetOutlined } from '@ant-design/icons';
+import { Icon as LegacyIcon } from '@ant-design/compatible';
+import { Dropdown, Menu, message } from 'antd';
 import { lazyParseData, getWhistlePort } from '../../utils';
 import { Modal, Button } from 'antd';
 const confirm = Modal.confirm;
@@ -333,16 +335,16 @@ export class WhistleExntension extends Extension {
             const menu = (
                 <Menu>
                     <Menu.Item onClick={this.toggleSystemProxy.bind(this)}>
-                        <Icon type="desktop" />
+                        <DesktopOutlined />
                         {onlineState === 'ready' ? t('Disable system proxy') : t('Enable system proxy')}
                     </Menu.Item>
                     <Menu.Item onClick={() => this.startWhistle()}>
-                        <Icon type="retweet"></Icon>
+                        <RetweetOutlined></RetweetOutlined>
                         {t('Restart proxy')}
                     </Menu.Item>
                     {getHelperMenus(t)}
                     <Menu.Item onClick={this.showUserNamePassword.bind(this)}>
-                        <Icon type="key" />
+                        <KeyOutlined />
                         {t('Whistle password')}
                     </Menu.Item>
                 </Menu>
@@ -386,28 +388,26 @@ export class WhistleExntension extends Extension {
                     }
                 });
             }, []);
-            return (
-                <>
-                    <Dropdown overlay={menu}>
-                        <div className="whistle-status-bar-item">
-                            {t('Proxy')}
-                            {port ? `: [HTTP ${port}/SOCKS5 ${((port as unknown) as number) + 1}]` : null}{' '}
-                            <Icon
-                                style={{ marginRight: '10px', marginLeft: '5px' }}
-                                className={info.proxyClassName}
-                                type={info.proxyIcon}
-                            />
-                            {t('System Proxy')}
-                            <Icon
-                                style={{ marginLeft: '5px' }}
-                                className={info.systemProxyClassName}
-                                type={info.systemProxyIcon}
-                            />
-                            <Icon style={{ marginLeft: '10px' }} type="menu" />
-                        </div>
-                    </Dropdown>
-                </>
-            );
+            return <>
+                <Dropdown overlay={menu}>
+                    <div className="whistle-status-bar-item">
+                        {t('Proxy')}
+                        {port ? `: [HTTP ${port}/SOCKS5 ${((port as unknown) as number) + 1}]` : null}{' '}
+                        <LegacyIcon
+                            style={{ marginRight: '10px', marginLeft: '5px' }}
+                            className={info.proxyClassName}
+                            type={info.proxyIcon}
+                        />
+                        {t('System Proxy')}
+                        <LegacyIcon
+                            style={{ marginLeft: '5px' }}
+                            className={info.systemProxyClassName}
+                            type={info.systemProxyIcon}
+                        />
+                        <MenuOutlined style={{ marginLeft: '10px' }} />
+                    </div>
+                </Dropdown>
+            </>;
         };
 
         return WhistleStatusbarItem;

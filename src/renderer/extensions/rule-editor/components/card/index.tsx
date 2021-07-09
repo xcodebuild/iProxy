@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { Select, Icon } from 'antd';
+import { Icon as LegacyIcon } from '@ant-design/compatible';
+import { Select } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { findDOMNode } from 'react-dom';
 
@@ -138,7 +139,7 @@ export const Card = (props: Props) => {
                     <Select.Option value={item.value} key={item.value}>
                         <div className="iproxy-select-item">
                             <span className="iproxy-select-icon">
-                                <Icon type={item.icon}></Icon>
+                                <LegacyIcon type={item.icon}></LegacyIcon>
                             </span>
                             <span className="iproxy-select-title">{t(item.title)}</span>
                         </div>

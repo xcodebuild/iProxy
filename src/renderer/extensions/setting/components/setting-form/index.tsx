@@ -1,4 +1,7 @@
-import { Form, Select, Button, Popover, Switch, InputNumber, Icon, Alert, Tooltip, Table } from 'antd';
+import { CheckOutlined, CloseOutlined, QuestionCircleOutlined } from '@ant-design/icons';
+import { Form } from '@ant-design/compatible';
+import '@ant-design/compatible/assets/index.css';
+import { Select, Button, Popover, Switch, InputNumber, Alert, Tooltip, Table } from 'antd';
 import React, { useEffect, useState } from 'react';
 import { CoreAPI } from '../../../../core-api';
 import { message } from 'antd';
@@ -133,16 +136,16 @@ class InnerSettingForm extends React.Component {
                     {getFieldDecorator('softwareWhiteList', {
                         valuePropName: 'checked',
                         initalValue: true,
-                    })(<Switch checkedChildren={<Icon type="check" />} unCheckedChildren={<Icon type="close" />} />)}
+                    })(<Switch checkedChildren={<CheckOutlined />} unCheckedChildren={<CloseOutlined />} />)}
                 </Form.Item>
 
                 <Form.Item label={t('Enable hotkey')}>
                     {getFieldDecorator('enableHotkeys', {
                         valuePropName: 'checked',
                         initalValue: false,
-                    })(<Switch checkedChildren={<Icon type="check" />} unCheckedChildren={<Icon type="close" />} />)}
+                    })(<Switch checkedChildren={<CheckOutlined />} unCheckedChildren={<CloseOutlined />} />)}
                     <Tooltip title={t('Toggle Proxy') + ' | Cmd/Ctrl+Shift+Alt+P'}>
-                        <Icon style={{ marginLeft: '5px' }} type="question-circle"></Icon>
+                        <QuestionCircleOutlined style={{ marginLeft: '5px' }}></QuestionCircleOutlined>
                     </Tooltip>
                 </Form.Item>
 
@@ -150,7 +153,7 @@ class InnerSettingForm extends React.Component {
                     {getFieldDecorator('disableTlsCheck', {
                         valuePropName: 'checked',
                         initalValue: true,
-                    })(<Switch checkedChildren={<Icon type="check" />} unCheckedChildren={<Icon type="close" />} />)}
+                    })(<Switch checkedChildren={<CheckOutlined />} unCheckedChildren={<CloseOutlined />} />)}
                 </Form.Item>
                 <Form.Item label={t('Default Port')}>
                     {getFieldDecorator('defaultPort')(<InputNumber min={1024} max={65534} />)}
