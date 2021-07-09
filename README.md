@@ -76,6 +76,3 @@ For new contributors you can try to fix a [🏅send-a-PR](https://github.com/xco
     <img src="https://contributors-img.web.app/image?repo=xcodebuild/iproxy"></img>
   </a>
 </p>
-
-> ICBU 端架构团队招聘
-> ❤️ 如果你擅长端技术，热爱开源，追求极致的用户体验和开发者体验，欢迎发简历到 xcodebuild+lp@gmail.com
