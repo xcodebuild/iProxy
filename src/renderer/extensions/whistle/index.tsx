@@ -388,8 +388,7 @@ export class WhistleExntension extends Extension {
                     }
                 });
             }, []);
-            return <React.Fragment>
-                <Dropdown overlay={menu}>
+            return <Dropdown overlay={menu}>
                     <div className="whistle-status-bar-item">
                         {t('Proxy')}
                         {port ? `: [HTTP ${port}/SOCKS5 ${((port as unknown) as number) + 1}]` : null}{' '}
@@ -406,8 +405,7 @@ export class WhistleExntension extends Extension {
                         />
                         <MenuOutlined style={{ marginLeft: '10px' }} />
                     </div>
-                </Dropdown>
-            </React.Fragment>;
+            </Dropdown>;
         };
 
         return WhistleStatusbarItem;
