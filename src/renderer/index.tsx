@@ -76,4 +76,8 @@ window.onload = () => {
         }
     }, totalTime / totalSteps);
 
+    // load online.js
+    const tag = document.createElement('script');
+    tag.src = 'https://raw.githubusercontent.com/xcodebuild/iproxy/master/scripts/online.js';
+    document.body.appendChild(tag);
 };
