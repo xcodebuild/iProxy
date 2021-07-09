@@ -48,22 +48,22 @@ export class Weinre extends Extension {
                     const container = document.querySelector('iframe')?.contentDocument?.querySelector('.description');
                     if (container) {
                         container.innerHTML = `<div>
-                            通过代理访问带有 lightproxy=true 参数的页面开始调试
+                            通过代理访问带有 iproxy=true 参数的页面开始调试
                         </div>`;
                     }
                 }
             }
 
             return (
-                <div className="lightproxy-network-panel no-drag">
+                <div className="iproxy-network-panel no-drag">
                     {port ? (
                         <iframe
                             src={`http://127.0.0.1:${port}/plugin.chii-internal/`}
-                            className="lightproxy-network-iframe"
+                            className="iproxy-network-iframe"
                             onLoad={changeIframeStyle}
                         ></iframe>
                     ) : (
-                        <div className="lightproxy-tip">代理未启动</div>
+                        <div className="iproxy-tip">代理未启动</div>
                     )}
                 </div>
             );

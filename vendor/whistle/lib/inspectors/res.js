@@ -33,7 +33,7 @@ var BODY_PROTOCOLS = ['attachment', 'resReplace', 'resBody', 'resPrepend', 'resA
   'cssBody', 'cssPrepend', 'cssAppend', 'resWrite', 'resWriteRaw', 'resMerge'];
 var BODY_PROTOCOLS_LEN = BODY_PROTOCOLS.length;
 
-const boardcastPort = process.env.LIGHTPROXY_BOARDCASR_PORT;
+const boardcastPort = process.env.IPROXY_BOARDCASR_PORT;
 
 console.log('Whistle get boardcast port', boardcastPort);
 
@@ -893,14 +893,14 @@ module.exports = function(req, res, next) {
                     headers['x-host-ip'] = req.hostIp || LOCALHOST;
                   }
                   const ruleRaw = req.rules && req.rules.rule && req.rules.rule.raw;
-                  headers['__lightproxy-host-ip__'] = req.hostIp || LOCALHOST;
+                  headers['__iproxy-host-ip__'] = req.hostIp || LOCALHOST;
 
                   const strwrap = (str) => str.replace(/[^\x00-\x7F]/g, '_');
 
-                  headers['__lightproxy-rules__'] = strwrap(JSON.stringify(ruleRaw) || 'none');
-                  headers['__lightproxy-real-url__'] = strwrap(req.realUrl || 'none');
+                  headers['__iproxy-rules__'] = strwrap(JSON.stringify(ruleRaw) || 'none');
+                  headers['__iproxy-real-url__'] = strwrap(req.realUrl || 'none');
 
-                  headers['__lightproxy-help__'] = 'See https://github.com/alibaba/lightproxy';
+                  headers['__iproxy-help__'] = 'See https://github.com/xcodebuild/iproxy';
                   // clientReady.then(() => {
                   //   wsClient.send(
                   //     'whistle-hit'.padEnd(50, ' ') +

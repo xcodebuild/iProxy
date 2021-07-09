@@ -1,38 +1,27 @@
-![Build](https://github.com/alibaba/lightproxy/workflows/Build/badge.svg)
-![Build doc and Deploy](https://github.com/alibaba/lightproxy/workflows/Build%20and%20Deploy/badge.svg)
-![Stable version](https://img.shields.io/badge/dynamic/json?url=https://gw.alipayobjects.com/os/LightProxy/release.json&label=Stable%20Version&query=$.version)
-![Beta version](https://img.shields.io/badge/dynamic/json?url=https://gw.alipayobjects.com/os/LightProxy/beta-release.json&label=Beta%20Version&query=$.version)
-![GitHub issues](https://img.shields.io/github/issues/alibaba/lightproxy)
-![GitHub closed issues](https://img.shields.io/github/issues-closed-raw/alibaba/lightproxy)
-[![HitCount](http://hits.dwyl.com/alibaba/lightproxy.svg)](http://hits.dwyl.com/alibaba/lightproxy)
+![Build](https://github.com/xcodebuild/iproxy/workflows/Build/badge.svg)
+![GitHub issues](https://img.shields.io/github/issues/xcodebuild/iproxy)
+![GitHub closed issues](https://img.shields.io/github/issues-closed-raw/xcodebuild/iproxy)
+[![HitCount](http://hits.dwyl.com/xcodebuild/iproxy.svg)](http://hits.dwyl.com/xcodebuild/iproxy)
 
 
 <p align="center">
-   <a href="https://lightproxy.org">
+   <a href="https://www.yuque.com/iproxy">
     <img src="./vendor/files/icon.png" height="150px"/>
   </a>
 </p>
 
 <p align="center">
-<b><a href="https://lightproxy.org/doc/getting-started#download">Download</a></b>
+<b><a href="https://www.yuque.com/iproxy">Download</a></b>
 |
-<b><a href="https://lightproxy.org/doc/getting-started">Document</a></b>
-|
-<b><a href="CONTRIBUTING.org">Contribute</a></b>
-|
-  <b><a href="https://github.com/alibaba/lightproxy/issues/117">Introduction</a></b>
-|
-<b><a href="https://github.com/alibaba/lightproxy/issues/19">介绍文章</a></b>
-|
-<b><a href="https://alibaba.github.io/lightproxy/start-proxy-only.html">FAQ</a></b>
+<b><a href="https://www.yuque.com/iproxy">Document</a></b>
 
 </p>
 <p align="center">
-<a href="https://www.producthunt.com/posts/lightproxy?utm_source=badge-featured&utm_medium=badge&utm_souce=badge-lightproxy" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=195432&theme=light" alt="LightProxy - Open-source proxy tools for macOS & Windows based on whistle | Product Hunt Embed" style="width: 250px; height: 54px;" width="250px" height="54px" /></a>
+<a href="https://www.producthunt.com/posts/iproxy?utm_source=badge-featured&utm_medium=badge&utm_souce=badge-iproxy" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=195432&theme=light" alt="iProxy - Open-source proxy tools for macOS & Windows based on whistle | Product Hunt Embed" style="width: 250px; height: 54px;" width="250px" height="54px" /></a>
 </p>
 
 <p align="center">
-  <a href="https://lightproxy.org">
+  <a href="https://www.yuque.com/iproxy">
     <img src="https://img.alicdn.com/tfs/TB157bJF.T1gK0jSZFrXXcNCXXa-1393-921.png"></img>
     <img src="https://img.alicdn.com/tfs/TB1vd0uGYj1gK0jSZFOXXc7GpXa-1549-1018.png"></img>
   </a>
@@ -55,13 +44,13 @@
 
 ## Download
 
-[macOS Version Download](https://gw.alipayobjects.com/os/LightProxy/LightProxy.dmg)
+[macOS Version Download](https://gw.alipayobjects.com/os/iProxy/iProxy.dmg)
 
-[Windows Version Download](https://gw.alipayobjects.com/os/LightProxy/LightProxy-Setup.exe)
+[Windows Version Download](https://gw.alipayobjects.com/os/iProxy/iProxy-Setup.exe)
 
 ## Quick Start
 
-Take a quick start at: https://lightproxy.org/doc/getting-started
+Take a quick start at: https://iproxy.org/doc/getting-started
 
 ## How to contribute
 
@@ -73,19 +62,19 @@ Take a quick start at: https://lightproxy.org/doc/getting-started
 ### dev
 
 ```shell
-git clone https://github.com/alibaba/lightproxy
-cd lightproxy
+git clone https://github.com/xcodebuild/iproxy
+cd iproxy
 yarn run install-deps
 yarn run dev
 ```
 
-For new contributors you can try to fix a [🏅send-a-PR](https://github.com/alibaba/lightproxy/issues?q=is%3Aissue+is%3Aopen+label%3A%22%F0%9F%8F%85send+a+PR%22)
+For new contributors you can try to fix a [🏅send-a-PR](https://github.com/xcodebuild/iproxy/issues?q=is%3Aissue+is%3Aopen+label%3A%22%F0%9F%8F%85send+a+PR%22)
 
 
 ## Contributors ✨
 <p align="center">
-  <a href="https://github.com/alibaba/lightproxy/graphs/contributors">
-    <img src="https://contributors-img.web.app/image?repo=alibaba/lightproxy"></img>
+  <a href="https://github.com/xcodebuild/iproxy/graphs/contributors">
+    <img src="https://contributors-img.web.app/image?repo=xcodebuild/iproxy"></img>
   </a>
 </p>
 

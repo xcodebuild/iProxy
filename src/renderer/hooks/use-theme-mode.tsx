@@ -2,7 +2,9 @@
 import React, { useEffect, useState, useContext, useCallback } from 'react';
 import { CoreAPI } from '../core-api';
 
+// @ts-ignore
 import darkTheme from '../style/theme/dark.lazy.less';
+// @ts-ignore
 import defaultTheme from '../style/theme/default.lazy.less';
 
 export enum ThemeModeEnum {

@@ -1,9 +1,9 @@
-.lightproxy-rule-list {
+.iproxy-rule-list {
     background-color: @rule-list-bgcolor;
     height: calc(100% + 3px);
     overflow: scroll;
 }
-.lightproxy-rule-list-item {
+.iproxy-rule-list-item {
     padding: 8px 15px 8px 15px;
     width: 160px;
     font-size: @rule-item-font-size;
@@ -19,7 +19,7 @@
         position: absolute;
         right: 15px;
         top: 50%;
-        color: #a7e1c4;
+        color: #cf1322;
         transform: translateY(-50%);
     }
 
@@ -27,6 +27,7 @@
 
     &.selected {
         background-color: @rule-item-selected-bgcolor;
+        color: @rule-item-selected-color !important;
         border-bottom: none;
     }
 
@@ -36,13 +37,13 @@
 
 }
 
-.lightproxy-rule-actionbar {
+.iproxy-rule-actionbar {
     text-align: right;
     background-color: @rule-list-bgcolor;
     width: 160px;
     height: 35px;
 
-    .lightproxy-add-rule-btn {
+    .iproxy-add-rule-btn {
         height: auto;
         margin-top: 5px;
         * {

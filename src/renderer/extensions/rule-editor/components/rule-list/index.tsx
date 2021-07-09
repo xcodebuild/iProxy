@@ -42,7 +42,7 @@ interface Props {
     saveRules: (rules: Rule[]) => void;
 }
 
-// to fix https://github.com/alibaba/lightproxy/issues/14
+// to fix https://github.com/xcodebuild/iproxy/issues/14
 // save tab status here
 const editorStatus = {} as {
     [index: number]:
@@ -65,7 +65,7 @@ export const RuleList = (props: Props) => {
             name: 'Default',
             enabled: true,
             uuid: 'Default',
-            content: `# LightProxy Default Rules, Input / to insert
+            content: `# iProxy Default Rules, Input / to insert
 # ${t('Default rule to keep some daily-software works behind proxy')}
 # command+s to save
 # Double click to enable/disable rule
@@ -83,7 +83,7 @@ export const RuleList = (props: Props) => {
 # mapping by wildcard
 # ^https://*.example.com file:///User/xxx/xxx.html
 
-# More usage follow document: https://alibaba.github.io/lightproxy/quick-start.html
+# More usage follow document: https://www.yuque.com/iproxy
 
 `,
         },
@@ -109,7 +109,7 @@ export const RuleList = (props: Props) => {
                     .concat([
                         {
                             uuid: '[internal-debugger-on]',
-                            content: `/lightproxy=true/ whistle.chii-internal://[lightproxy-debug]`,
+                            content: `/iproxy=true/ whistle.chii-internal://[iproxy-debug]`,
                             enabled: true,
                             name: '[internal-debugger-on]',
                         },
@@ -242,10 +242,10 @@ export const RuleList = (props: Props) => {
         const handler = (index: number) => {
             toggleRuleEnabledRef.current(index);
         };
-        CoreAPI.eventEmmitter.on('lightproxy-toggle-rule', handler);
+        CoreAPI.eventEmmitter.on('iproxy-toggle-rule', handler);
 
         return () => {
-            CoreAPI.eventEmmitter.off('lightproxy-toggle-rule', handler);
+            CoreAPI.eventEmmitter.off('iproxy-toggle-rule', handler);
         };
     }, []);
 
@@ -299,9 +299,9 @@ export const RuleList = (props: Props) => {
 
     return (
         <div style={{ height: '100%' }}>
-            <div className="lightproxy-rule-actionbar drag">
+            <div className="iproxy-rule-actionbar drag">
                 <Popover content={t('New Rule')} trigger="hover">
-                    <Button onClick={handleAddRule} className="no-drag lightproxy-add-rule-btn">
+                    <Button onClick={handleAddRule} className="no-drag iproxy-add-rule-btn">
                         <Icon type="form" />
                     </Button>
                 </Popover>
@@ -310,13 +310,13 @@ export const RuleList = (props: Props) => {
                 <Droppable droppableId="droppable">
                     {provided => (
                         <div
-                            className="lightproxy-rule-list no-drag"
+                            className="iproxy-rule-list no-drag"
                             {...provided.droppableProps}
                             ref={provided.innerRef}
                         >
                             {ruleList.map((item, index) => {
                                 const className = classnames({
-                                    'lightproxy-rule-list-item': true,
+                                    'iproxy-rule-list-item': true,
                                     selected: index === selected,
                                     enabled: !item.rename && item.enabled,
                                 });

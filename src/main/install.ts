@@ -15,8 +15,8 @@ import { execSync } from 'child_process';
 import {
     CERT_KEY_FILE_NAME,
     CERT_FILE_NAME,
-    LIGHTPROXY_CERT_DIR_PATH,
-    LIGHTPROXY_CERT_KEY_PATH,
+    IPROXY_CERT_DIR_PATH,
+    IPROXY_CERT_KEY_PATH,
     SYSTEM_IS_MACOS,
     PROXY_CONF_HELPER_PATH,
     PROXY_CONF_HELPER_FILE_PATH,
@@ -29,7 +29,7 @@ import logger from 'electron-log';
 const pki = forge.pki;
 
 const sudoOptions = {
-    name: 'LightProxy',
+    name: 'iProxy',
 };
 
 async function generateCert() {
@@ -46,7 +46,7 @@ async function generateCert() {
         const attrs = [
             {
                 name: 'commonName',
-                value: 'LightProxy-' + new Date().toISOString().slice(0, 10),
+                value: 'iProxy-' + new Date().toISOString().slice(0, 10),
             },
             {
                 name: 'countryName',
@@ -62,11 +62,11 @@ async function generateCert() {
             },
             {
                 name: 'organizationName',
-                value: 'LightProxy',
+                value: 'iProxy',
             },
             {
                 shortName: 'OU',
-                value: 'https://github.com/alibaba/lightproxy',
+                value: 'https://github.com/xcodebuild/iproxy',
             },
         ];
 
@@ -131,7 +131,7 @@ export async function installCertAndHelper() {
 
     const formatPath = (path: string) => '"' + path + '"';
 
-    const INSTALL_DONE_FILE = '/tmp/lightproxy-install-done';
+    const INSTALL_DONE_FILE = '/tmp/iproxy-install-done';
     // 信任证书 & 安装 helper
     const installPromise = new Promise((resolve, reject) => {
         if (SYSTEM_IS_MACOS) {
@@ -176,6 +176,7 @@ export async function installCertAndHelper() {
             console.log('run command', command);
             try {
                 const output = execSync(command, {
+                    // @ts-ignore
                     windowsHide: true,
                 });
                 console.log('certutil result', output.toString());
@@ -200,16 +201,16 @@ export async function installCertAndHelper() {
 
     console.log('after install');
     // 信任完成，把证书目录拷贝过去
-    await fs.copyAsync(dir, LIGHTPROXY_CERT_DIR_PATH);
+    await fs.copyAsync(dir, IPROXY_CERT_DIR_PATH);
     console.log('copy cert done');
 }
 
 async function checkCertInstall() {
-    const certKeyExist = await fs.existsAsync(LIGHTPROXY_CERT_KEY_PATH);
+    const certKeyExist = await fs.existsAsync(IPROXY_CERT_KEY_PATH);
     if (!certKeyExist) {
         return false;
     }
-    const { ctimeMs } = await fs.statAsync(LIGHTPROXY_CERT_KEY_PATH);
+    const { ctimeMs } = await fs.statAsync(IPROXY_CERT_KEY_PATH);
 
     // expire at 11 month(cert expire in 1 year in fact)
     const expireTime = ctimeMs + 11 * 30 * 24 * 60 * 60 * 1000;

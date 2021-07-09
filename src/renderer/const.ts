@@ -8,11 +8,11 @@ export const FILES_DIR = remote.getGlobal('__filesDir');
 // @ts-ignore
 export const ICON_TEMPLATE_PATH = path.join(FILES_DIR, 'iconTemplate.png');
 
-export const RULE_STORE_KEY = 'lightproxy-rule';
+export const RULE_STORE_KEY = 'iproxy-rule';
 
-export const GITHUB_PROJECT_PAGE = 'https://github.com/alibaba/lightproxy';
-export const NEW_ISSUE_PAGE = 'https://github.com/alibaba/lightproxy/issues/new';
-export const DOCUMENT_URL = 'https://alibaba.github.io/lightproxy/quick-start.html';
+export const GITHUB_PROJECT_PAGE = 'https://github.com/xcodebuild/iproxy';
+export const NEW_ISSUE_PAGE = 'https://github.com/xcodebuild/iproxy/issues/new';
+export const DOCUMENT_URL = 'https://www.yuque.com/iproxy';
 
 // @ts-ignore
 export const IS_BUILD_FOR_PR = __BUILD_FOR_TRAVIS_PR__ ? true : false;

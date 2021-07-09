@@ -129,17 +129,6 @@ class InnerSettingForm extends React.Component {
         };
         return (
             <Form {...formItemLayout}>
-                <Form.Item label={t('Update Channel')}>
-                    {getFieldDecorator(
-                        'updateChannel',
-                        {},
-                    )(
-                        <Select>
-                            <Select.Option value="stable">{t('Stable')}</Select.Option>
-                            <Select.Option value="beta">{t('Beta')}</Select.Option>
-                        </Select>,
-                    )}
-                </Form.Item>
                 <Form.Item label={t('Daily software white-list')}>
                     {getFieldDecorator('softwareWhiteList', {
                         valuePropName: 'checked',
@@ -152,7 +141,7 @@ class InnerSettingForm extends React.Component {
                         valuePropName: 'checked',
                         initalValue: false,
                     })(<Switch checkedChildren={<Icon type="check" />} unCheckedChildren={<Icon type="close" />} />)}
-                    <Tooltip title={t('Toggle Proxy') + ' | Cmd/Ctrl+Shift+Alt+L'}>
+                    <Tooltip title={t('Toggle Proxy') + ' | Cmd/Ctrl+Shift+Alt+P'}>
                         <Icon style={{ marginLeft: '5px' }} type="question-circle"></Icon>
                     </Tooltip>
                 </Form.Item>
@@ -166,7 +155,7 @@ class InnerSettingForm extends React.Component {
                 <Form.Item label={t('Default Port')}>
                     {getFieldDecorator('defaultPort')(<InputNumber min={1024} max={65534} />)}
                 </Form.Item>
-                <Form.Item label={t('Copyright')}>Version {version} Made by IFE Team with love</Form.Item>
+                <Form.Item label={t('Copyright')}>Version {version} Made with love</Form.Item>
                 <Form.Item label={t('Actions')}>
                     <Button className="action-btn" loading={this.state.isUpdating} onClick={checkUpdate} type="primary">
                         {t('Check Update')}
@@ -180,7 +169,7 @@ class InnerSettingForm extends React.Component {
                     >
                         <Button
                             onClick={() => {
-                                shell.openExternal('https://github.com/alibaba/lightproxy');
+                                shell.openExternal('https://github.com/xcodebuild/iproxy');
                             }}
                             className="action-btn"
                         >
@@ -200,7 +189,7 @@ class InnerSettingForm extends React.Component {
 const saveSettings = debounce((props, changedValues, allValues) => {
     const { t } = props;
     CoreAPI.store.set('settings', allValues);
-    CoreAPI.eventEmmitter.emit('lightproxy-settings-changed', { changedValues });
+    CoreAPI.eventEmmitter.emit('iproxy-settings-changed', { changedValues });
     message.destroy();
     message.success(t('Saved'));
 }, 500);

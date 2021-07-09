@@ -6,13 +6,13 @@ import { remote } from 'electron';
 import { CoreAPI } from '../../../../core-api';
 import { WHITELIST_DOMAINS } from '../../../../const';
 
-const MAGIC_RULE_DISABLE_HTTPS = '#LIGHTPROXY_MAGIC_DISABLE_HTTPS#';
-const MAGIC_RULE_DISABLE_HTTP2 = '#LIGHTPROXY_MAGIC_DISABLE_HTTP2#';
+const MAGIC_RULE_DISABLE_HTTPS = '#IPROXY_MAGIC_DISABLE_HTTPS#';
+const MAGIC_RULE_DISABLE_HTTP2 = '#IPROXY_MAGIC_DISABLE_HTTP2#';
 
 // some custom extend of whistle
 function extendRule(index: number, content: string) {
     const extendContent = content.replace(/`([^]*?)`/g, (match, innerContent, offset) => {
-        const dir = path.join(os.tmpdir(), '/lightproxy');
+        const dir = path.join(os.tmpdir(), '/iproxy');
         fs.mkdir(dir, () => {
             // pass
         });
@@ -64,7 +64,7 @@ export function syncRuleToWhistle(rules: Rule[], port: number) {
     const settings = CoreAPI.store.get('settings') || {};
     const softwareWhiteList = settings['softwareWhiteList'] === false ? false : true;
 
-    const RULE_SPLIT = "\n# ======== Generate by LightProxy, don't modify ========\n";
+    const RULE_SPLIT = "\n# ======== Generate by iProxy, don't modify ========\n";
 
     const WHITE_LIST_DOMAIN_STR = WHITELIST_DOMAINS.join(' ');
     const genRuleContent =

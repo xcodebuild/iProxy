@@ -58,10 +58,10 @@ const toggleSystemProxy = async (onlineStatus: string, port: number, coreAPI: an
     console.log('toggle proxy', { onlineStatus, port });
     if (onlineStatus === 'online') {
         await enableSystemProxy(port);
-        showNotification('LightProxy enabled', 'LightProxy enabled');
+        showNotification('iProxy enabled', 'iProxy enabled');
     } else if (onlineStatus === 'ready') {
         await diableSystemProxy();
-        showNotification('LightProxy disabled', 'LightProxy disabled');
+        showNotification('iProxy disabled', 'iProxy disabled');
     }
     coreAPI.store.set('onlineStatus', onlineStatus);
 };
@@ -89,7 +89,7 @@ export class WhistleExntension extends Extension {
 
     initGlobalKey() {
         const enableHotkeys = CoreAPI.store.get('settings')?.enableHotkeys;
-        const key = `CommandOrControl+Shift+Alt+l`;
+        const key = `CommandOrControl+Shift+Alt+p`;
         if (enableHotkeys) {
             globalShortcut.register(key, () => {
                 this.toggleSystemProxy();
@@ -139,7 +139,7 @@ export class WhistleExntension extends Extension {
 
                     onlineStatus === 'online' && toggleSystemProxy(onlineStatus, port, this.coreAPI);
 
-                    this.coreAPI.eventEmmitter.on('lightproxy-toggle-system-proxy', async () => {
+                    this.coreAPI.eventEmmitter.on('iproxy-toggle-system-proxy', async () => {
                         this.toggleSystemProxy();
                     });
                 }
@@ -148,7 +148,7 @@ export class WhistleExntension extends Extension {
             setTimeout(() => {
                 this.initGlobalKey();
             });
-            CoreAPI.eventEmmitter.on('lightproxy-settings-changed', ({ changedValues }) => {
+            CoreAPI.eventEmmitter.on('iproxy-settings-changed', ({ changedValues }) => {
                 if ('enableHotkeys' in changedValues) {
                     this.initGlobalKey();
                 }
@@ -167,7 +167,7 @@ export class WhistleExntension extends Extension {
             await this.startWhistle();
         })();
 
-        this.coreAPI.eventEmmitter.on('lightproxy-restart-proxy-with-lan', () => {
+        this.coreAPI.eventEmmitter.on('iproxy-restart-proxy-with-lan', () => {
             this.mVisiableOnLan = true;
             this.startWhistle(true);
         });
@@ -212,7 +212,7 @@ export class WhistleExntension extends Extension {
         }
 
         const options = {
-            // LIGHTPROXY_DEVTOOLS_PORT: '' + this.mDevtoolPort,
+            // IPROXY_DEVTOOLS_PORT: '' + this.mDevtoolPort,
             DEFAULT_PORT: defaultPort,
             WHISTLE_HOST: visiableOnLan ? '0.0.0.0' : '127.0.0.1',
             WHISTLE_USERNAME: this.mUserName,
@@ -282,7 +282,7 @@ export class WhistleExntension extends Extension {
                 const handler = () => {
                     setOnlineState(this.coreAPI.store.get('onlineStatus'));
                 };
-                this.coreAPI.eventEmmitter.on('lightproxy-toggle-system-proxy', handler);
+                this.coreAPI.eventEmmitter.on('iproxy-toggle-system-proxy', handler);
 
                 const showReEnableProxyModal = () => {
                     confirm({
@@ -325,7 +325,7 @@ export class WhistleExntension extends Extension {
 
                 return () => {
                     client?.close();
-                    this.coreAPI.eventEmmitter.off('lightproxy-toggle-system-proxy', handler);
+                    this.coreAPI.eventEmmitter.off('iproxy-toggle-system-proxy', handler);
                     clearInterval(checkTimer);
                 };
             }, []);

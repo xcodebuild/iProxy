@@ -10,7 +10,7 @@ interface Props {
     y: number;
 }
 
-const MOCK_PATH = 'github.com/alibaba/lightproxy';
+const MOCK_PATH = 'github.com/xcodebuild/iproxy';
 
 const options = [
     {
@@ -136,11 +136,11 @@ export const Card = (props: Props) => {
             {options.map(item => {
                 return (
                     <Select.Option value={item.value} key={item.value}>
-                        <div className="lightproxy-select-item">
-                            <span className="lightproxy-select-icon">
+                        <div className="iproxy-select-item">
+                            <span className="iproxy-select-icon">
                                 <Icon type={item.icon}></Icon>
                             </span>
-                            <span className="lightproxy-select-title">{t(item.title)}</span>
+                            <span className="iproxy-select-title">{t(item.title)}</span>
                         </div>
                     </Select.Option>
                 );

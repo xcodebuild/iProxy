@@ -16,7 +16,6 @@ import electronIsDev from 'electron-is-dev';
 
 import { format as formatUrl } from 'url';
 import { initIPC } from './api';
-import { checkUpdater } from './updater';
 import { hideOrQuit } from './platform';
 import { installCertAndHelper } from './install';
 
@@ -30,8 +29,8 @@ import {
     SYSTEM_IS_MACOS,
     NEW_ISSUE_PAGE,
     GITHUB_PROJECT_PAGE,
-    LIGHTPROXY_HOME_PATH,
-    LIGHTPROXY_FILES_DIR,
+    IPROXY_HOME_PATH,
+    IPROXY_FILES_DIR,
     APP_VERSION,
     IS_BUILD_FOR_PR,
 } from './const';
@@ -115,13 +114,13 @@ function copyFolderRecursiveSync(source: string, target: string) {
 global.__static = __static;
 
 // @ts-ignore
-global.__filesDir = LIGHTPROXY_FILES_DIR;
+global.__filesDir = IPROXY_FILES_DIR;
 
-const LIGHTPROXY_FILES_IN_ASAR_PATH = electronIsDev
+const IPROXY_FILES_IN_ASAR_PATH = electronIsDev
     ? path.join(__dirname, '../../vendor/files/')
     : path.join(__dirname, './files/');
 
-const LIGHTPROXY_FILES_ZIP_IN_ASAR_PATH = electronIsDev
+const IPROXY_FILES_ZIP_IN_ASAR_PATH = electronIsDev
     ? path.join(__dirname, '../../vendor/files.zip')
     : path.join(__dirname, './files.zip');
 
@@ -134,12 +133,12 @@ async function initSplashScreen() {
             'data:text/html;charset=UTF-8,' +
             encodeURIComponent(
                 splash({
-                    brand: 'IFE Team with ♥',
-                    productName: `LightProxy`,
+                    brand: 'Build with ♥',
+                    productName: `iProxy`,
                     text: `Loading - ${version} ...`,
-                    website: 'https://github.com/alibaba/lightproxy',
+                    website: 'https://github.com/xcodebuild/iproxy',
                     logo: logoIcon,
-                    color: '#0c60aa',
+                    color: '#242424',
                 }),
             );
 
@@ -147,7 +146,7 @@ async function initSplashScreen() {
             width: 600,
             height: 400,
             frame: false,
-            backgroundColor: '#0c60aa',
+            backgroundColor: '#242424',
             // modal: true,
             // transparent: true,
             autoHideMenuBar: true,
@@ -158,6 +157,7 @@ async function initSplashScreen() {
         splashWindow.loadURL(splashContent);
 
         splashWindow.webContents.on('did-finish-load', () => {
+            // @ts-ignore
             resolve();
         });
         splashWindow.show();
@@ -166,47 +166,31 @@ async function initSplashScreen() {
 
 async function initCopyFiles() {
     try {
-        if (!fs.existsSync(LIGHTPROXY_FILES_DIR)) {
-            fs.mkdirpSync(LIGHTPROXY_FILES_DIR);
+        if (!fs.existsSync(IPROXY_FILES_DIR)) {
+            fs.mkdirpSync(IPROXY_FILES_DIR);
         }
 
-        const versionFile = path.join(LIGHTPROXY_FILES_DIR, 'version');
+        const versionFile = path.join(IPROXY_FILES_DIR, 'version');
         if (fs.existsSync(versionFile) && fs.readFileSync(versionFile, 'utf-8') === version && !electronIsDev) {
             // pass
         } else {
             console.log('copy files');
-            fs.removeSync(LIGHTPROXY_FILES_DIR);
+            fs.removeSync(IPROXY_FILES_DIR);
 
-            await extract(LIGHTPROXY_FILES_ZIP_IN_ASAR_PATH, {
-                dir: LIGHTPROXY_HOME_PATH,
+            await extract(IPROXY_FILES_ZIP_IN_ASAR_PATH, {
+                dir: IPROXY_HOME_PATH,
             });
 
-            // copyFolderRecursiveSync(LIGHTPROXY_FILES_IN_ASAR_PATH, LIGHTPROXY_HOME_PATH);
-            // fs.chmodSync(LIGHTPROXY_NODEJS_PATH, '775');
+            // copyFolderRecursiveSync(IPROXY_FILES_IN_ASAR_PATH, IPROXY_HOME_PATH);
+            // fs.chmodSync(IPROXY_NODEJS_PATH, '775');
             fs.moveSync(
-                path.join(LIGHTPROXY_FILES_DIR, '/node/modules'),
-                path.join(LIGHTPROXY_FILES_DIR, '/node/node_modules'),
+                path.join(IPROXY_FILES_DIR, '/node/modules'),
+                path.join(IPROXY_FILES_DIR, '/node/node_modules'),
             );
             fs.writeFileSync(versionFile, version, 'utf-8');
         }
     } catch (e) {
         console.error(e);
-    }
-}
-
-function initUpdate() {
-    if (IS_BUILD_FOR_PR) {
-        return;
-    }
-    const timer = setInterval(async () => {
-        const result = await checkUpdater();
-        if (result) {
-            clearInterval(timer);
-        }
-    }, 1000 * 60 * 60);
-
-    if (process.argv.indexOf('--update') !== -1) {
-        checkUpdater();
     }
 }
 
@@ -227,8 +211,8 @@ function createMainWindow() {
             webSecurity: false,
             // electron >= 10
             enableRemoteModule: true,
+            contextIsolation: false,
         },
-        // https://github.com/alibaba/lightproxy/issues/22
         // disable frameless in Windows
         frame: SYSTEM_IS_MACOS ? false : true,
         x: mainWindowState.x,
@@ -377,7 +361,7 @@ function setApplicationMenu() {
                 await installCertAndHelper();
                 dialog.showMessageBox({
                     type: 'info',
-                    message: 'Install Done, LightProxy will restart',
+                    message: 'Install Done, iProxy will restart',
                 });
                 app.relaunch();
                 app.quit();
@@ -431,7 +415,6 @@ app.on('activate', () => {
 app.on('ready', async () => {
     appReady = true;
     await initSplashScreen();
-    initUpdate();
     await initCopyFiles();
     mainWindow = createMainWindow();
     setApplicationMenu();
@@ -443,7 +426,7 @@ app.on('ready', async () => {
 
     const userid = CoreAPI.store.get('userid');
 
-    const visitor = ua('UA-154996514-1', userid);
+    const visitor = ua('G-H3TWZC29B2', userid);
 
     // app-version
     visitor.set('cd1', version);
@@ -455,7 +438,7 @@ app.on('ready', async () => {
 
     const screenview = () => {
         visitor
-            .screenview('App', 'LightProxy', version, err => {
+            .screenview('App', 'iProxy', version, err => {
                 console.error(err);
             })
             .send();

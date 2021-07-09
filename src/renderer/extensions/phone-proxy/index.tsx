@@ -28,7 +28,7 @@ export class PhoneProxy extends Extension {
             const { t } = useTranslation();
 
             useEffect(() => {
-                this.coreAPI.eventEmmitter.emit('lightproxy-restart-proxy-with-lan');
+                this.coreAPI.eventEmmitter.emit('iproxy-restart-proxy-with-lan');
                 message.info(t('Visiable on LAN enabled'));
             }, []);
 
@@ -59,8 +59,8 @@ export class PhoneProxy extends Extension {
 
 
             return (
-                <div className="lightproxy-phoneproxy-container">
-                    <div className="lightproxy-phoneproxy-qrcode">
+                <div className="iproxy-phoneproxy-container">
+                    <div className="iproxy-phoneproxy-qrcode">
                         <QrCode size={256} value={`http://${address}:${port}/cgi-bin/rootca`}></QrCode>
                     </div>
                     <div className="title">

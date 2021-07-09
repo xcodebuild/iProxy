@@ -48,7 +48,7 @@ export class WhistlePanel extends Extension {
                     const src = `http://127.0.0.1:${port}/#network`;
                     if (whistleIframe.src !== src) {
                         whistleIframe.onload = changeIframeStyle;
-                        whistleIframe.classList.add('lightproxy-network-iframe');
+                        whistleIframe.classList.add('iproxy-network-iframe');
                         whistleIframe.style.display = 'block';
                         whistleIframe.src = src;
                     }
@@ -65,8 +65,8 @@ export class WhistlePanel extends Extension {
             }, []);
 
             return (
-                <div className="lightproxy-network-panel no-drag">
-                    {port ? <></> : <div className="lightproxy-tip">代理未启动</div>}
+                <div className="iproxy-network-panel no-drag">
+                    {port ? <></> : <div className="iproxy-tip">代理未启动</div>}
                 </div>
             );
         };

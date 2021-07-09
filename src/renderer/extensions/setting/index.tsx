@@ -33,8 +33,8 @@ export class Setting extends Extension {
             }
 
             return (
-                <div className="lightproxy-setting no-drag">
-                    {/* <p>LightProxy poweredby Whistle & Electron</p>
+                <div className="iproxy-setting no-drag">
+                    {/* <p>iProxy poweredby Whistle & Electron</p>
                     <p>Made with love by IFE</p>
                     <p>Version {version}</p> */}
                     <SettingFormComponent t={t} settings={settings} />

@@ -22,7 +22,7 @@ async function buildTrayContextMenu() {
             label: item.name,
             checked: item.enabled,
             async click() {
-                CoreAPI.eventEmmitter.emit('lightproxy-toggle-rule', index);
+                CoreAPI.eventEmmitter.emit('iproxy-toggle-rule', index);
                 // await ipc.callRenderer(mainWindow, 'toggle-rule', item.id);
             },
         };
@@ -36,7 +36,7 @@ async function buildTrayContextMenu() {
             label: t('System Proxy'),
             checked: online,
             async click() {
-                CoreAPI.eventEmmitter.emit('lightproxy-toggle-system-proxy');
+                CoreAPI.eventEmmitter.emit('iproxy-toggle-system-proxy');
             },
         },
         { type: 'separator' },
@@ -99,7 +99,7 @@ export class RuleEditor extends Extension {
 
             tray.on('mouse-move', buildTrayContextMenu);
             tray.on('click', buildTrayContextMenu);
-            tray.setToolTip('LightProxy');
+            tray.setToolTip('iProxy');
         })();
     }
 

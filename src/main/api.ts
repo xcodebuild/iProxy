@@ -10,7 +10,7 @@ import treeKill from 'tree-kill';
 import ip from 'ip';
 import { checkUpdater } from './updater';
 import path from 'path';
-import { LIGHTPROXY_FILES_DIR, SYSTEM_IS_MACOS } from './const';
+import { IPROXY_FILES_DIR, SYSTEM_IS_MACOS } from './const';
 import { app, nativeTheme, BrowserWindow } from 'electron';
 import http from 'http';
 
@@ -30,12 +30,12 @@ async function spawnModule(props: any) {
 
     logger.info('boardcast port', boardcastPort);
 
-    const nodeModulePath = path.join(LIGHTPROXY_FILES_DIR, `/node/node_modules/`);
+    const nodeModulePath = path.join(IPROXY_FILES_DIR, `/node/node_modules/`);
     const modulePath = encodeURIComponent(path.join(nodeModulePath, `${moduleId}/index.js`));
 
     const nodeExe = SYSTEM_IS_MACOS
-        ? path.join(LIGHTPROXY_FILES_DIR, './node/node-mac')
-        : path.join(LIGHTPROXY_FILES_DIR, './node/node-win.exe');
+        ? path.join(IPROXY_FILES_DIR, './node/node-mac')
+        : path.join(IPROXY_FILES_DIR, './node/node-win.exe');
 
     const nodeScript = `
 const cp = require('child_process');
@@ -68,7 +68,7 @@ require(decodeURIComponent('${modulePath}'));`;
                     ...process.env,
                     ...env,
                     ELECTRON_RUN_MODULE: moduleId,
-                    LIGHTPROXY_BOARDCASR_PORT: boardcastPort,
+                    IPROXY_BOARDCASR_PORT: boardcastPort,
                     USER_DATA: app.getPath('appData'),
                     NODE_PATH: nodeModulePath,
                     ELECTRON_RUN_AS_NODE: 1,

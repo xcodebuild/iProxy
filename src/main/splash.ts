@@ -6,6 +6,7 @@ export const splash = ({
     text = 'Loading ...',
     website = 'www.website.com',
     color = '#666',
+    fontColor = 'white',
 }) => `
   <!DOCTYPE html>
   <meta charset="utf-8">
@@ -106,7 +107,7 @@ export const splash = ({
         position: absolute;
         margin: auto;
         border-radius: 5px;
-        background: white;
+        background: ${fontColor};
       }
   
       #dot1 {
@@ -145,16 +146,16 @@ export const splash = ({
     <div id="box" style="background-color:${color}">
       <span id="logo">
         <img id="logo-img" src="${logo}" />
-        <h6 id="logo-text">${brand}</h6>
+        <h6 id="logo-text" style="color: ${fontColor}">${brand}</h6>
       </span>
-      <h1 id="product" class="text">${productName}</h1>
+      <h1 id="product" style="color: ${fontColor}" class="text">${productName}</h1>
       <div class="dot" id="dot1"></div>
       <div class="dot" id="dot2"></div>
       <div class="dot" id="dot3"></div>
       <div class="dot" id="dot4"></div>
       <div class="dot" id="dot5"></div>
       <h4 class="text" id="starting-txt">${text}</h4>
-      <span class="text" id="author-txt">${website}</span>
+      <span style="display: none" class="text" id="author-txt">${website}</span>
     </div>
   </body>
   

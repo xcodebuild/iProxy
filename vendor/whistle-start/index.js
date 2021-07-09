@@ -3,7 +3,7 @@
 const path = require('path');
 const portfinder = require('portfinder');
 
-const userData = path.join(process.env.USER_DATA, '/LightProxy');
+const userData = path.join(process.env.USER_DATA, '/iProxy');
 const ws = require('ws');
 
 const startWhistle = require('whistle/index');
@@ -34,7 +34,7 @@ const pluginPaths = glob.sync("/usr/local/lib/node_modules/").concat(
 
 console.log('pluginPaths', pluginPaths);
 
-const boardcastPort = process.env.LIGHTPROXY_BOARDCASR_PORT;
+const boardcastPort = process.env.IPROXY_BOARDCASR_PORT;
 
 console.info('Whistle get boardcast port', boardcastPort);
 
@@ -50,7 +50,7 @@ client.onerror = err => {
 };
 
 const options = {
-    name: 'LightProxyWhistle',
+    name: 'iProxyWhistle',
     // port: 12888,
     certDir: path.join(userData, './cert'),
 };
@@ -85,7 +85,7 @@ console.info('use custom cert:', options.certDir);
 
         start(opts)
             .then(() => {
-                console.info('Whistle for LightProxy start: http://127.0.0.1:' + port);
+                console.info('Whistle for iProxy start: http://127.0.0.1:' + port);
                 console.info('Whistle start for socks port:' + socksPort);
                 return clientReady;
             })

@@ -8,7 +8,7 @@ export const StatusBar = (props: Props) => {
     const { rightItems } = props;
     const [color, setColor] = useState('normal');
     return (
-        <div className={`lightproxy-status-bar color-${color}`}>
+        <div className={`iproxy-status-bar color-${color}`}>
             {rightItems.map((item, index) => {
                 const Comp = item;
                 return <Comp setStatusBarMode={setColor} key={index} />;

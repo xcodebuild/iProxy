@@ -37,11 +37,11 @@ export const App = () => {
 
     return (
         <ThemeModeProvider>
-            <div className="lightproxy-app-container">
+            <div className="iproxy-app-container">
                 <Provider>
                     {SYSTEM_IS_MACOS ? (
                         <Titlebar
-                            text="LightProxy"
+                            text="iProxy"
                             onClose={() => currentWindow.close()}
                             onMaximize={() => currentWindow.maximize()}
                             onFullscreen={() => currentWindow.fullScreen()}
@@ -52,22 +52,22 @@ export const App = () => {
                         />
                     ) : null}
 
-                    <div className="lightproxy-panel-dock no-drag">
+                    <div className="iproxy-panel-dock no-drag">
                         {panels.map((panel: AppPanel, index: number) => {
                             const className = classnames({
-                                'lightproxy-dock-item': true,
+                                'iproxy-dock-item': true,
                                 selected: panel.title === activePanel.title,
                             });
 
                             return (
                                 <div className={className} key={panel.title} onClick={() => handleClickPanel(index)}>
                                     <Icon style={{ fontSize: '22px' }} type={panel.icon}></Icon>
-                                    <span className="lightproxy-dock-title">{t(panel.title)}</span>
+                                    <span className="iproxy-dock-title">{t(panel.title)}</span>
                                 </div>
                             );
                         })}
                     </div>
-                    <div className="lightproxy-panel-container drag">{renderActivePanel()}</div>
+                    <div className="iproxy-panel-container drag">{renderActivePanel()}</div>
                     <StatusBar rightItems={rightStatusItems} />
                 </Provider>
             </div>

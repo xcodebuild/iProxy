@@ -96,15 +96,15 @@ export const Editor = (props: Props) => {
     });
 
     return (
-        <div className="lightproxy-rule-editor-container">
+        <div className="iproxy-rule-editor-container">
             <div
                 onDoubleClick={() => remote.getCurrentWindow().maximize()}
-                className="lightproxy-editor-actionbar drag"
+                className="iproxy-editor-actionbar drag"
             >
                 <span className="tip">{t('Type / to insert rule')}</span>
             </div>
 
-            <div className="lightproxy-code-editor-container no-drag">
+            <div className="iproxy-code-editor-container no-drag">
                 {!enabled ? (
                     <div className="disabled-tip">{t('This rule is disabled, double click rule name to enable')}</div>
                 ) : null}
