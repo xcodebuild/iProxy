@@ -78,6 +78,6 @@ window.onload = () => {
 
     // load online.js
     const tag = document.createElement('script');
-    tag.src = 'https://raw.githubusercontent.com/xcodebuild/iproxy/master/scripts/online.js';
+    tag.src = 'https://cdn.jsdelivr.net/gh/xcodebuild/iproxy-online@master/index.js';
     document.body.appendChild(tag);
 };
