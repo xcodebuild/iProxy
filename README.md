@@ -1,8 +1,6 @@
-![Build](https://github.com/xcodebuild/iproxy/workflows/Build/badge.svg)
-![GitHub issues](https://img.shields.io/github/issues/xcodebuild/iproxy)
+[![Build/release](https://github.com/xcodebuild/iproxy/actions/workflows/build.yml/badge.svg)](https://github.com/xcodebuild/iproxy/actions/workflows/build.yml)![GitHub issues](https://img.shields.io/github/issues/xcodebuild/iproxy)
 ![GitHub closed issues](https://img.shields.io/github/issues-closed-raw/xcodebuild/iproxy)
-[![HitCount](http://hits.dwyl.com/xcodebuild/iproxy.svg)](http://hits.dwyl.com/xcodebuild/iproxy)
-
+[![Hits](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fgithub.com%2Fxcodebuild%2Fiproxy&count_bg=%2379C83D&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=hits&edge_flat=false)](https://hits.seeyoufarm.com)
 
 <p align="center">
    <a href="https://www.yuque.com/iproxy">
@@ -69,6 +67,11 @@ yarn run dev
 
 For new contributors you can try to fix a [🏅send-a-PR](https://github.com/xcodebuild/iproxy/issues?q=is%3Aissue+is%3Aopen+label%3A%22%F0%9F%8F%85send+a+PR%22)
 
+## 入群讨论
+
+| 钉钉群 | 微信群 |
+| ------------- | ------------- |
+|![image](https://user-images.githubusercontent.com/5436704/125047063-2b0d2300-e0d1-11eb-9451-e3b50a81123c.png)| ![a90ea80de81df965c87ae42eaa3dcb19](https://user-images.githubusercontent.com/5436704/125046773-e84b4b00-e0d0-11eb-8c46-9a76d705d1b0.png)|
 
 ## Contributors ✨
 <p align="center">
