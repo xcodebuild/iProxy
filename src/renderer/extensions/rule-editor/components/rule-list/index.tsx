@@ -2,7 +2,8 @@ import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react'
 import { DragDropContext, Droppable, Draggable, DropResult } from 'react-beautiful-dnd';
 import classnames from 'classnames';
 import { Editor } from '../editor';
-import { Button, Icon, Popover, message, Input } from 'antd';
+import { FormOutlined } from '@ant-design/icons';
+import { Button, Popover, message, Input } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { uuidv4 } from '../../../../utils';
 
@@ -302,7 +303,7 @@ export const RuleList = (props: Props) => {
             <div className="iproxy-rule-actionbar drag">
                 <Popover content={t('New Rule')} trigger="hover">
                     <Button onClick={handleAddRule} className="no-drag iproxy-add-rule-btn">
-                        <Icon type="form" />
+                        <FormOutlined />
                     </Button>
                 </Popover>
             </div>

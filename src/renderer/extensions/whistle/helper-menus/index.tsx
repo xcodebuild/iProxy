@@ -1,4 +1,5 @@
-import { Menu, Icon } from 'antd';
+import { BugOutlined, FileTextOutlined, GithubOutlined, HomeOutlined } from '@ant-design/icons';
+import { Menu } from 'antd';
 
 import { remote } from 'electron';
 import React from 'react';
@@ -19,19 +20,19 @@ const handleShowLogs = () => {
 export function getHelperMenus(t: Function) {
     return [
         <Menu.Item key="home" onClick={handleHomepage}>
-            <Icon type="home" />
+            <HomeOutlined />
             {t('Home Page & Document')}
         </Menu.Item>,
         <Menu.Item key="issue" onClick={handleIssue}>
-            <Icon type="bug" />
+            <BugOutlined />
             {t('Report issue')}
         </Menu.Item>,
         <Menu.Item key="github" onClick={handleGithub}>
-            <Icon type="github" />
+            <GithubOutlined />
             {t('Github')}
         </Menu.Item>,
         <Menu.Item key="log" onClick={handleShowLogs}>
-            <Icon type="file-text" />
+            <FileTextOutlined />
             {t('Show logs')}
         </Menu.Item>,
     ];

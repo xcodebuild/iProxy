@@ -33,12 +33,14 @@
     "art:icon": "\"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\" --headless --screenshot --window-size=512,512 --default-background-color=0 art/icon/index.html && mv screenshot.png vendor/files/icon.png && \"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\" --headless --screenshot --window-size=512,512 --default-background-color=0 art/icon/index-pure.html && mv screenshot.png vendor/files/icon-pure.png"
   },
   "dependencies": {
+    "@ant-design/compatible": "^1.0.8",
+    "@ant-design/icons": "^4.6.2",
     "@sentry/electron": "1.1.0",
     "@sentry/node": "5.10.2",
     "@timkendrick/monaco-editor": "^0.0.9",
     "@umijs/hooks": "^1.9.3",
     "@xcodebuild/global-proxy": "^0.0.6",
-    "antd": "^3.26.6",
+    "antd": "^4.16.6",
     "bufferutil": "^4.0.1",
     "classnames": "^2.2.6",
     "compare-versions": "^3.5.1",
