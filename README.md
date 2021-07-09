@@ -49,7 +49,7 @@
 
 ## Quick Start
 
-Take a quick start at: https://iproxy.org/doc/getting-started
+Take a quick start at: https://yuque.com/iproxy
 
 ## How to contribute
 
