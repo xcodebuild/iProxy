@@ -28,6 +28,29 @@ export const Editor = (props: Props) => {
     const onSaveRef = useRef(onSave);
     onSaveRef.current = onSave;
 
+    const containerRef = useRef<HTMLDivElement>();
+
+    useEffect(() => {
+        // display a fast button when hover on line
+        if (containerRef.current) {
+            const onMouseOver = (e: MouseEvent) => {
+                if (!e.target) return;
+                const ele = e.target as HTMLElement;
+                if (ele.className === 'view-line') {
+                    // find line
+                    requestAnimationFrame(() => {
+                        const rect = ele.getBoundingClientRect();
+                        setShowCardsPos({ x: rect.x - 200, y: rect.y });
+                    });
+                }
+            };
+            containerRef.current.addEventListener('mouseover', onMouseOver);
+            return () => {
+                containerRef.current?.removeEventListener('mouseover', onMouseOver);
+            };
+        }
+    }, [containerRef]);
+
     useEffect(() => {
         const resizeEditor = () => {
             editorRef.current?.editor?.layout();
@@ -41,22 +64,6 @@ export const Editor = (props: Props) => {
 
     const handleChange = (val: string) => {
         onChange(val);
-        if (editorRef.current) {
-            const editor = editorRef.current.editor;
-
-            const model = editor?.getModel();
-            const position = editor?.getPosition();
-            if (model && position) {
-                const lineContent = model.getLineContent(position.lineNumber);
-                if (lineContent.replace(/^\s+/, '').replace(/\s+$/, '') === '/') {
-                    // trigger / cards
-
-                    const top = editor?.getTopForPosition(position.lineNumber, position.column) || 0;
-                    const offset = editor?.getScrollTop() || 0;
-                    setShowCardsPos({ x: 205, y: top - offset + 20 });
-                }
-            }
-        }
     };
 
     const handleFinished = (option: Option) => {
@@ -96,12 +103,11 @@ export const Editor = (props: Props) => {
     });
 
     return (
-        <div className="iproxy-rule-editor-container">
+        <div ref={containerRef} className="iproxy-rule-editor-container">
             <div
                 onDoubleClick={() => remote.getCurrentWindow().maximize()}
                 className="iproxy-editor-actionbar drag"
             >
-                <span className="tip">{t('Type / to insert rule')}</span>
             </div>
 
             <div className="iproxy-code-editor-container no-drag">

@@ -333,7 +333,7 @@ export class WhistleExntension extends Extension {
             }, []);
 
             const menu = (
-                <Menu>
+                <Menu className="hover-menu">
                     <Menu.Item onClick={this.toggleSystemProxy.bind(this)}>
                         <DesktopOutlined />
                         {onlineState === 'ready' ? t('Disable system proxy') : t('Enable system proxy')}

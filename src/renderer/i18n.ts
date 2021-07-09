@@ -20,7 +20,6 @@ export const i18nResources = {
             'Online but not system proxy': '代理已启动但不是系统代理',
             'Online & system proxy ready': '代理已经启动 & 设置为系统代理',
             'Default rule to keep some daily-software works behind proxy': '初始规则可以让一些日常使用软件在代理下工作',
-            'Type / to insert rule': '输入 / 插入规则',
             'Disable system proxy': '禁用系统代理',
             'Enable system proxy': '启用系统代理',
             search: '搜索',
