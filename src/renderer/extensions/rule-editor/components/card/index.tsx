@@ -122,7 +122,7 @@ export const Card = (props: Props) => {
                 <Menu>
                      {options.map(item => {
                         return (
-                            <Menu.Item onClick={() => {
+                            <Menu.Item key={item.value} onClick={() => {
                                 const option = options.find(findItem => findItem.value === item.value) as Option;
                                 onFinish(option);
                             }}>
