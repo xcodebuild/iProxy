@@ -7,6 +7,8 @@ var properties = require('../../../lib/rules/util').properties;
 var PID = process.pid;
 var MAX_OBJECT_SIZE = 1024 * 1024 * 6;
 var index = 0;
+var dnsOverHttps = config.dnsOverHttps;
+const doh = !!dnsOverHttps;
 
 exports.getClientId = function() {
   if (index > 9999) {
@@ -16,20 +18,31 @@ exports.getClientId = function() {
 };
 
 exports.getServerInfo = function(req) {
+  var baseDir;
+  if (!config.networkMode && !config.pluginsMode) {
+    baseDir = config.baseDirHash;
+  }
   var info = {
     pid: PID,
     pInfo: proc,
+    dns: dnsOverHttps || config.dnsServer,
+    doh: doh,
+    df: config.dnsOptional,
+    r6: config.resolve6,
     version: config.version,
     cmdName: config.cmdName,
     hideLeftMenu: config.hideLeftMenu,
     networkMode: config.networkMode,
+    rulesOnlyMode: config.rulesOnlyMode,
     pluginsMode: config.pluginsMode,
     ndr: config.notAllowedDisableRules,
     ndp: config.notAllowedDisablePlugins,
+    drb: config.disabledBackOption,
+    drm: config.disabledMultipleOption,
     rulesMode: config.rulesMode,
     strictMode: config.strict,
     multiEnv: config.multiEnv,
-    baseDir: config.baseDirHash,
+    baseDir: baseDir,
     username: config.username,
     nodeVersion: process.version,
     latestVersion: properties.getLatestVersion('latestVersion'),

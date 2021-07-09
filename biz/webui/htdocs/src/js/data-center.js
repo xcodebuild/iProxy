@@ -311,7 +311,7 @@ function checkFilter(item, list) {
       }
       break;
     default:
-      if (checkFilterField(item.url, filter)) {
+      if (checkFilterField((item.isHttps ? 'tunnel://' : '') + item.url, filter)) {
         return true;
       }
     }
@@ -599,7 +599,7 @@ function startLoadData() {
     inited = true;
     $.extend(options, hashFilterObj);
     if (onlyViewOwnData) {
-      options.ip = 'self';
+      options.ip = 'self,clientId';
     }
     cgi.getData(options, function (data) {
       var hasNewData = data && data.data && data.data.hasNew;
@@ -726,13 +726,14 @@ function startLoadData() {
         var filter = getFilterText();
         var excludeFilter = filter.disabledExcludeText ? null : resolveFilterText(filter.excludeText);
         var includeFilter = filter.disabledFilterText ? null : resolveFilterText(filter.filterText);
-        ids.forEach(function (id) {
+        exports.curNewIdList = ids.filter(function (id) {
           var item = data[id];
           if (item) {
             if ((!excludeFilter || !checkFilter(item, excludeFilter))
               && (!includeFilter || checkFilter(item, includeFilter))) {
               setReqData(item);
               dataList.push(item);
+              return true;
             }
           }
         });
@@ -888,7 +889,9 @@ function setReqData(item) {
     if (item.path.length > MAX_PATH_LENGTH) {
       item.path = item.path.substring(0, MAX_PATH_LENGTH) + '...';
     }
-  } else if (!item.useH2 && item.protocol === 'H2') {
+  } else if (item.useH2) {
+    item.protocol = 'H2';
+  } else if (item.protocol === 'H2') {
     item.protocol = item.isHttps ? 'HTTP' : util.getProtocol(url);
   }
   if (item.useHttp && (item.protocol === 'HTTPS' || item.protocol === 'WSS')) {
@@ -899,22 +902,43 @@ function setReqData(item) {
   }
 }
 
+var PROTOCOL_RE = /^(?:https?|wss?):\/\//;
+
+function checkUrl(data) {
+  var url = data && data.url;
+  if (!url || typeof url !== 'string' || url.indexOf('#') !== -1) {
+    return false;
+  }
+  if (data.isHttps) {
+    return url.indexOf('/') === -1 && url.indexOf('?') === -1;
+  }
+  return PROTOCOL_RE.test(url);
+}
+
 exports.addNetworkList = function (list) {
   if (!Array.isArray(list) || !list.length) {
     return;
   }
   var hasData;
+  var curNewIdList = [];
   list.forEach(function (data) {
-    if (!data || !(data.startTime >= 0) || !data.req ||
-      !data.req.headers || !data.res) {
+    if (!data || !(data.startTime >= 0) || !data.req || !data.req.headers
+      || !data.res || !checkUrl(data)) {
       return;
     }
+    var req = data.req;
     delete data.active;
     delete data.selected;
     delete data.hide;
     delete data.order;
-    delete data.req.json;
+    delete req.json;
     delete data.res.json;
+    delete data.data;
+    delete data.stopRecordFrames;
+    delete data.pauseRecordFrames;
+    if (!util.isString(data.fwdHost)) {
+      delete data.fwdHost;
+    }
     if (Array.isArray(data.frames)) {
       data.frames = data.frames.filter(function(frame) {
         if (frame) {
@@ -927,20 +951,28 @@ exports.addNetworkList = function (list) {
     data.id = data.startTime + '-' + ++dataIndex;
     setReqData(data);
     dataList.push(data);
+    curNewIdList.push(data.id);
     hasData = true;
   });
   if (hasData) {
+    exports.curNewIdList = curNewIdList;
     dataCallbacks.forEach(function (cb) {
       cb(networkModal);
     });
   }
 };
 
+function overflowCount() {
+  return dataList.length - NetworkModal.MAX_COUNT - 1;
+}
+
+exports.overflowCount = overflowCount;
+
 function getStartTime() {
   if (!inited) {
     return clearNetwork ? -2 : '';
   }
-  if (dataList.length - 1 > NetworkModal.MAX_COUNT || exports.stopRefresh) {
+  if (overflowCount() > 0 || exports.stopRefresh) {
     return -1;
   }
   return lastRowId || '0';
@@ -970,9 +1002,8 @@ function updateServerInfo(data) {
   if (curServerInfo && curServerInfo.version == data.version && curServerInfo.rulesMode === data.rulesMode && curServerInfo.cmdName === data.cmdName &&
     curServerInfo.networkMode === data.networkMode && curServerInfo.pluginsMode === data.pluginsMode && curServerInfo.multiEnv === data.multiEnv &&
     curServerInfo.baseDir == data.baseDir && curServerInfo.username == data.username && curServerInfo.nodeVersion == data.nodeVersion &&
-    curServerInfo.port == data.port && curServerInfo.host == data.host &&
-    curServerInfo.ipv4.sort().join() == data.ipv4.sort().join() &&
-    curServerInfo.ipv6.sort().join() == data.ipv6.sort().join()) {
+    curServerInfo.port == data.port && curServerInfo.host == data.host && curServerInfo.pid == data.pid &&
+    curServerInfo.ipv4.sort().join() == data.ipv4.sort().join() && curServerInfo.ipv6.sort().join() == data.ipv6.sort().join()) {
     curServerInfo = data;
     return;
   }
@@ -1020,6 +1051,8 @@ exports.on = function (type, callback) {
     }
   }
 };
+
+exports.networkModal = networkModal;
 
 exports.stopNetworkRecord = function(stop) {
   if (!stop && exports.pauseRefresh) {

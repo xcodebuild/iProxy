@@ -1,4 +1,6 @@
 var React = require('react');
+var ReactDOM = require('react-dom');
+var $ = require('jquery');
 var Dialog = require('./dialog');
 var dataCenter = require('./data-center');
 var util = require('./util');
@@ -48,6 +50,9 @@ var RecycleBinDialog = React.createClass({
     self.setState(options, function() {
       !quiet && self.refs.recycleBinDialog.show();
     });
+  },
+  hide: function() {
+    this.refs.recycleBinDialog.hide();
   },
   checkFile: function(data, xhr) {
     if (!data) {
@@ -109,18 +114,21 @@ var RecycleBinDialog = React.createClass({
         });
     }
   },
+  isVisible: function() {
+    return $(ReactDOM.findDOMNode(this.refs.recycleBinBody)).is(':visible');
+  },
   render: function() {
     var self = this;
     var state = self.state;
     var list = state.list || [];
     return (
       <Dialog ref="recycleBinDialog" wstyle="w-files-dialog">
-        <div className="modal-body">
+        <div className="modal-body" ref="recycleBinBody">
           <button type="button" className="close" data-dismiss="modal">
             <span aria-hidden="true">&times;</span>
           </button>
           <h4>
-            {state.name} Recycle Bin
+            {state.name} Trash
           </h4>
           <table className="table">
               <thead>
@@ -141,7 +149,7 @@ var RecycleBinDialog = React.createClass({
                           <a data-name={item.name} onClick={self.view}>View</a>
                           <a onClick={function() {
                             self.recover(item);
-                          }}>Recover</a>
+                          }}>Restore</a>
                           <a data-name={item.name} onClick={self.remove}>Delete</a>
                         </td>
                       </tr>
@@ -172,6 +180,12 @@ var RecycleBinDialogWrap = React.createClass({
   },
   show: function(options) {
     this.refs.recycleBinDialog.show(options);
+  },
+  hide: function() {
+    this.refs.recycleBinDialog.hide();
+  },
+  isVisible: function() {
+    return this.refs.recycleBinDialog.isVisible();
   },
   render: function() {
     return <RecycleBinDialog ref="recycleBinDialog" />;

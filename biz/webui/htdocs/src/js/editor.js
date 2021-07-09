@@ -40,6 +40,7 @@ require('codemirror/addon/scroll/annotatescrollbar');
 require('codemirror/addon/search/matchesonscrollbar');
 
 var rulesHint = require('./rules-hint');
+var events = require('./events');
 
 var themes = ['default', 'neat', 'elegant', 'erlang-dark', 'night', 'monokai', 'cobalt', 'eclipse'
               , 'rubyblue', 'lesser-dark', 'xq-dark', 'xq-light', 'ambiance'
@@ -47,7 +48,7 @@ var themes = ['default', 'neat', 'elegant', 'erlang-dark', 'night', 'monokai', '
 require('./rules-mode');
 var DEFAULT_THEME = 'cobalt';
 var DEFAULT_FONT_SIZE = '16px';
-var RULES_COMMENT_RE = /^()\s*#\s*/;
+var RULES_COMMENT_RE = /^(\s*)#\s*/;
 var JS_COMMENT_RE = /^(\s*)\/\/+\s?/;
 var NO_SPACE_RE = /\S/;
 
@@ -181,6 +182,57 @@ var Editor = React.createClass({
         editor.setSize(null, height);
       }
     }
+    var getCh = function(ch, dis) {
+      return Math.max(0, ch + dis);
+    };
+    $(elem).on('dblclick', '.CodeMirror-linenumber', function(e) {
+      var num = parseInt($(e.target).text(), 10);
+      if (!(num > 0)){
+        return;
+      }
+      var lineNum = num - 1;
+      var line = editor.getLine(lineNum);
+      if (!line || !line.trim()) {
+        return;
+      }
+      var isRules = self.isRulesEditor();
+      var commentRE = isRules ? RULES_COMMENT_RE : JS_COMMENT_RE;
+      var origLine = line;
+      if (commentRE.test(line)) {
+        line = line.replace(commentRE, '$1');
+      } else {
+        line = (isRules ? '#' : '//') + (/^\s/.test(line) ? '' : ' ') + line;
+      }
+      var list = editor.listSelections();
+      var resetRange;
+      var len = list && list.length;
+      var dis = line.length - origLine.length;
+      if (list && list.length) {
+        for (var i = 0; i < len; i++) {
+          var pre = list[i];
+          var hLine = pre.head.line;
+          var aLine = pre.anchor.line;
+          if (hLine === lineNum) {
+            resetRange = true;
+            pre.head.ch = getCh(pre.head.ch, dis);
+            if (aLine === hLine && pre.head !== pre.anchor) {
+              pre.anchor.ch = getCh(pre.anchor.ch, dis);
+            }
+            break;
+          }
+          if (aLine === lineNum) {
+            resetRange = true;
+            pre.anchor.ch = getCh(pre.anchor.ch, dis);
+            break;
+          }
+        }
+      }
+      editor.replaceRange(line + '\n', {line: lineNum, ch: 0}, {line: num, ch: 0});
+      if (resetRange) {
+        editor.setSelections(list);
+      }
+      events.trigger('toggleCommentInEditor');
+    });
     $(elem).on('keydown', function(e) {
       var isRules = self.isRulesEditor();
       var isJS = self._mode == 'javascript';

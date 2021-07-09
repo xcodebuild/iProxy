@@ -24,7 +24,8 @@ var uploadJsonParser = bodyParser.json(UPLOAD_PARSE_CONF);
 var GET_METHOD_RE = /^get$/i;
 var WEINRE_RE = /^\/weinre\/.*/;
 var ALLOW_PLUGIN_PATHS = ['/cgi-bin/rules/list2', '/cgi-bin/values/list2', '/cgi-bin/get-custom-certs-info'];
-var DONT_CHECK_PATHS = ['/cgi-bin/server-info', '/cgi-bin/plugins/is-enable', '/preview.html', '/cgi-bin/rootca', '/cgi-bin/log/set'];
+var DONT_CHECK_PATHS = ['/cgi-bin/server-info', '/cgi-bin/plugins/is-enable', '/cgi-bin/plugins/get-plugins',
+  '/preview.html', '/cgi-bin/rootca', '/cgi-bin/log/set'];
 var GUEST_PATHS = ['/cgi-bin/composer', '/cgi-bin/socket/data', '/cgi-bin/abort', '/cgi-bin/socket/abort',
   '/cgi-bin/socket/change-status', '/cgi-bin/sessions/export'];
 var PLUGIN_PATH_RE = /^\/(whistle|plugin)\.([^/?#]+)(\/)?/;
@@ -130,6 +131,9 @@ app.use(function(req, res, next) {
   };
   req.on('error', abort);
   res.on('error', abort).on('close', abort);
+  if (config.shadowRulesOnlyMode && req.path !== '/cgi-bin/rootca') {
+    return res.status(404).end('Not Found');
+  }
   next();
 });
 
@@ -187,12 +191,31 @@ function cgiHandler(req, res) {
     res.setHeader('access-control-allow-origin', req.headers.origin);
     res.setHeader('access-control-allow-credentials', true);
   }
-  try {
-    require(path.join(__dirname, '..' + req.path))(req, res);
-  } catch(err) {
-    res.status(500).send(config.debugMode ?
-        '<pre>' + util.getErrorStack(err) + '</pre>' : 'Internal Server Error');
+  var filepath = path.join(__dirname, '..' + req.path) + '.js';
+  var handleResponse = function() {
+    try {
+      require(filepath)(req, res);
+    } catch(err) {
+      var msg = config.debugMode ? '<pre>' + util.getErrorStack(err) + '</pre>' : 'Internal Server Error';
+      res.status(500).send(msg);
+    }
+  };
+  if (require.cache[filepath]) {
+    return handleResponse();
   }
+  fs.stat(filepath, function(err, stat) {
+    if (err || !stat.isFile()) {
+      var notFound = err ? err.code === 'ENOENT' : !stat.isFile();
+      var msg;
+      if (config.debugMode) {
+        msg =  '<pre>' + (err ? util.getErrorStack(err) : 'Not File') + '</pre>';
+      } else {
+        msg = notFound ? 'Not Found' : 'Internal Server Error';
+      }
+      return res.status(notFound ? 404 : 500).send(msg);
+    }
+    handleResponse();
+  });
 }
 
 app.all('/cgi-bin/sessions/*', cgiHandler);

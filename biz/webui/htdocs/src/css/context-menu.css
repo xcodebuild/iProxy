@@ -16,14 +16,21 @@
   min-width: 110px;
 }
 
+.w-ctx-menu-list .w-ctx-item-tt input {
+  margin-right: 5px;
+  vertical-align: text-top;
+}
+
 .w-ctx-menu-list .glyphicon-play {
   line-height: 28px;
   font-size: 10px;
   margin-left: 10px;
 }
 
-.w-ctx-menu-list p {
+.w-ctx-menu-list label {
   margin: 0!important;
+  font-weight: normal!important;
+  display: block;
 }
 body .w-ctx-menu-list .w-ctx-menu-list {
   margin-left: 3px;

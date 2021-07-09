@@ -9,6 +9,7 @@ var columns = require('./columns');
 var dataCenter = require('./data-center');
 var events = require('./events');
 var util = require('./util');
+var storage = require('./storage');
 
 var Settings = React.createClass({
   getInitialState: function() {
@@ -29,6 +30,12 @@ var Settings = React.createClass({
     columns.reset();
     this.onColumnsResort();
   },
+  componentDidMount: function() {
+    var self = this;
+    events.on('toggleTreeView', function() {
+      self.setState({});
+    });
+  },
   onNetworkSettingsChange: function(e) {
     var target = e.target;
     var name = target.getAttribute('data-name');
@@ -40,6 +47,14 @@ var Settings = React.createClass({
       this.setState({});
       events.trigger('filterChanged');
       return;
+    }
+    if (name === 'treeView') {
+      events.trigger('switchTreeView');
+      return;
+    }
+    if (name === 'disabledHNR') {
+      storage.set('disabledHNR', target.checked ? '' : '1');
+      return this.setState({});
     }
     var settings = this.state;
     var filterTextChanged;
@@ -139,6 +154,7 @@ var Settings = React.createClass({
     var self = this;
     var state = self.state;
     var columnList = state.columns;
+    var isTreeView = storage.get('isTreeView') === '1';
 
     return (
       <Dialog ref="networkSettingsDialog" wstyle="w-network-settings-dialog">
@@ -221,6 +237,19 @@ var Settings = React.createClass({
           <label className="w-network-settings-own">
             <input checked={dataCenter.isOnlyViewOwnData()} data-name="viewOwn" type="checkbox" />Only take this machine's request into consideration (IP: {dataCenter.clientIp})
           </label>
+          <label className="w-network-settings-own">
+            <input checked={isTreeView} data-name="treeView" type="checkbox" />
+            <span className="glyphicon glyphicon-tree-conifer" style={{marginRight: 2}}></span>Show Tree View (Ctrl[Command] + B)
+          </label>
+          { isTreeView ? <br /> : null }
+          {
+            isTreeView ? (
+              <label className="w-network-settings-own">
+                <input checked={storage.get('disabledHNR') !== '1'} data-name="disabledHNR" type="checkbox" />
+                Highlight new requests
+              </label>
+            ) : null
+          }
         </div>
         <div className="modal-footer">
           <button type="button" className="btn btn-default" data-dismiss="modal">Close</button>

@@ -138,6 +138,7 @@ function handleWebSocket(options, cb) {
       socket.on('data', handleResponse);
       if (cb) {
         util.onSocketEnd(socket, function(err) {
+          socket.destroy();
           cb(err || new Error('Closed'));
         });
       }
@@ -252,6 +253,9 @@ module.exports = function(req, res) {
   var getBody = function(cb) {
     var base64 = req.body.base64;
     var body = base64 || req.body.body;
+    if (!isWs) {
+      delete headers.trailer;
+    }
     if (isWs || isConn || util.hasRequestBody(options)) {
       body = body && util.toBuffer(body, base64 ? 'base64' : getCharset(headers));
       options.body = body;

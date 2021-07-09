@@ -14,8 +14,15 @@ var events = require('./events');
 var iframes = require('./iframes');
 var RecycleBinDialog = require('./recycle-bin');
 
+var disabledEditor = window.location.href.indexOf('disabledEditor=1') !== -1;
 var rulesCtxMenuList = [
-  { name: 'Copy' },
+  {
+    name: 'Copy',
+    list: [
+      { name: 'Name' },
+      { name: 'Rules' }
+    ]
+  },
   { name: 'Enable', action: 'Save' },
   {
     name: 'Create',
@@ -25,7 +32,7 @@ var rulesCtxMenuList = [
   { name: 'Delete' },
   { name: 'Export' },
   { name: 'Import' },
-  { name: 'Recycle Bin', action: 'RecycleBin' },
+  { name: 'Trash' },
   {
     name: 'Others',
     action: 'Plugins',
@@ -34,7 +41,13 @@ var rulesCtxMenuList = [
   { name: 'Help', sep: true }
 ];
 var valuesCtxMenuList = [
-  { name: 'Copy' },
+  {
+    name: 'Copy',
+    list: [
+      { name: 'Key', action: 'CopyKey' },
+      { name: 'Value' }
+    ]
+  },
   { name: 'Save' },
   {
     name: 'Create',
@@ -51,7 +64,7 @@ var valuesCtxMenuList = [
   },
   { name: 'Export' },
   { name: 'Import' },
-  { name: 'Recycle Bin', action: 'RecycleBin' },
+  { name: 'Trash' },
   {
     name: 'Others',
     action: 'Plugins',
@@ -136,6 +149,13 @@ var List = React.createClass({
           return false;
         }
       }
+    })
+    .on('hashchange', function() {
+      var disabled = window.location.href.indexOf('disabledEditor=1') !== -1;
+      if (disabled !== disabledEditor) {
+        disabledEditor = disabled;
+        self.setState({});
+      }
     });
 
     function trigger(item) {
@@ -157,6 +177,19 @@ var List = React.createClass({
         e.preventDefault();
       }
     });
+    events.on('toggleCommentInEditor', function() {
+      var activeItem = modal.getActive();
+      if (activeItem) {
+        var name = self.props.name === 'rules' ? 'Rules' : 'Values';
+        events.trigger('save' + name, activeItem);
+      }
+    });
+    events.on('reloadRulesRecycleBin', function() {
+      self.reloadRecycleBin('Rules');
+    });
+    events.on('reloadValuesRecycleBin', function() {
+      self.reloadRecycleBin('Values');
+    });
     this.ensureVisible(true);
   },
   shouldComponentUpdate: function(nextProps) {
@@ -172,6 +205,9 @@ var List = React.createClass({
     }
     this.curListLen = curListLen;
     this.curActiveItem = curActiveItem;
+    if (this.props.hide) {
+      this.refs.recycleBinDialog.hide();
+    }
   },
   ensureVisible: function(init) {
     var activeItem = this.props.modal.getActive();
@@ -298,6 +334,30 @@ var List = React.createClass({
       }
     }
   },
+  reloadRecycleBin: function(name) {
+    if (this.refs.recycleBinDialog.isVisible()) {
+      this._pendingRecycle = false;
+      this.showRecycleBin(name);
+    }
+  },
+  showRecycleBin: function(name) {
+    var self = this;
+    if (self._pendingRecycle) {
+      return;
+    }
+    self._pendingRecycle = true;
+    dataCenter[name.toLowerCase()].recycleList(function(data, xhr) {
+      self._pendingRecycle = false;
+      if (!data) {
+        util.showSystemError(xhr);
+        return;
+      }
+      if (!data.list.length) {
+        return message.info('Trash is empty.');
+      }
+      self.refs.recycleBinDialog.show({ name: name, list: data.list });
+    });
+  },
   onClickContextMenu: function(action, e, parentAction, menuName) {
     var self = this;
     var name = self.props.name === 'rules' ? 'Rules' : 'Values';
@@ -329,21 +389,8 @@ var List = React.createClass({
     case 'Import':
       events.trigger('import' + name, e);
       break;
-    case 'RecycleBin':
-      if (!self._pendingRecycle) {
-        self._pendingRecycle = true;
-        dataCenter[name.toLowerCase()].recycleList(function(data, xhr) {
-          self._pendingRecycle = false;
-          if (!data) {
-            util.showSystemError(xhr);
-            return;
-          }
-          if (!data.list.length) {
-            return message.info('Recycle bin is empty.');
-          }
-          self.refs.recycleBinDialog.show({ name: name, list: data.list });
-        });
-      }
+    case 'Trash':
+      self.showRecycleBin(name);
       break;
     case 'Validate':
       var item = self.currentFocusItem;
@@ -411,6 +458,7 @@ var List = React.createClass({
     var height = (isRules ? 280 : 310) - (pluginItem.hide ? 30 : 0);
     pluginItem.maxHeight = height + 30;
     var data = util.getMenuPosition(e, 110, height);
+    data.className = 'w-contenxt-menu-list';
     if (isRules) {
       data.list = rulesCtxMenuList;
       data.list[1].disabled = disabled;
@@ -432,8 +480,17 @@ var List = React.createClass({
       data.list[5].disabled = disabled;
       data.list[6].disabled = !modal.list.length;
     }
-    data.list[0].copyText = name;
-    data.list[0].disabled = disabled;
+    var copyItem = data.list[0];
+    copyItem.disabled = disabled;
+    if (!disabled) {
+      copyItem.list[0].copyText = name;
+      if (item.value) {
+        copyItem.list[1].disabled = false;
+        copyItem.list[1].copyText = item.value;
+      } else {
+        copyItem.list[1].disabled = true;
+      }
+    }
     data.list[3].disabled = isDefault || disabled;
     data.list[4].disabled = isDefault || disabled;
     this.refs.contextMenu.show(data);
@@ -483,7 +540,7 @@ var List = React.createClass({
                             onDrop={isDefaultRule ? undefined : self.onDrop}
                             style={{display: item.hide ? 'none' : null}}
                             key={item.key} data-key={item.key}
-                           
+                            title={name}
                             draggable={isDefaultRule ? false : draggable}
                             onClick={function() {
                               self.onClick(item);
@@ -505,7 +562,7 @@ var List = React.createClass({
             <ContextMenu onClick={this.onClickContextMenu} ref="contextMenu" />
             <RecycleBinDialog ref="recycleBinDialog" />
           </div>
-          <Editor {...self.props} onChange={self.onChange} readOnly={!activeItem}
+          <Editor {...self.props} onChange={self.onChange} readOnly={disabledEditor || !activeItem}
             name={activeItem.name} value={activeItem.value}
           mode={isRules ? 'rules' : getSuffix(activeItem.name)} />
         </Divider>

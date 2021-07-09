@@ -1,12 +1,15 @@
-.w-menu {height: 28px; border-top: 1px solid #fcfcfc; background: #f1f3f4; padding-right: 80px; position: relative; z-index: 1001;}
+.w-menu {
+  height: 28px; border-top: 1px solid #fcfcfc; border-bottom: 1px solid #ccc;
+  background: #f1f3f4; padding-right: 80px; position: relative; z-index: 1001;
+}
 .w-menu a {text-decoration: none!important; color: #000; padding: 0 5px; line-height: 26px; height: 26px; margin-right: 5px; display: inline-block;}
 .w-menu .glyphicon, .w-detail .glyphicon {margin-right: 3px;}
 .w-menu .glyphicon-folder-open, .w-menu .glyphicon-folder-close {margin-right: 6px;}
 .w-menu .w-online {position: absolute; right: 0;}
 .w-menu .w-online, .w-menu a:hover, .w-left-menu a:hover, .w-left-menu a:hover .w-disabled {color: #337ab7;}
 .w-menu .w-offline {color: #ccc!important; cursor: default;}
-.w-menu .w-disabled, .w-frames-action .w-disabled {color: #888!important; cursor: not-allowed!important;}
-.w-left-menu .w-disabled { color: #888; }
+.w-menu .w-disabled, .w-frames-action .w-disabled {color: #aaa!important; cursor: not-allowed!important;}
+.w-left-menu .w-disabled { color: #aaa; }
 .w-menu .w-menu-enable {color: #ff6666!important;}
 .w-menu .w-menu-wrapper {display: inline-block; position: relative; height: 30px;}
 
@@ -55,20 +58,24 @@
 .w-confirm-import-dialog .modal-dialog { width: 320px; font-weight: bold; }
 
 .w-show-left-menu-btn { padding: 0 15px!important; margin-right: 0!important; }
-.w-left-menu { background: #f1f3f4; border: 1px solid #ccc; border-bottom: none; display: none; }
+.w-left-menu {
+  background: #f1f3f4; border-left: 1px solid #ccc;
+  border-right: 1px solid #ccc; display: none;
+}
 .w-show-left-menu .w-left-menu { display: block; border-left: none; }
 .w-show-left-menu .w-nav-menu { display: none; }
-.w-left-menu a { display: block; position: relative; padding: 10px 0 8px; width: 45px; overflow: hidden; text-align: center;
+.w-left-menu a { display: block; position: relative; padding: 10px 0 8px; width: 47px; overflow: hidden; text-align: center;
   text-decoration: none!important; color: #000; }
 .w-left-menu a span { margin-right: 5px; }
-.w-left-menu a i {
+.w-left-menu a .w-left-menu-name {
   display: block;
   font-style: normal;
-  font-size: 13px;
+  font-size: 12px;
   zoom: 1;
-  transform: scale(0.7, 0.7);
-  width: 66px;
-  margin-left: -11px;
+  transform: scale(0.8, 0.8);
+  width: 65px;
+  margin-left: -10px;
+  white-space: nowrap;
 }
 .w-left-menu-tips {
   padding: 6px 10px; display: none; left: 47px; top: 3px; position: absolute;
@@ -84,7 +91,7 @@
 .w-menu-changed {
   position: absolute;
   top: 2px;
-  left: 2px;
+  left: 5px;
   color: red;
 }
 .w-replay-count-dialog .modal-content {
@@ -120,4 +127,8 @@
   height: auto;
   border-bottom: 1px solid #ccc;
   min-height: 0;
+}
+
+.w-menu .w-tree-view-active {
+  color: #337ab7;
 }

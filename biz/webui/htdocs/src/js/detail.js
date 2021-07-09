@@ -56,6 +56,18 @@ var ReqData = React.createClass({
       self.toggleTab(tabs[0]);
     }).on('showInspectors', function() {
       self.toggleTab(tabs[1]);
+    }).on('toggleInspectors', function() {
+      var modal = self.props.modal;
+      var item = modal && modal.getActive();
+      var isWs = item && /^ws/.test(item.url);
+      var tab = self.state.tab;
+      if (!tab || tab === tabs[0]) {
+        self.toggleTab(tabs[1]);
+      } else if (isWs && tab === tabs[1]) {
+        self.toggleTab(tabs[2]);
+      } else {
+        self.toggleTab(tabs[0]);
+      }
     }).on('showFrames', function() {
       self.toggleTab(tabs[2]);
     }).on('showTimeline', function() {
@@ -68,6 +80,19 @@ var ReqData = React.createClass({
     }).on('networkStateChange', function() {
       clearTimeout(timer);
       timer = setTimeout(update, 100);
+    }).on('toggleDetailTab', function() {
+      var tab = self.state.tab;
+      if (!tab) {
+        self.toggleTab(tabs[0]);
+      } else if (tab === tabs[0]) {
+        self.toggleTab(tabs[1]);
+      } else if (tab === tabs[1]) {
+        self.toggleTab(tabs[2]);
+      } else if (tab === tabs[2]) {
+        self.toggleTab(tabs[4]);
+      } else if (tab === tabs[4]) {
+        self.toggleTab(tabs[0]);
+      }
     });
   },
   showComposer: function(item) {

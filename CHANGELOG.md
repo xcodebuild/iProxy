@@ -1,3 +1,79 @@
+# v2.7.7
+1. fix: [pipe](https://wproxy.org/whistle/rules/pipe.html) 无法直接透传 WebSocket 的二进制包问题
+2. style: 支持显示自定义根证书及删除自定义证书导引
+3. style: `pipe` 支持智能提示
+
+# v2.7.6
+1. feat: 支持通过类似 `--dnsServer http://dns.alidns.com/resolve` 自定义 `dns-over-https` 服务： https://github.com/avwo/whistle/issues/439
+2. style: 优化错误提示
+
+# v2.7.5
+1. feat: 支持通过 `disable://interceptConsole` 禁止 `log://` 拦截 `console` 的请求，用户只能通过代码 `window._whistleConsole && _whistleConsole.xxx(a, b, ...)` 记录日志
+2. feat: 支持在规则里面同时设置多个s `%plugin-name=xxxx` （最多 10 个），Whistle 会自带将这些值带到插件的对象： `req.originalReq.pluginVars`
+3. refactor: 显示插件转发的 HTTP 协议 
+
+# v2.7.4
+1. refactor: 调整 `delete://reqH.xxxx` 的时机
+
+# v2.7.3
+1. style: 优化左侧菜单
+2. styl: 修复 Values 右键菜单 Copy / Key 弹出创建新 key 输入框问题
+3. feat: 支持设置 `-M shadowRules` （抓包 + 设置 shadowRules） 或 `-M shadowRulesOnly` （无法查看抓包）
+
+# v2.7.2
+1. feat: 支持通过命令行参数 `--dnsServer "1.1.1.1,8.8.8.8,10.3.2.1:8080"` 自定义 DNS server
+		> 如果需要请求自定义 DNS server 出错时自动转成默认可以用: `--dnsServer "1.1.1.1,8.8.8.8,10.3.2.1:8080,default"`
+		> 自定义 DNS server，默认是获取 IPv4，如果需要获取 IPv6，要手动指定 `--dnsServer "2001:4860:4860::8888,[2001:4860:4860::8888]:1053,ipv6"`
+2. fix: 修复 List View 通过表头排序后无法 Reset 的问题
+
+# 2.7.1
+1. fix: Tree View 抓包数据满了后无法自动更新问题
+# v2.7.0
+1. feat: Network 支持 Tree View 展示
+2. feat: `pac` 支持设置用户名密码：`pac://user:pass@pacPath`
+3. style: 支持显示 `Raw Url` 详见：https://github.com/avwo/whistle/issues/572
+
+# v2.6.16
+1. fix: 解决规则文件名称过长保存失败的问题
+2. feat: 域名统配也支持获取子匹配内容 
+
+# v2.6.15
+1. refactor: 优化命令行启动输出的信息
+2. feat: 编辑器 `Show Line Number` 时，双击行数可以注释或取消注释
+3. feat: `Network / Tools / Toolbox` 支持将对象转成 `Query` 参数
+4. style: 支持扩展 `util.openEditor(value)` 方法 
+
+# v2.6.14
+1. chore: https://github.com/avwo/whistle/issues/559
+
+# v2.6.13
+1. style: Network 搜索框支持最多3个关键字过滤
+2. style: Network 右键菜单新增 `Open/Source` 查看当前抓包数据的源码
+3. refactor: `onSocketEnd` 添加 `timeout` 事件，兼容各种诡异行为
+4. refactor: 优化内部连接管理
+
+# v2.6.12
+1. feat: 支持通过 url 参数的 clientId 过来抓包数据
+2. feat: 支持通过 `disable://proxyConnection` 将代理转发头改为 `Proxy-Connection: close`
+
+# v2.6.11
+1. perf: 确保及时关闭无用连接，减少内存占用
+2. style: Online 支持显示 QPS，及 内存、CPU、QPS 的最大值
+3. refactor: 处理处理请求过程中无法捕获的异常
+
+# v2.6.10
+1. feat: 支持导出 har 文件
+2. feat: 支持设置 `-M "disabledBackOption|disabledMultipleOption|notAllowDisableRules"`
+3. feat: 内部路径 `/...whistle-path.5b6af7b9884e1165...///` 支持设置域名 `/...whistle-path.5b6af7b9884e1165...///__domain__port__/path/to` (`port__` 可选) 或 `/...whistle-path.5b6af7b9884e1165...///path/to?_whistleInternalHost_=__domain__port__` (`port__` 可选) 
+
+# v2.6.9
+1. feat: 支持通过 `--shadowRules jsonString` 导入规则到 Rules
+2. style: 支持通过设置请求参数 `disabledEditor=1` 将 Rules & Values 编辑框设置为只读模式
+
+# v2.6.8
+1. fix: `excludeFilter` `includeFilter` 混合配置时结果错乱问题
+2. feat: 支持 -M `rulesOnly` 及 `pluginsOnly`
+
 # v2.6.7
 1. fix: https://github.com/avwo/whistle/issues/540
 

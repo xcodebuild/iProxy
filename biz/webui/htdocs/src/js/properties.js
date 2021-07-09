@@ -17,14 +17,20 @@ var Properties = React.createClass({
     var props = this.props;
     var sourceText = props.enableViewSource;
     var copyValue = props.enableCopyValue;
+    var hasPluginRule = props.hasPluginRule;
     var viewSource = this.state.viewSource;
     var onHelp = props.onHelp;
+    var rawName = props.rawName;
+    var rawValue = props.rawValue;
     var modal = props.modal || {};
     var title = props.title || {};
     var keys = Object.keys(modal);
     if (sourceText || copyValue) {
       var result = [];
       keys.forEach(function(name) {
+        if (hasPluginRule && name === 'rule') {
+          return;
+        }
         var value = modal[name];
         name = sourceText ? name + ': ' : '';
         result.push(Array.isArray(value) ?
@@ -33,7 +39,7 @@ var Properties = React.createClass({
           }).join('\n') : name + util.toString(value));
       });
       sourceText = sourceText && result.join('\n');
-      copyValue = copyValue && result.join('\n').trim();
+      copyValue = copyValue && result.filter(util.noop).join('\n').trim();
     }
     if (this.textStr !== sourceText) {
       this.textStr = sourceText;
@@ -63,6 +69,16 @@ var Properties = React.createClass({
         </pre>) : undefined }
         <table className={'table w-properties w-properties-parsed ' + (props.className || '')}>
           <tbody>
+            {
+              rawValue ? (
+                <tr key="raw" className={rawValue ? undefined : 'w-no-value'}>
+                  <th>{rawName}</th>
+                  <td className="w-prop-raw-data" title={rawValue}>
+                    {rawValue.length > 2100 ? rawValue.substring(2100) + '...' : rawValue}
+                  </td>
+                </tr>
+              ) : null
+            }
             {
               keys.map(function(name) {
                 var value = modal[name];
