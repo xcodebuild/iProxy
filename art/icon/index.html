@@ -14,28 +14,32 @@
 
 body {
   display: flex;
-  overflow: hidden;
-  padding: 0;
   margin: 0;
+  overflow: hidden;
 }
 
+.container {
+  width: 512px;
+  height: 512px;
+  align-items: center;
+  padding: 50px;
+}
 .icon {
   background: var(--icon-background);
   border-radius: 60px;
   display: flex;
   justify-content: flex-end;
-  height: 512px;
-  width: 512px;
+  height: 412px;
+  width: 412px;
   overflow: hidden;
   position: relative;
-  box-sizing: content-box;
 }
 .i {
-  height: 420px;
-  width: 80px;
+  height: 320px;
+  width: 45px;
   position: absolute;
-  left: 200px;
-  top: 50px;
+  left: 170px;
+  top: 45px;
   border-radius: 5px;
   box-shadow: rgba(0, 0, 0, 0.3) 3px 5px 15px;
   transform: rotate(20deg);
@@ -43,8 +47,11 @@ body {
 }
     </style>
 
-<div class="icon">
-  <div class="i"></div>
+<div class="container">
+  <div class="icon">
+    <div class="i"></div>
+  </div>
 </div>
+
 </body>
 </html>
