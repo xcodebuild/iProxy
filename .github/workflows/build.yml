@@ -21,7 +21,7 @@ jobs:
 
       - name: Install deps
         run: |
-          rm .npmrc
+          npm install fyarn
           npm run install-deps
 
       - name: Build/release Electron app
