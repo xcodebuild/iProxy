@@ -8,30 +8,43 @@
 
 <body>
     <style>
-.line-down {
-  background: linear-gradient(20deg, #3888c1, #49b3fe);
-  height: 490px;
-  width: 100px;
+     :root {
+  --icon-background: linear-gradient(20deg, #1890ff, #164ea4);
+}
+
+body {
+  display: flex;
+  overflow: hidden;
+  padding: 0;
+  margin: 0;
+}
+
+.icon {
+  background: var(--icon-background);
+  border-radius: 60px;
+  display: flex;
+  justify-content: flex-end;
+  height: 512px;
+  width: 512px;
+  overflow: hidden;
+  position: relative;
+  box-sizing: content-box;
+}
+.i {
+  height: 420px;
+  width: 80px;
   position: absolute;
-  left: 135px;
-  top: 8px;
+  left: 200px;
+  top: 50px;
   border-radius: 5px;
   box-shadow: rgba(0, 0, 0, 0.3) 3px 5px 15px;
   transform: rotate(20deg);
-}
-
-.line-right {
-  background: linear-gradient(20deg, #1959bb, #164ea4);
-  height: 100px;
-  width: 380px;
-  position: absolute;
-  left: 65px;
-  top: 400px;
-  border-radius: 5px;
-  box-shadow: rgba(0, 0, 0, 0.3) 0 5px 10px;
+  background-color: white;
 }
     </style>
-   <div class="line-right"></div>
-   <div class="line-down"></div>
+
+<div class="icon">
+  <div class="i"></div>
+</div>
 </body>
 </html>

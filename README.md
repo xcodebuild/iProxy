@@ -17,7 +17,6 @@
 
 </p>
 <p align="center">
-<a href="https://www.producthunt.com/posts/iproxy?utm_source=badge-featured&utm_medium=badge&utm_souce=badge-iproxy" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=195432&theme=light" alt="iProxy - Open-source proxy tools for macOS & Windows based on whistle | Product Hunt Embed" style="width: 250px; height: 54px;" width="250px" height="54px" /></a>
 </p>
 
 <p align="center">

@@ -138,7 +138,7 @@ async function initSplashScreen() {
                     text: `Loading - ${version} ...`,
                     website: 'https://github.com/xcodebuild/iproxy',
                     logo: logoIcon,
-                    color: '#242424',
+                    color: '#1890ff',
                 }),
             );
 
@@ -146,7 +146,7 @@ async function initSplashScreen() {
             width: 600,
             height: 400,
             frame: false,
-            backgroundColor: '#242424',
+            backgroundColor: '#1890ff',
             // modal: true,
             // transparent: true,
             autoHideMenuBar: true,
