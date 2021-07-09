@@ -376,7 +376,7 @@ export class WhistleExntension extends Extension {
                     proxyIcon: 'error',
                     systemProxyIcon: 'error',
                 },
-            }[onlineState];
+            }[onlineState] as any;
 
             useEffect(() => {
                 this.coreAPI.eventEmmitter.on('whistle-online-status-change', data => {

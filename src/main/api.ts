@@ -8,7 +8,6 @@ import { checkSystemProxyWork, setSystemProxy } from './platform';
 import checkInstallStatus from './install';
 import treeKill from 'tree-kill';
 import ip from 'ip';
-import { checkUpdater } from './updater';
 import path from 'path';
 import { IPROXY_FILES_DIR, SYSTEM_IS_MACOS } from './const';
 import { app, nativeTheme, BrowserWindow } from 'electron';
@@ -106,6 +105,7 @@ async function treeKillProcess(pid: any) {
             if (err) {
                 logger.error(err);
             }
+            // @ts-ignore
             resolve();
         });
     });
@@ -120,10 +120,6 @@ async function checkDarkMode(mainWindow: BrowserWindow) {
         ipcMain.callRenderer(mainWindow, 'updateDarkMode', nativeTheme.shouldUseDarkColors);
     });
     return nativeTheme.shouldUseDarkColors;
-}
-
-async function update() {
-    return checkUpdater();
 }
 
 async function checkSystemProxy(props: any) {
@@ -179,8 +175,6 @@ export async function initIPC(mainWindow: BrowserWindow) {
     ipcMain.answerRenderer('getIp', getIp);
 
     ipcMain.answerRenderer('checkDarkMode', () => checkDarkMode(mainWindow));
-
-    ipcMain.answerRenderer('update', update);
 
     ipcMain.answerRenderer('checkSystemProxy', checkSystemProxy);
 

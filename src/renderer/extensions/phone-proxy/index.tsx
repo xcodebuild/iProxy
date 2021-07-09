@@ -66,7 +66,7 @@ export class PhoneProxy extends Extension {
                     <div className="title">
                         <span className="margin10">{t('Scan to install cert')}</span>
                         <a className="margin10"href={`http://${address}:${port}/cgi-bin/rootca`}>{t('Click to download cert')}</a>
-                        <span className="button" onClick={copyCertAddress}>{t('Click to copy cert link')}</span>
+                        <a onClick={copyCertAddress}>{t('Click to copy cert link')}</a>
                     </div>
                     <div className="title" onClick={copyProxyAddress}>
                         <span>{t('Setting WIFI proxy to')}</span>
