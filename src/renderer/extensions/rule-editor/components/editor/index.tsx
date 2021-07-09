@@ -28,7 +28,7 @@ export const Editor = (props: Props) => {
     const onSaveRef = useRef(onSave);
     onSaveRef.current = onSave;
 
-    const containerRef = useRef<HTMLDivElement | undefined>();
+    const containerRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
         // display a fast button when hover on line
