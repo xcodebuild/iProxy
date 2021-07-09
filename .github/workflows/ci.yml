@@ -46,9 +46,9 @@ jobs:
           uses: actions/upload-artifact@v2
           with:
             name: target-${{ runner.OS }}
-            path:
-              - dist/*.dmg
-              - dist/*.exe
+            path: |
+              dist/*.dmg
+              dist/*.exe
         - name: Fail after upload build result
           if: steps.build.outputs.fail == '1'
           run: "false"
