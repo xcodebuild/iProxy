@@ -148,7 +148,7 @@
     "webpack-bundle-analyzer": "^3.6.0",
     "webpack-cli": "^4.7.2",
     "webpack-dev-server": "^3.9.0",
-    "webpack-merge": "^4.2.2"
+    "webpack-merge": "^5.8.0"
   },
   "build": {
     "appId": "io.github.xcodebuild.iproxy",

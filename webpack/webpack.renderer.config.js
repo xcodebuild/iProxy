@@ -9,7 +9,7 @@ const baseConfig = require('./webpack.base.config');
 const pkg = require('../package.json');
 const devMode = process.env.NODE_ENV !== 'production';
 
-module.exports = merge.smart(baseConfig, {
+module.exports = merge.merge(baseConfig, {
     target: 'electron-renderer',
     entry: {
         app: ['@babel/polyfill', './src/renderer/index.tsx'],
