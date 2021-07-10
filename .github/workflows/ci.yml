@@ -34,14 +34,14 @@ jobs:
           run: |
             npm run dist:win
           env:
-            GH_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+            GH_TOKEN: ${{ secrets.github_token }}
 
         - name: build mac app
           if: matrix.os == 'macos-latest'
           run: |
             npm run dist:mac
           env:
-            GH_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+            GH_TOKEN: ${{ secrets.github_token }}
 
         - name: upload windows app
           if: matrix.os == 'windows-latest'
