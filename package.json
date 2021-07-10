@@ -73,7 +73,7 @@
     "node-gzip": "^1.1.2",
     "qrcode.react": "^1.0.0",
     "react": "^16.12.0",
-    "react-beautiful-dnd": "^12.2.0",
+    "react-beautiful-dnd": "^13.1.0",
     "react-dom": "^16.12.0",
     "react-i18next": "^11.2.6",
     "react-keep-alive": "^2.5.2",
