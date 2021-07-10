@@ -74,11 +74,13 @@ module.exports = merge.smart(baseConfig, {
             title: pkg.title,
             template: path.resolve(__dirname, '../src/index.ejs'),
         }),
-        new CopyPlugin([
-            { from: './node_modules/@timkendrick/monaco-editor/dist/external/index.js', to: './monaco.js' },
-            { from: './node_modules/@timkendrick/monaco-editor/dist/external/monaco.css', to: './monaco.css' },
-            { from: './vendor/files.zip', to: './files.zip' },
-        ]),
+        new CopyPlugin({
+            patterns: [
+                { from: './node_modules/@timkendrick/monaco-editor/dist/external/index.js', to: './monaco.js' },
+                { from: './node_modules/@timkendrick/monaco-editor/dist/external/monaco.css', to: './monaco.css' },
+                { from: './vendor/files.zip', to: './files.zip' },
+            ],
+        }),
         new webpack.NamedModulesPlugin(),
         new webpack.DefinePlugin({
             'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'development'),
