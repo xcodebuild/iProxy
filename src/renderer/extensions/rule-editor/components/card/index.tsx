@@ -3,7 +3,7 @@ import { Icon as LegacyIcon } from '@ant-design/compatible';
 import { Popover, Select, Button, Dropdown, Menu } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { findDOMNode } from 'react-dom';
-import { PlusCircleOutlined } from '@ant-design/icons';
+import { MenuOutlined } from '@ant-design/icons';
 
 interface Props {
     onFinish: (val: Option) => void;
@@ -146,7 +146,7 @@ export const Card = (props: Props) => {
                 }}
                 size="small"
                 shape="circle"
-                icon={<PlusCircleOutlined />}>
+                icon={<MenuOutlined />}>
             </Button>
         </Dropdown>
         
