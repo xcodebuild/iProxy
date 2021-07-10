@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - staging
+      - master
       - trying
   pull_request:
     branches:
