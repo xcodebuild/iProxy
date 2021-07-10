@@ -1,0 +1,53 @@
+name: nightly
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # run at 2 AM UTC
+
+jobs:
+  build:
+      strategy:
+        matrix:
+          os: [windows-latest, macos-latest]
+      runs-on: ${{ matrix.os }}
+      steps:
+        - name: Check out Git repository
+          uses: actions/checkout@v1
+
+        - name: Install Node.js, NPM and Yarn
+          uses: actions/setup-node@v1
+          with:
+            node-version: 14
+
+        - name: Install deps
+          run: |
+            npm run install-deps
+            npm run nightlyversion
+
+        - name: build windows app
+          if: matrix.os == 'windows-latest'
+          run: |
+            npm run dist:win
+          env:
+            GH_TOKEN: ${{ secrets.github_token }}
+
+        - name: build mac app
+          if: matrix.os == 'macos-latest'
+          run: |
+            npm run dist:mac
+          env:
+            GH_TOKEN: ${{ secrets.github_token }}
+
+        - name: upload windows app
+          if: matrix.os == 'windows-latest'
+          uses: actions/upload-artifact@v2
+          with:
+            name: iProxyNightly-${{ runner.OS }}
+            path: release/*.exe
+
+        - name: upload mac app
+          if: matrix.os == 'macos-latest'
+          uses: actions/upload-artifact@v2
+          with:
+            name: iProxyNightly-${{ runner.OS }}
+            path: release/*.dmg
