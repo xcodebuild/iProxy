@@ -12,7 +12,7 @@
     "compile": "yarn run lint && yarn run compile-main && yarn run compile-renderer",
     "build": "yarn clean:dist && yarn syncversion && yarn compile ",
     "dist": "yarn run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --win --x64 --publish never",
-    "dist:mac": "yarn run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --x64",
+    "dist:mac": "yarn run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --universal",
     "dist:win": "yarn run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win --x64",
     "dist-codesign": "yarn run build && electron-builder --mac --win --x64 --publish never",
     "pack": "yarn dist --dir -c.compression=store -c.mac.identity=null",
