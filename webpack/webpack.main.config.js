@@ -7,7 +7,7 @@ const ForkTsCheckerWebpackPlugin = require('fork-ts-checker-webpack-plugin');
 
 const baseConfig = require('./webpack.base.config');
 
-module.exports = merge.smart(baseConfig, {
+module.exports = merge.merge(baseConfig, {
     target: 'electron-main',
     entry: {
         main: './src/main/index.ts',

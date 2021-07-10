@@ -7,6 +7,6 @@ if (process.env.BUNDLE_ANALYZER) {
     baseConfig.plugins.push(new BundleAnalyzerPlugin());
 }
 
-module.exports = merge.smart(baseConfig, {
+module.exports = merge.merge(baseConfig, {
     mode: 'production',
 });
