@@ -63,7 +63,7 @@
     "koa": "^2.11.0",
     "koa-static": "^5.0.0",
     "lodash": "^4.17.15",
-    "md5-file": "^4.0.0",
+    "md5-file": "^5.0.0",
     "mini-event-emitter": "^0.9.1",
     "monaco": "^1.201704190613.0+9ac64297a3b2ace5240299ba54b03f5029378397",
     "monaco-editor": "^0.25.2",
