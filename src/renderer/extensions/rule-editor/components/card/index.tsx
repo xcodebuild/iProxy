@@ -1,8 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import { Icon as LegacyIcon } from '@ant-design/compatible';
-import { Select } from 'antd';
+import { Popover, Select, Button, Dropdown, Menu } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { findDOMNode } from 'react-dom';
+import { MenuOutlined } from '@ant-design/icons';
 
 interface Props {
     onFinish: (val: Option) => void;
@@ -116,36 +117,38 @@ export const Card = (props: Props) => {
     }, []);
 
     return (
-        <Select
-            showSearch
-            // defaultValue="add-cors"
-            onChange={val => {
-                const option = options.find(item => item.value === val) as Option;
-                onFinish(option);
-            }}
-            onBlur={onCancel}
-            ref={selectRef}
-            style={{
-                position: 'fixed',
-                top: y + 'px',
-                left: x + 'px',
-                width: '300px',
-            }}
-            showArrow={false}
-            className="ligthproxy-card"
+        <Dropdown
+            overlay={
+                <Menu>
+                     {options.map(item => {
+                        return (
+                            <Menu.Item key={item.value} onClick={() => {
+                                const option = options.find(findItem => findItem.value === item.value) as Option;
+                                onFinish(option);
+                            }}>
+                                <div className="iproxy-select-item">
+                                    <span className="iproxy-select-icon">
+                                        <LegacyIcon type={item.icon}></LegacyIcon>
+                                    </span>
+                                    <span className="iproxy-select-title">{t(item.title)}</span>
+                                </div>
+                            </Menu.Item>
+                        );
+                    })}
+                </Menu>
+            }
         >
-            {options.map(item => {
-                return (
-                    <Select.Option value={item.value} key={item.value}>
-                        <div className="iproxy-select-item">
-                            <span className="iproxy-select-icon">
-                                <LegacyIcon type={item.icon}></LegacyIcon>
-                            </span>
-                            <span className="iproxy-select-title">{t(item.title)}</span>
-                        </div>
-                    </Select.Option>
-                );
-            })}
-        </Select>
+            <Button
+                style={{
+                    left: x,
+                    top: y,
+                    position: 'absolute',
+                }}
+                size="small"
+                shape="circle"
+                icon={<MenuOutlined />}>
+            </Button>
+        </Dropdown>
+        
     );
 };
