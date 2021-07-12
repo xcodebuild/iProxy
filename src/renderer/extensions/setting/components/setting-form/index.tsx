@@ -1,7 +1,7 @@
 import { CheckOutlined, CloseOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import { Form } from '@ant-design/compatible';
 import '@ant-design/compatible/assets/index.css';
-import { Select, Button, Popover, Switch, InputNumber, Alert, Tooltip, Table } from 'antd';
+import { Select, Button, Popover, Switch, InputNumber, Alert, Tooltip, Table, Typography } from 'antd';
 import React, { useEffect, useState } from 'react';
 import { CoreAPI } from '../../../../core-api';
 import { message } from 'antd';
@@ -158,7 +158,11 @@ class InnerSettingForm extends React.Component {
                 <Form.Item label={t('Default Port')}>
                     {getFieldDecorator('defaultPort')(<InputNumber min={1024} max={65534} />)}
                 </Form.Item>
-                <Form.Item label={t('Copyright')}>Version {version} Made with love</Form.Item>
+                <Form.Item label={t('Copyright')}>
+                    <Typography>
+                        Version {version} Made with love
+                    </Typography>
+                </Form.Item>
                 <Form.Item label={t('Actions')}>
                     <Button className="action-btn" loading={this.state.isUpdating} onClick={checkUpdate} type="primary">
                         {t('Check Update')}

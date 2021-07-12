@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CoreAPI } from '../../core-api';
 import { Extension } from '../../extension';
+import { useThemeMode } from '../../hooks/use-theme-mode';
 import { getWhistlePort } from '../../utils';
 export class Weinre extends Extension {
     constructor() {
@@ -33,6 +34,8 @@ export class Weinre extends Extension {
                 };
             }, []);
 
+            const { isDarkMode } = useThemeMode();
+
             function changeIframeStyle() {
                 const iframeDocumentHead = document.querySelector('iframe')?.contentDocument?.querySelector('head');
                 if (iframeDocumentHead) {
@@ -46,8 +49,19 @@ export class Weinre extends Extension {
                     iframeDocumentHead.appendChild(customStyle);
 
                     const container = document.querySelector('iframe')?.contentDocument?.querySelector('.description');
+
                     if (container) {
-                        container.innerHTML = `<div>
+                        container.innerHTML = `<style>
+                        ${isDarkMode ? `
+                        .content-header {
+                            background: #3b3b3d !important;
+                        }
+                        div {
+                            color : #f0f0f0 !important;
+                        }
+                        `: ''}
+                        </style>
+                        <div>
                             通过代理访问带有 iproxy=true 参数的页面开始调试
                         </div>`;
                     }
