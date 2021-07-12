@@ -12,6 +12,7 @@ import path from 'path';
 import { IPROXY_FILES_DIR, SYSTEM_IS_MACOS } from './const';
 import { app, nativeTheme, BrowserWindow } from 'electron';
 import http from 'http';
+import * as process from "process";
 
 interface SwpanModuleProp {
     moduleId: string;
@@ -54,7 +55,7 @@ cp.spawn = function(cmd, argv, options) {
 require(decodeURIComponent('${modulePath}'));`;
     const startProcess = () => {
         const child = spwan(
-            nodeExe,
+            process.execPath,
             [
                 '-e',
                 `const code = decodeURIComponent("${encodeURIComponent(nodeScript)}");console.log(code);eval(code);`,
