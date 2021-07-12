@@ -14,7 +14,7 @@ jobs:
   build:
       strategy:
         matrix:
-          os: [windows-latest, macos-latest, macos-10.15]
+          os: [windows-latest, macos-latest]
       runs-on: ${{ matrix.os }}
       steps:
         - name: Check out Git repository
@@ -26,15 +26,8 @@ jobs:
             node-version: 14
 
         - name: Install deps
-          if: matrix.os != 'macos-10.15'
           run: |
             npm run install-deps
-            npm run dateversion
-
-        - name: Install deps for M1
-          if: matrix.os == 'macos-10.15'
-          run: |
-            env IS_ARM=1 npm run install-deps
             npm run dateversion
 
         - name: build windows app
@@ -51,13 +44,6 @@ jobs:
           env:
             GH_TOKEN: ${{ secrets.github_token }}
 
-        - name: build mac app for M1
-          if: matrix.os == 'macos-10.15'
-          run: |
-            npm run dist:mac-arm
-          env:
-            GH_TOKEN: ${{ secrets.github_token }}
-
         - name: upload windows app
           if: matrix.os == 'windows-latest'
           uses: actions/upload-artifact@v2
@@ -69,12 +55,5 @@ jobs:
           if: matrix.os == 'macos-latest'
           uses: actions/upload-artifact@v2
           with:
-            name: iProxyTesting-Intel-${{ runner.OS }}
-            path: release/*.dmg
-
-        - name: upload mac app for M1
-          if: matrix.os == 'macos-10.15'
-          uses: actions/upload-artifact@v2
-          with:
-            name: iProxyTesting-Apple-${{ runner.OS }}
+            name: iProxyTesting-${{ runner.OS }}
             path: release/*.dmg

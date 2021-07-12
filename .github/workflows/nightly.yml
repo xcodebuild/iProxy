@@ -6,69 +6,48 @@ on:
 
 jobs:
   build:
-    strategy:
-      matrix:
-        os: [windows-latest, macos-latest, macos-10.15]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Check out Git repository
-        uses: actions/checkout@v1
+      strategy:
+        matrix:
+          os: [windows-latest, macos-latest]
+      runs-on: ${{ matrix.os }}
+      steps:
+        - name: Check out Git repository
+          uses: actions/checkout@v1
 
-      - name: Install Node.js, NPM and Yarn
-        uses: actions/setup-node@v1
-        with:
-          node-version: 14
+        - name: Install Node.js, NPM and Yarn
+          uses: actions/setup-node@v1
+          with:
+            node-version: 14
 
-      - name: Install deps
-        if: matrix.os != 'macos-10.15'
-        run: |
-          npm run install-deps
-          npm run nightlyversion
+        - name: Install deps
+          run: |
+            npm run install-deps
+            npm run nightlyversion
 
-      - name: Install deps for M1
-        if: matrix.os == 'macos-10.15'
-        run: |
-          env IS_ARM=1 npm run install-deps
-          npm run nightlyversion
+        - name: build windows app
+          if: matrix.os == 'windows-latest'
+          run: |
+            npm run dist:win
+          env:
+            GH_TOKEN: ${{ secrets.github_token }}
 
-      - name: build windows app
-        if: matrix.os == 'windows-latest'
-        run: |
-          npm run dist:win
-        env:
-          GH_TOKEN: ${{ secrets.github_token }}
+        - name: build mac app
+          if: matrix.os == 'macos-latest'
+          run: |
+            npm run dist:mac
+          env:
+            GH_TOKEN: ${{ secrets.github_token }}
 
-      - name: build mac app
-        if: matrix.os == 'macos-latest'
-        run: |
-          npm run dist:mac
-        env:
-          GH_TOKEN: ${{ secrets.github_token }}
+        - name: upload windows app
+          if: matrix.os == 'windows-latest'
+          uses: actions/upload-artifact@v2
+          with:
+            name: iProxyNightly-${{ runner.OS }}
+            path: release/*.exe
 
-      - name: build mac app for M1
-        if: matrix.os == 'macos-10.15'
-        run: |
-          npm run dist:mac-arm
-        env:
-          GH_TOKEN: ${{ secrets.github_token }}
-
-      - name: upload windows app
-        if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v2
-        with:
-          name: iProxyNightly-${{ runner.OS }}
-          path: release/*.exe
-
-      - name: upload mac app
-        if: matrix.os == 'macos-latest'
-        uses: actions/upload-artifact@v2
-        with:
-          name: iProxyNightly-Intel-${{ runner.OS }}
-          path: release/*.dmg
-
-      - name: upload mac app for M1
-        if: matrix.os == 'macos-10.15'
-        uses: actions/upload-artifact@v2
-        with:
-          name: iProxyNightly-Apple-${{ runner.OS }}
-          path: release/*.dmg
+        - name: upload mac app
+          if: matrix.os == 'macos-latest'
+          uses: actions/upload-artifact@v2
+          with:
+            name: iProxyNightly-${{ runner.OS }}
+            path: release/*.dmg
