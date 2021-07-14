@@ -101,7 +101,7 @@
     "@types/event-emitter": "^0.3.3",
     "@types/fs-extra-promise": "^1.0.8",
     "@types/ip": "^1.1.0",
-    "@types/jest": "^24.0.25",
+    "@types/jest": "^26.0.24",
     "@types/koa": "^2.11.0",
     "@types/koa-static": "^4.0.1",
     "@types/lodash": "^4.14.149",
