@@ -95,7 +95,7 @@
     "@babel/preset-env": "^7.8.2",
     "@babel/preset-react": "^7.8.0",
     "@babel/preset-typescript": "^7.8.0",
-    "@hot-loader/react-dom": "^16.11.0",
+    "@hot-loader/react-dom": "^17.0.1",
     "@types/classnames": "^2.2.9",
     "@types/cross-spawn": "^6.0.1",
     "@types/event-emitter": "^0.3.3",
