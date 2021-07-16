@@ -1,4 +1,5 @@
-[![Build/release](https://github.com/xcodebuild/iproxy/actions/workflows/build.yml/badge.svg)](https://github.com/xcodebuild/iproxy/actions/workflows/build.yml)![GitHub issues](https://img.shields.io/github/issues/xcodebuild/iproxy)
+[![CI](https://github.com/xcodebuild/iProxy/actions/workflows/ci.yml/badge.svg)](https://github.com/xcodebuild/iProxy/actions/workflows/ci.yml)
+![GitHub issues](https://img.shields.io/github/issues/xcodebuild/iproxy)
 ![GitHub closed issues](https://img.shields.io/github/issues-closed-raw/xcodebuild/iproxy)
 [![Hits](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fgithub.com%2Fxcodebuild%2Fiproxy&count_bg=%2379C83D&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=hits&edge_flat=false)](https://hits.seeyoufarm.com)
 
