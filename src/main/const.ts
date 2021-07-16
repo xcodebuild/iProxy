@@ -34,13 +34,13 @@ export const PROXY_REFRESH_WINDOWS_HELPER_PATH = path.join(IPROXY_FILES_DIR, './
 let PLATFORM_IPROXY_NODE = "";
 
 if (SYSTEM_IS_LINUX) {
-    PLATFORM_IPROXY_NODE = 'lightproxy-node-linux';
+    PLATFORM_IPROXY_NODE = 'iproxy-node-linux';
 }
 else if (SYSTEM_IS_MACOS) {
-    PLATFORM_IPROXY_NODE = "lightproxy-node-macos";
+    PLATFORM_IPROXY_NODE = "iproxy-node-macos";
 }
 else {
-    PLATFORM_IPROXY_NODE = "lightproxy-node-win.exe";
+    PLATFORM_IPROXY_NODE = "iproxy-node-win.exe";
 }
 
 export const IPROXY_NODEJS_PATH = path.join(IPROXY_FILES_DIR, '/node/' + PLATFORM_IPROXY_NODE);
