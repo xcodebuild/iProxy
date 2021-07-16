@@ -37,7 +37,7 @@
     "@ant-design/compatible": "^1.0.8",
     "@ant-design/icons": "^4.6.2",
     "@sentry/electron": "2.5.1",
-    "@sentry/node": "5.10.2",
+    "@sentry/node": "6.9.0",
     "@timkendrick/monaco-editor": "^0.0.9",
     "@umijs/hooks": "^1.9.3",
     "@xcodebuild/global-proxy": "^0.0.6",
