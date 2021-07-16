@@ -109,7 +109,7 @@
     "@types/node-downloader-helper": "^1.0.0",
     "@types/node-fetch": "^2.5.4",
     "@types/react": "^17.0.14",
-    "@types/react-beautiful-dnd": "^11.0.3",
+    "@types/react-beautiful-dnd": "^13.1.1",
     "@types/react-dom": "^16.9.4",
     "@types/universal-analytics": "^0.4.3",
     "@types/ws": "^7.4.6",
