@@ -9,7 +9,7 @@ import checkInstallStatus from './install';
 import treeKill from 'tree-kill';
 import ip from 'ip';
 import path from 'path';
-import { IPROXY_FILES_DIR, SYSTEM_IS_MACOS } from './const';
+import { IPROXY_FILES_DIR, SYSTEM_IS_MACOS, SYSTEM_IS_LINUX } from './const';
 import { app, nativeTheme, BrowserWindow } from 'electron';
 import http from 'http';
 import * as process from "process";
@@ -33,9 +33,13 @@ async function spawnModule(props: any) {
     const nodeModulePath = path.join(IPROXY_FILES_DIR, `/node/node_modules/`);
     const modulePath = encodeURIComponent(path.join(nodeModulePath, `${moduleId}/index.js`));
 
-    const nodeExe = SYSTEM_IS_MACOS
-        ? path.join(IPROXY_FILES_DIR, './node/node-mac')
-        : path.join(IPROXY_FILES_DIR, './node/node-win.exe');
+    if (SYSTEM_IS_MACOS) {
+        const nodeExe = path.join(IPROXY_FILES_DIR, './node/node-mac');
+    } else if (SYSTEM_IS_LINUX) {
+        const nodeExe = path.join(IPROXY_FILES_DIR, './node/node-linux');
+    } else {
+        const nodeExe = path.join(IPROXY_FILES_DIR, './node/node-win.exe');
+    }
 
     const nodeScript = `
 const cp = require('child_process');
