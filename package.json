@@ -144,7 +144,7 @@
     "url-loader": "^4.1.1",
     "webpack": "^4.41.5",
     "webpack-build-notifier": "^2.0.0",
-    "webpack-bundle-analyzer": "^3.6.0",
+    "webpack-bundle-analyzer": "^4.4.2",
     "webpack-cli": "^3.3.10",
     "webpack-dev-server": "^3.9.0",
     "webpack-merge": "^5.8.0"
