@@ -138,6 +138,7 @@ export const Editor = (props: Props) => {
                                 editor.getAction('actions.find').run();
                             }, 50);
                         });
+                        // @ts-ignore
                         onMount(editor);
                     }}
                 />
