@@ -33,12 +33,16 @@ async function spawnModule(props: any) {
     const nodeModulePath = path.join(IPROXY_FILES_DIR, `/node/node_modules/`);
     const modulePath = encodeURIComponent(path.join(nodeModulePath, `${moduleId}/index.js`));
 
+    let nodeEXE = "";
     if (SYSTEM_IS_MACOS) {
-        const nodeExe = path.join(IPROXY_FILES_DIR, './node/node-mac');
+        nodeEXE = path.join(IPROXY_FILES_DIR, './node/node-mac');
+        const nodeExe = nodeEXE;
     } else if (SYSTEM_IS_LINUX) {
-        const nodeExe = path.join(IPROXY_FILES_DIR, './node/node-linux');
+        nodeEXE = path.join(IPROXY_FILES_DIR, './node/node-linux');
+        const nodeExe = nodeEXE;
     } else {
-        const nodeExe = path.join(IPROXY_FILES_DIR, './node/node-win.exe');
+        nodeEXE = path.join(IPROXY_FILES_DIR, './node/node-win.exe');
+        const nodeExe = nodeEXE;
     }
 
     const nodeScript = `

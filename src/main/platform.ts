@@ -139,7 +139,9 @@ export async function setSystemProxy(port: number) {
         const output = execSync(
             `gsettings set org.gnome.system.proxy mode "manual" && 
              gsettings set org.gnome.system.proxy.http host "127.0.0.1" && 
-             gsettings set org.gnome.system.proxy.http port ${port}`
+             gsettings set org.gnome.system.proxy.http port ${port} &&
+             gsettings set org.gnome.system.proxy.https host "127.0.0.1" && 
+             gsettings set org.gnome.system.proxy.https port ${port}`
         );        
     } else {
         return globalProxy
