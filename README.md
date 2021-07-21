@@ -46,6 +46,20 @@
 
 [Windows Version Download](https://gw.alipayobjects.com/os/iProxy/iProxy-Setup.exe)
 
+Linux(Deepin) comming soon
+
+## About Linux Version
+
+iProxy supports Linux now! It is contributed by the Deepin Beijing Develop Team.
+
+Supported desktop environment: Gnome and DDE.
+
+Supported linux distribution: Debian, Ubuntu, deepin, etc.
+
+Unsupported desktop environment: KDE.
+
+Fedora and Arch Linux: please replace libnss3-tools with the package name of your distribution.
+
 ## Quick Start
 
 Take a quick start at: https://yuque.com/iproxy
