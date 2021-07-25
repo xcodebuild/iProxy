@@ -14,7 +14,7 @@ jobs:
   build:
       strategy:
         matrix:
-          os: [windows-latest, macos-latest]
+          os: [windows-latest, macos-latest, ubuntu-latest]
       runs-on: ${{ matrix.os }}
       steps:
         - name: Check out Git repository
@@ -44,6 +44,13 @@ jobs:
           env:
             GH_TOKEN: ${{ secrets.github_token }}
 
+        - name: build linux app
+          if: matrix.os == 'ubuntu-latest'
+          run: |
+            npm run dist:linux
+          env:
+            GH_TOKEN: ${{ secrets.github_token }}
+
         - name: upload windows app
           if: matrix.os == 'windows-latest'
           uses: actions/upload-artifact@v2
@@ -57,3 +64,10 @@ jobs:
           with:
             name: iProxyTesting-${{ runner.OS }}
             path: release/*.dmg
+
+        - name: upload linux app
+          if: matrix.os == 'ubuntu-latest'
+          uses: actions/upload-artifact@v2
+          with:
+            name: iProxyTesting-${{ runner.OS }}
+            path: release/*.AppImage
