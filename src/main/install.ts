@@ -18,6 +18,7 @@ import {
     IPROXY_CERT_DIR_PATH,
     IPROXY_CERT_KEY_PATH,
     SYSTEM_IS_MACOS,
+    SYSTEM_IS_LINUX,    
     PROXY_CONF_HELPER_PATH,
     PROXY_CONF_HELPER_FILE_PATH,
 } from './const';
@@ -25,6 +26,8 @@ import { clipboard, dialog } from 'electron';
 import treeKill from 'tree-kill';
 
 import logger from 'electron-log';
+
+import * as shell from 'shelljs';
 
 const pki = forge.pki;
 
@@ -107,6 +110,7 @@ Windows user Please try to enable Property => Compatibility => Run program as Ad
 安装证书或者 helper 过程中授权失败
 macOS 用户请尝试在弹出的对话框中输入用户密码
 Windows 用户请尝试打开在 属性 => 兼容性 => 以管理员身份运营该应用
+Deepin GNU/Linux 用户请安装libnss3-tools然后重启本软件
 
 Application will quit
 应用程序即将退出
@@ -161,6 +165,27 @@ export async function installCertAndHelper() {
                 showGuide();
             }
             resolve(true);
+        } else if (SYSTEM_IS_LINUX) {
+            // only tested in deepin
+            if (!shell.which('certutil')) {
+                reject("证书未成功安装，请先确认libnss3-tools是否安装");  
+            } else {
+                const command = `certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n iProxy -i "${path.join(
+                    dir,
+                    CERT_FILE_NAME,
+                )}" && touch ${INSTALL_DONE_FILE} && echo "安装完成"`;
+                console.log('run command', command);
+                try {
+                    const output = execSync(command, {
+                        // @ts-ignore
+                        windowsHide: true,
+                    });
+                    console.log('certutil result', output.toString());
+                } catch (e) {
+                    console.log('error', e.message, e.stderr.toString(), e.stdout.toString());
+                }
+            }
+            resolve(true);
         } else {
             dialog.showMessageBoxSync({
                 type: 'info',
@@ -198,7 +223,6 @@ export async function installCertAndHelper() {
         // prevent copy cert after failed
         return;
     }
-
     console.log('after install');
     // 信任完成，把证书目录拷贝过去
     await fs.copyAsync(dir, IPROXY_CERT_DIR_PATH);

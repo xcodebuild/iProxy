@@ -7,8 +7,10 @@ import { PROXY_CONF_HELPER_PATH, PROXY_REFRESH_WINDOWS_HELPER_PATH } from './con
 import logger from 'electron-log';
 import globalProxy from '@xcodebuild/global-proxy';
 
-const systemType = os.type();
-const SYSTEM_IS_MACOS = systemType === 'Darwin';
+const systemTypemac = os.type();
+const systemTypelinux = os.type();
+export const SYSTEM_IS_MACOS = systemTypemac === 'Darwin';
+export const SYSTEM_IS_LINUX = systemTypelinux === 'Linux';
 
 export function hideIconInDock() {
     if (SYSTEM_IS_MACOS) {
@@ -40,7 +42,7 @@ function covertOutputToJSON(output: string) {
 
 export async function checkSystemProxyWork(address: string, port: number) {
     return new Promise((resolve, reject) => {
-        if (!SYSTEM_IS_MACOS) {
+        if (!SYSTEM_IS_MACOS && !SYSTEM_IS_LINUX) {
             // Windows
             const WINDOWS_QUERY_PROXY = `reg query "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings"`;
 
@@ -111,6 +113,9 @@ export async function setSystemProxy(port: number) {
     if (port === 0) {
         if (SYSTEM_IS_MACOS) {
             execSync(`'${PROXY_CONF_HELPER_PATH}' -m off`);
+        } else if (SYSTEM_IS_LINUX) {
+            //仅在Deepin测试
+            execSync(`gsettings set org.gnome.system.proxy mode "none"`);
         } else {
             return globalProxy
                 .disable()
@@ -129,6 +134,15 @@ export async function setSystemProxy(port: number) {
             `'${PROXY_CONF_HELPER_PATH}' -m global -p ${port} -r ${port} -s 127.0.0.1 -x "*.lan, *.ali.com, *.hz.ali.com, *.symantacliveupdate.com, *.symantac.com, irmaagent.effirst.com:8080"`,
         );
         logger.info('stdout', output.toString());
+    } else if (SYSTEM_IS_LINUX) {
+        //仅在Deepin测试
+        const output = execSync(
+            `gsettings set org.gnome.system.proxy mode "manual" && 
+             gsettings set org.gnome.system.proxy.http host "127.0.0.1" && 
+             gsettings set org.gnome.system.proxy.http port ${port} &&
+             gsettings set org.gnome.system.proxy.https host "127.0.0.1" && 
+             gsettings set org.gnome.system.proxy.https port ${port}`
+        );        
     } else {
         return globalProxy
             .enable('127.0.0.1', port, 'http')
