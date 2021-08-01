@@ -144,7 +144,7 @@
     "style-loader": "^1.0.2",
     "typescript": "^3.7.3",
     "url-loader": "^4.1.1",
-    "webpack": "^4.41.5",
+    "webpack": "^5.47.1",
     "webpack-build-notifier": "^2.0.0",
     "webpack-bundle-analyzer": "^4.4.2",
     "webpack-cli": "^3.3.10",
