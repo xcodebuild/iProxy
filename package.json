@@ -67,7 +67,7 @@
     "mini-event-emitter": "^0.9.1",
     "monaco": "^1.201704190613.0+9ac64297a3b2ace5240299ba54b03f5029378397",
     "monaco-editor": "^0.25.2",
-    "monaco-editor-webpack-plugin": "^1.7.0",
+    "monaco-editor-webpack-plugin": "^4.1.1",
     "node-downloader-helper": "^1.0.11",
     "node-fetch": "^2.6.0",
     "node-gzip": "^1.1.2",
