@@ -20,6 +20,7 @@ var initSocketMgr = require('./socket-mgr');
 var tunnelProxy = require('./tunnel');
 var upgradeProxy = require('./upgrade');
 var proc = require('./util/process');
+var perf = require('./util/perf');
 
 function handleClientError(err, socket) {
   if (!socket.writable) {
@@ -48,6 +49,8 @@ function proxy(callback) {
     mw && app.use((typeof mw == 'string' ? require(mw) : mw).bind(proxyEvents));
   });
   server.on('clientError', handleClientError);
+  pluginMgr.setProxy(proxyEvents);
+  perf.setProxy(proxyEvents);
   initSocketMgr(proxyEvents);
   setupHttps(server, proxyEvents);
   exportInterfaces(proxyEvents);

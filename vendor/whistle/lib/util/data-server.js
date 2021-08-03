@@ -197,6 +197,9 @@ module.exports = function init(_proxy) {
     var result;
     if (ip === 'self') {
       ip = clientIp;
+      cid = clientId;
+    } else if (ip === 'clientIp') {
+      ip = clientIp;
     } if (ip === 'clientId') {
       if (clientId) {
         cid = clientId;
@@ -211,6 +214,9 @@ module.exports = function init(_proxy) {
           cid = clientId;
         } else {
           if (item === 'self') {
+            cid = clientId;
+            item = clientIp;
+          } else if (item === 'clientIp') {
             item = clientIp;
           }
           if (net.isIP(item) && list.indexOf(item) === -1) {
@@ -268,8 +274,8 @@ module.exports = function init(_proxy) {
     if (filter.clientIp) {
       return clientId === filter.clientIp;
     }
-    if (filter.ip) {
-      return clientIp === filter.ip;
+    if (filter.ip && clientIp === filter.ip) {
+      return true;
     }
     // 有 clientId 过滤条件时，必须匹配 clientId
     if (filter.clientId) {
@@ -319,7 +325,7 @@ module.exports = function init(_proxy) {
   }
 
   function getClientId(item) {
-    return item.req.headers[config.CLIENT_ID_HEADER] || item.clientId;
+    return item._clientId || item.req.headers[config.CLIENT_ID_HEADER] || item.clientId;
   }
 
   function checkItem(item, filter) {

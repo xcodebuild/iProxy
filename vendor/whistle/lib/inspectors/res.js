@@ -961,6 +961,9 @@ module.exports = function(req, res, next) {
                         res.addTrailers(formatHeaders(trailers, rawHeaderNames));
                       } catch (e) {}
                     });
+                    if (res.flushHeaders && (!req.disable.flushHeaders || req.enable.flushHeaders)) {
+                      res.flushHeaders();
+                    }
                   } catch(e) {
                     e._resError = true;
                     util.emitError(res, e);

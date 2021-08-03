@@ -27,6 +27,10 @@ function getAtRule(rule) {
   return rule.rawPattern + ' @' + rule.matcher.substring(4);
 }
 
+function getVarRule(rule) {
+  return rule.rawPattern + ' %' + rule.matcher.substring(4);
+}
+
 function getStr(str) {
   return str ? ' ' + str : '';
 }
@@ -197,6 +201,13 @@ var Overview = React.createClass({
           atCtn = [getAtRule(atRule)];
           atTitle = [atRule.raw];
         }
+        var pList = rules.P;
+        if (pList) {
+          pList.forEach(function(item) {
+            atCtn.push(getVarRule(item));
+            atTitle = [item.raw];
+          });
+        }
         if (clientCert) {
           atCtn = atCtn || [];
           atTitle = atTitle || [];
@@ -252,7 +263,7 @@ var Overview = React.createClass({
 
     return (
       <div ref="container" className={'fill orient-vertical-box w-detail-content w-detail-overview' + (util.getBoolean(this.props.hide) ? ' hide' : '')}>
-        <Properties modal={overviewModal} rawName="Raw Url" rawValue={rawUrl} />
+        <Properties modal={overviewModal} rawName="Original Url" rawValue={rawUrl} />
         <p className="w-detail-overview-title" style={{ background: showOnlyMatchRules ? 'lightyellow' : undefined }}>
           <a href="https://avwo.github.io/whistle/rules/" target="_blank"><span className="glyphicon glyphicon-question-sign"></span></a>All Rules:
           <label><input checked={showOnlyMatchRules} onChange={this.showOnlyMatchRules} type="checkbox" />Only show matching rules</label>

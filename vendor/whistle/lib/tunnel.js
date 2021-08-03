@@ -80,7 +80,7 @@ function tunnelProxy(server, proxy) {
       isLocalUIUrl = options.port == config.port || options.port == config.uiport;
     }
     var _rules = req.rules = reqSocket.rules = (isICloundCKDB || isLocalUIUrl) ? {} : rules.initRules(req);
-    reqSocket._pluginVars = req._pluginVars;
+    reqSocket._globalPluginVars = req._globalPluginVars;
     rules.resolveRulesFile(req, function() {
       var filter = req.filter;
       var disable = req.disable;
@@ -166,6 +166,7 @@ function tunnelProxy(server, proxy) {
           var enable = req.enable;
           inspect = util.isInspect(enable) || util.isCustomParser(req);
           reqData = {
+            _clientId: util.getComposerClientId(headers),
             ip: req.clientIp,
             port: req.clientPort,
             method: req.method,
@@ -250,7 +251,7 @@ function tunnelProxy(server, proxy) {
               if (err) {
                 return sendEstablished(500);
               }
-              var tunnelPort = ports && (ports.tunnelPort || ports.port);
+              var tunnelPort = ports && ports.tunnelPort;
               var proxyUrl;
               if(tunnelPort) {
                 proxyUrl = 'proxy://127.0.0.1:' + tunnelPort;

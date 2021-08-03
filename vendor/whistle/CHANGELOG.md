@@ -1,3 +1,30 @@
+
+# v2.7.11
+1. feat: 插件 hook 支持 `async-await`：
+
+		``` js
+		module.exports = async (server, options) => {
+			// ... do sth
+		};
+		```
+2. feat: `pipe://xxx` 支持插件内部通过 `req.originalReq.ruleValue` 获取 `xxx://value` 的 `value` 值
+
+# v2.7.10
+1. feat: 支持通过 `-M disableForwardedHost` 禁止 Whistle 使用 `x-forwarded-host` 请求头，默认 Whistle 会用该请求头作为请求 URL 的域名
+2. feat: 支持通过 `-M disableForwardedProto` 禁止 Whistle 使用 `x-forwarded-proto` 请求头，默认当该请求头值为 `https` 时， Whistle 会把请求当成 HTTPS 处理
+3. feat: 第三方通过 `const proxy = startWhistle(options);` 启动 Whistle 时，可以通过 `proxy.on('perfDataChange', (perfData) => {})` 获取 cpu、内存、请求量等数据
+4. refactor: 第三方通过 `const proxy = startWhistle(options);` 启动 Whistle 时，可以通过 `proxy.on('pluginLoad', child, name, moduleName);`、`proxy.on('pluginLoadError', err, name, moduleName);` 监听插件启动信息
+
+# v2.7.9
+1. feat: 支持 `pattern %plugin=xxx`
+2. feat: 支持插件通过 `options.getTop(data => data && console.log(data))` 获取所在 Whistle 的 CPU、内存及请求量等信息
+
+# v2.7.8
+1. feat: 源码目录添加 Dockerfile: https://github.com/avwo/whistle/pull/601
+2. feat: 支持在插件的根目录执行 `w2 run` 时自动加载该插件
+3. refactor: 设置 `resCors://enable` 如果请求头不存在 `origin` 则自动忽略该设置
+4. fix: https://github.com/avwo/whistle/issues/600
+
 # v2.7.7
 1. fix: [pipe](https://wproxy.org/whistle/rules/pipe.html) 无法直接透传 WebSocket 的二进制包问题
 2. style: 支持显示自定义根证书及删除自定义证书导引

@@ -68,6 +68,7 @@ function resolveWebsocket(socket, wss) {
   };
   var resData = {};
   var data = {
+    _clientId: socket._clientId,
     id: socket.reqId,
     url: fullUrl,
     startTime: now,
@@ -195,7 +196,7 @@ function resolveWebsocket(socket, wss) {
         if (err) {
           return execCallback(err);
         }
-        var port = ports && ports.port;
+        var port = ports && ports.upgrade && ports.port;
         if (port) {
           options.port = port;
           data.realUrl = util.changePort(fullUrl, options.port);
@@ -824,6 +825,7 @@ function toHttp1(req, res) {
         return write.call(res, chunk, handleError);
       };
       svrRes.pipe(res);
+      res.flushHeaders && res.flushHeaders();
     } catch (e) {
       handleAbort();
     }

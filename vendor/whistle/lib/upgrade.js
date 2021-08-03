@@ -86,6 +86,7 @@ function upgradeHandler(req, socket) {
   util.onSocketEnd(socket, destroy);
 
   var headers = req.headers;
+  socket._clientId = util.getComposerClientId(headers);
   var getBuffer = function(method, newHeaders, path) {
     var rawData = [(method || 'GET') + ' ' + (path || socket.url || req.url) + ' ' + 'HTTP/1.1'];
     newHeaders = formatHeaders(newHeaders || headers, req.rawHeaders);
@@ -96,7 +97,9 @@ function upgradeHandler(req, socket) {
   var isHttps = socket.isHttps || !!headers[config.HTTPS_FIELD] || headers[config.HTTPS_PROTO_HEADER] === 'https';
   req.isHttps = socket.isHttps = isHttps;
   // format headers
-  socket.fullUrl = util.getFullUrl(req).replace('http', 'ws');
+  req.isWs = true;
+  socket.fullUrl = util.getFullUrl(req);
+  socket._fwdHost = req._fwdHost;
   var isWs = WS_RE.test(headers.upgrade);
   getPluginNameByReq(isWs ? req : null, function(err, uiPort) {
     if (err) {
