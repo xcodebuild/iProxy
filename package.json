@@ -52,7 +52,7 @@
     "electron-is-dev": "^1.1.0",
     "electron-log": "^4.0.0",
     "electron-promise-ipc": "^2.0.1",
-    "electron-store": "^5.1.0",
+    "electron-store": "^8.0.0",
     "electron-window-state": "^5.0.3",
     "exit-hook": "^2.2.0",
     "extract-zip": "^2.0.1",
