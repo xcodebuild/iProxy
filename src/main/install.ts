@@ -207,6 +207,7 @@ export async function installCertAndHelper() {
                 });
                 console.log('certutil result', output.toString());
             } catch (e) {
+                // @ts-ignore
                 console.log('error', e.message, e.stderr.toString(), e.stdout.toString());
             }
 
