@@ -18,7 +18,7 @@ import {
     IPROXY_CERT_DIR_PATH,
     IPROXY_CERT_KEY_PATH,
     SYSTEM_IS_MACOS,
-    SYSTEM_IS_LINUX,    
+    SYSTEM_IS_LINUX,
     PROXY_CONF_HELPER_PATH,
     PROXY_CONF_HELPER_FILE_PATH,
 } from './const';
@@ -36,7 +36,7 @@ const sudoOptions = {
 };
 
 async function generateCert() {
-    return new Promise(resolve => {
+    return new Promise((resolve) => {
         const keys = pki.rsa.generateKeyPair(2048);
         const cert = pki.createCertificate();
         cert.publicKey = keys.publicKey;
@@ -168,7 +168,7 @@ export async function installCertAndHelper() {
         } else if (SYSTEM_IS_LINUX) {
             // only tested in deepin
             if (!shell.which('certutil')) {
-                reject("证书未成功安装，请先确认libnss3-tools是否安装");  
+                reject('证书未成功安装，请先确认libnss3-tools是否安装');
             } else {
                 const command = `certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n iProxy -i "${path.join(
                     dir,
@@ -182,6 +182,7 @@ export async function installCertAndHelper() {
                     });
                     console.log('certutil result', output.toString());
                 } catch (e) {
+                    // @ts-ignore
                     console.log('error', e.message, e.stderr.toString(), e.stdout.toString());
                 }
             }
