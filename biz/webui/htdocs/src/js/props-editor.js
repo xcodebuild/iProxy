@@ -5,6 +5,7 @@ var ReactDOM = require('react-dom');
 var Dialog = require('./dialog');
 var util = require('./util');
 var message = require('./message');
+var win = require('./win');
 
 var MAX_FILE_SIZE = 1024 * 1024 * 20;
 var MAX_NAME_LEN = 128;
@@ -166,17 +167,20 @@ var PropsEditor = React.createClass({
     }, 600);
   },
   onRemove: function(e) {
-    if (this.props.disabled) {
+    var self = this;
+    if (self.props.disabled) {
       return;
     }
     var name = e.target.getAttribute('data-name');
-    var opName = this.props.isHeader ? 'header' : 'field';
-    var item = this.state.modal[name];
-    if (confirm('Are you sure to delete this ' + opName + ' \'' + item.name + '\'.')) {
-      delete this.state.modal[name];
-      this.props.onChange(item.name);
-      this.setState({});
-    }
+    var opName = self.props.isHeader ? 'header' : 'field';
+    var item = self.state.modal[name];
+    win.confirm('Are you sure to delete this ' + opName + ' \'' + item.name + '\'.', function(sure) {
+      if (sure) {
+        delete self.state.modal[name];
+        self.props.onChange(item.name);
+        self.setState({});
+      }
+    });
   },
   getFields: function() {
     var modal = this.state.modal || '';
@@ -207,7 +211,7 @@ var PropsEditor = React.createClass({
     var form = new FormData(ReactDOM.findDOMNode(this.refs.readLocalFileForm));
     var file = form.get('localFile');
     if (file.size > MAX_FILE_SIZE) {
-      return alert('The size of all files cannot exceed 20m.');
+      return win.alert('The size of all files cannot exceed 20m.');
     }
     var modal = this.state.modal || '';
     var size = file.size;
@@ -215,7 +219,7 @@ var PropsEditor = React.createClass({
       size += modal[key].size;
     });
     if (size > MAX_FILE_SIZE) {
-      return alert('The size of all files cannot exceed 20m.');
+      return win.alert('The size of all files cannot exceed 20m.');
     }
     var self = this;
     self.reading = true;

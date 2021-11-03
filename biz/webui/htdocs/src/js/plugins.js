@@ -7,8 +7,10 @@ var Dialog = require('./dialog');
 var SyncDialog = require('./sync-dialog');
 var dataCenter = require('./data-center');
 var util = require('./util');
+var win = require('./win');
 
 var CMD_RE = /^([\w]{1,12})(\s+-g)?$/;
+var pendingEnable;
 
 function getPluginComparator(plugins) {
   return function(a, b) {
@@ -16,6 +18,16 @@ function getPluginComparator(plugins) {
     var p2 = plugins[b];
     return util.compare(p1.priority, p2.priority) || util.compare(p2.mtime, p1.mtime) || (a > b ? 1 : -1);
   };
+}
+
+function enableAllPlugins(e) {
+  if (pendingEnable) {
+    return;
+  }
+  pendingEnable = setTimeout(function() {
+    pendingEnable = null;
+  }, 2000);
+  events.trigger('disableAllPlugins', e);
 }
 
 function getCmd(uninstall) {
@@ -29,6 +41,11 @@ function getCmd(uninstall) {
   }
   return cmdName + (uninstall ? 'uninstall' : 'install') + g + ' ';
 }
+
+window.getWhistleProxyServerInfo = function() {
+  var serverInfo = dataCenter.getServerInfo();
+  return serverInfo && $.extend(true, {}, serverInfo);
+};
 
 var Home = React.createClass({
   componentDidMount: function() {
@@ -120,11 +137,14 @@ var Home = React.createClass({
     }, this.showMsgDialog);
   },
   enableAllPlugins: function(e) {
-    var data = this.props.data || {};
-    if (!data.disabledAllPlugins || !confirm('Do you want to turn on Plugins?')) {
+    var self = this;
+    var data = self.props.data || {};
+    if (pendingEnable || !data.disabledAllPlugins) {
       return;
     }
-    events.trigger('disableAllPlugins', e);
+    win.confirm('Do you want to turn on Plugins?', function(sure) {
+      sure && enableAllPlugins(e);
+    });
   },
   setUpdateAllBtnState: function() {
     events.trigger('setUpdateAllBtnState', this.hasNewPlugin);
@@ -167,6 +187,7 @@ var Home = React.createClass({
                   var plugin = plugins[name];
                   name = name.slice(0, -1);
                   var checked = !disabledPlugins[name];
+                  var openOutside = plugin.pluginHomepage && !plugin.openInPlugins;
                   var url = plugin.pluginHomepage || 'plugin.' + name + '/';
                   var hasNew = util.compareVersion(plugin.latest, plugin.version);
                   if (hasNew) {
@@ -181,14 +202,14 @@ var Home = React.createClass({
                           data-name={name} checked={ndp || checked} disabled={!ndp && disabled} onChange={self.props.onChange} className={ndp ? 'w-not-allowed' : undefined} />
                       </td>
                       <td className="w-plugins-date">{util.toLocaleString(new Date(plugin.mtime))}</td>
-                      <td className="w-plugins-name" title={plugin.moduleName}><a href={url} target="_blank" data-name={name} onClick={plugin.pluginHomepage ? null : self.onOpen}>{name}</a></td>
+                      <td className="w-plugins-name" title={plugin.moduleName}><a href={url} target="_blank" data-name={name} onClick={openOutside ? null : self.onOpen}>{name}</a></td>
                       <td className="w-plugins-version">
                         {plugin.homepage ? <a href={plugin.homepage} target="_blank">{plugin.version}</a> : plugin.version}
                         {hasNew ? (plugin.homepage ? <a className="w-new-version" href={plugin.homepage} target="_blank">{hasNew}</a>
                         : <span className="w-new-version">{hasNew}</span>) : undefined}
                       </td>
                       <td className="w-plugins-operation">
-                        <a href={url} target="_blank" data-name={name} className="w-plugin-btn" onClick={plugin.pluginHomepage ? null : self.onOpen}>Option</a>
+                        <a href={url} target="_blank" data-name={name} className="w-plugin-btn" onClick={openOutside ? null : self.onOpen}>Option</a>
                         {(plugin.rules || plugin._rules || plugin.resRules) ? <a draggable="false" data-name={name} onClick={self.showRules}>Rules</a> : <span className="disabled">Rules</span>}
                         {plugin.isProj ? <span className="disabled">Update</span> : <a draggable="false" className="w-plugin-btn w-plugin-update-btn"
                           data-name={name} onClick={self.showUpdate}>Update</a>}
@@ -331,7 +352,14 @@ var Tabs = React.createClass({
     }
 
     return (
-      <div className="w-nav-tabs fill orient-vertical-box" style={{display: self.props.hide ? 'none' : ''}}>
+      <div className="w-nav-tabs fill orient-vertical-box" style={{display: self.props.hide ? 'none' : '', paddingTop: disabled ? 0 : undefined}}>
+        {
+          disabled ?
+          <div className="w-record-status" style={{marginBottom: 5}}>
+          All plugins is disabled
+          <button className="btn btn-primary" onClick={enableAllPlugins}>Enable</button>
+          </div> : null
+        }
          <ul className="nav nav-tabs">
             <li className={'w-nav-home-tab' + (activeName == 'Home' ? ' active' : '')} data-name="Home"  onClick={self.props.onActive}><a draggable="false">Home</a></li>
             {tabs.map(function(tab) {

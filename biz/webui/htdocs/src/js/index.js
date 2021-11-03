@@ -27,6 +27,7 @@ var message = require('./message');
 var UpdateAllBtn = require('./update-all-btn');
 var ContextMenu = require('./context-menu');
 var CertsInfoDialog = require('./certs-info-dialog');
+var win = require('./win');
 
 var H2_RE = /http\/2\.0/i;
 var JSON_RE = /^\s*(?:[\{｛][\w\W]+[\}｝]|\[[\w\W]+\])\s*$/;
@@ -66,6 +67,14 @@ var LEFT_BAR_MENUS = [
   {
     name: 'Plugins',
     multiple: true
+  },
+  {
+    name: 'Clear',
+    icon: 'remove'
+  },
+  {
+    name: 'Save',
+    icon: 'save-file'
   }
 ];
 
@@ -516,6 +525,7 @@ var Index = React.createClass({
         latest: plugin.latest,
         hideLongProtocol: plugin.hideLongProtocol,
         hideShortProtocol: plugin.hideShortProtocol,
+        path: plugin.path,
         pluginVars: plugin.pluginVars
       });
     });
@@ -619,7 +629,7 @@ var Index = React.createClass({
     var self = this;
     var clipboard = new Clipboard('.w-copy-text');
     clipboard.on('error', function(e) {
-      alert('Copy failed.');
+      win.alert('Copy failed.');
     });
     clipboard = new Clipboard('.w-copy-text-with-tips');
     clipboard.on('error', function(e) {
@@ -648,9 +658,8 @@ var Index = React.createClass({
       self.valuesChanged = true;
       self.showReloadValues();
     });
-    events.on('disableAllPlugins', function(e) {
-      self.disableAllPlugins(e);
-    });
+    events.on('disableAllPlugins', self.disableAllPlugins);
+    events.on('disableAllRules', self.disableAllRules);
     events.on('showFiles', function(_, data) {
       self.files = self.files || data;
       self.showFiles();
@@ -675,49 +684,59 @@ var Index = React.createClass({
     events.on('recoverRules', function(_, data) {
       var modal = self.state.rules;
       var filename = data.filename;
-      if (modal.exists(filename) &&
-      !confirm('The name `' + filename + '`  already exists, whether to overwrite it?')) {
-        return;
-      }
-      dataCenter.rules.add({
-        name: filename,
-        value: data.data,
-        recycleFilename: data.name
-      }, function(result, xhr) {
-        if (result && result.ec === 0) {
-          var item = modal.add(filename, data.data);
-          self.setRulesActive(filename);
-          self.setState({ activeRules: item });
-          self.triggerRulesChange('create');
-          events.trigger('rulesRecycleList', result);
-        } else {
-          util.showSystemError(xhr);
+      var handleRecover = function(sure) {
+        if (!sure) {
+          return;
         }
-      });
+        dataCenter.rules.add({
+          name: filename,
+          value: data.data,
+          recycleFilename: data.name
+        }, function(result, xhr) {
+          if (result && result.ec === 0) {
+            var item = modal.add(filename, data.data);
+            self.setRulesActive(filename);
+            self.setState({ activeRules: item });
+            self.triggerRulesChange('create');
+            events.trigger('rulesRecycleList', result);
+          } else {
+            util.showSystemError(xhr);
+          }
+        });
+      };
+      if (!modal.exists(filename)) {
+        return handleRecover(true);
+      }
+      win.confirm('The name `' + filename + '`  already exists, whether to overwrite it?', handleRecover);
     });
 
     events.on('recoverValues', function(_, data) {
       var modal = self.state.values;
       var filename = data.filename;
-      if (modal.exists(filename) &&
-      !confirm('The name `' + filename + '`  already exists, whether to overwrite it?')) {
-        return;
-      }
-      dataCenter.values.add({
-        name: filename,
-        value: data.data,
-        recycleFilename: data.name
-      }, function(result, xhr) {
-        if (result && result.ec === 0) {
-          var item = modal.add(filename, data.data);
-          self.setValuesActive(filename);
-          self.setState({ activeValues: item });
-          self.triggerValuesChange('create');
-          events.trigger('valuesRecycleList', result);
-        } else {
-          util.showSystemError(xhr);
+      var handleRecover = function(sure) {
+        if (!sure) {
+          return;
         }
-      });
+        dataCenter.values.add({
+          name: filename,
+          value: data.data,
+          recycleFilename: data.name
+        }, function(result, xhr) {
+          if (result && result.ec === 0) {
+            var item = modal.add(filename, data.data);
+            self.setValuesActive(filename);
+            self.setState({ activeValues: item });
+            self.triggerValuesChange('create');
+            events.trigger('valuesRecycleList', result);
+          } else {
+            util.showSystemError(xhr);
+          }
+        });
+      };
+      if (!modal.exists(filename)) {
+        return handleRecover(true);
+      }
+      win.confirm('The name `' + filename + '`  already exists, whether to overwrite it?', handleRecover);
     });
 
     $(document)
@@ -743,7 +762,7 @@ var Index = React.createClass({
           }
           if (/\.log$/i.test(file.name)) {
             if (file.size > MAX_LOG_SIZE) {
-              return alert('The file size cannot exceed 2m.');
+              return win.alert('The file size cannot exceed 2m.');
             }
             util.readFileAsText(file, function(logs) {
               logs = util.parseLogs(logs);
@@ -1158,7 +1177,7 @@ var Index = React.createClass({
             || (oldDisabledPlugins[plugin.name] != disabledPlugins[plugin.name])
             || plugin.hideLongProtocol != oldPlugin.hideLongProtocol
             || plugin.hideShortProtocol != oldPlugin.hideShortProtocol
-            || plugin.pluginVars != oldPlugin.pluginVars) {
+            || plugin.pluginVars != oldPlugin.pluginVars || plugin.path != oldPlugin.path) {
             hasUpdate = true;
             break;
           }
@@ -1589,7 +1608,7 @@ var Index = React.createClass({
         self.reloadRules(data);
         showResult && message.success('Successful synchronization Rules.');
       } else  {
-        alert(data.em);
+        win.alert(data.em);
       }
     });
   },
@@ -1602,7 +1621,7 @@ var Index = React.createClass({
         self.reloadValues(data);
         showResult && message.success('Successful synchronization Values.');
       } else {
-        alert(data.em);
+        win.alert(data.em);
       }
     });
   },
@@ -1614,11 +1633,11 @@ var Index = React.createClass({
     }
     var file = data.get('rules');
     if (!file || !/\.(txt|json)$/i.test(file.name)) {
-      return alert('Only supports .txt or .json file.');
+      return win.alert('Only supports .txt or .json file.');
     }
 
     if (file.size > MAX_OBJECT_SIZE) {
-      return alert('The file size cannot exceed 6m.');
+      return win.alert('The file size cannot exceed 6m.');
     }
     if ($(e.target).hasClass('btn-danger')) {
       data.append('replaceAll', '1');
@@ -1634,11 +1653,11 @@ var Index = React.createClass({
     }
     var file = data.get('values');
     if (!file || !/\.(txt|json)$/i.test(file.name)) {
-      return alert('Only supports .txt or .json file.');
+      return win.alert('Only supports .txt or .json file.');
     }
 
     if (file.size > MAX_OBJECT_SIZE) {
-      return alert('The file size cannot exceed 6m.');
+      return win.alert('The file size cannot exceed 6m.');
     }
     if ($(e.target).hasClass('btn-danger')) {
       data.append('replaceAll', '1');
@@ -1874,16 +1893,19 @@ var Index = React.createClass({
         }
       }
     }
-
-    if (name &&  this.state.plugins[name + ':']) {
+    var plugin = name &&  this.state.plugins[name + ':'];
+    if (plugin) {
       if (tabs.length >= MAX_PLUGINS_TABS) {
-        alert('You can only open ' + MAX_PLUGINS_TABS + ' tabs.');
+        win.alert('At most ' + MAX_PLUGINS_TABS + ' tabs can be opened at the same time.');
         return this.showPlugins();
       }
       active = name;
+      if (plugin.pluginHomepage && !plugin.openInPlugins) {
+        return window.open(plugin.pluginHomepage);
+      }
       tabs.push({
         name: name,
-        url: 'plugin.' + name + '/'
+        url: plugin.pluginHomepage || 'plugin.' + name + '/'
       });
     }
 
@@ -2034,13 +2056,14 @@ var Index = React.createClass({
   },
   enableHttp2: function(e) {
     if (!dataCenter.supportH2) {
-      if (window.confirm('The current version of Node.js cannot support HTTP/2.\nPlease upgrade to the latest LTS version.')) {
-        window.open('https://nodejs.org/');
-      }
-      this.setState({});
+      var self = this;
+      win.confirm('The current version of Node.js cannot support HTTP/2.\nPlease upgrade to the latest LTS version.',
+      function(sure) {
+        sure && window.open('https://nodejs.org/');
+        self.setState({});
+      });
       return;
     }
-    var self = this;
     var checked = e.target.checked;
     dataCenter.enableHttp2({enableHttp2: checked ? 1 : 0},
         function(data, xhr) {
@@ -2069,10 +2092,10 @@ var Index = React.createClass({
       message.error('The name \'' + name + '\' already exists.');
       return;
     }
-
-    dataCenter.rules.add({name: name}, function(data, xhr) {
+    var addToTop = e && e.target.getAttribute('data-type') === 'top' ? 1 : '';
+    dataCenter.rules.add({name: name, addToTop: addToTop}, function(data, xhr) {
       if (data && data.ec === 0) {
-        var item = modal.add(name);
+        var item = modal[addToTop ? 'unshift' : 'add'](name);
         self.setRulesActive(name);
         target.value = '';
         target.blur();
@@ -2268,14 +2291,17 @@ var Index = React.createClass({
         self.state.rules.setChanged(item.name, false);
         self.setState({});
         self.triggerRulesChange('save');
-        if (self.state.disabledAllRules &&
-          confirm('Rules has been turn off, do you want to turn on it?')) {
-          dataCenter.rules.disableAllRules({disabledAllRules: 0}, function(data, xhr) {
-            if (data && data.ec === 0) {
-              self.state.disabledAllRules = false;
-              self.setState({});
-            } else {
-              util.showSystemError(xhr);
+        if (self.state.disabledAllRules) {
+          win.confirm('Rules has been turn off, do you want to turn on it?', function(sure) {
+            if (sure) {
+              dataCenter.rules.disableAllRules({disabledAllRules: 0}, function(data, xhr) {
+                if (data && data.ec === 0) {
+                  self.state.disabledAllRules = false;
+                  self.setState({});
+                } else {
+                  util.showSystemError(xhr);
+                }
+              });
             }
           });
         }
@@ -2429,7 +2455,10 @@ var Index = React.createClass({
     var activeItem = item || modal.getActive();
     if (activeItem && !activeItem.isDefault) {
       var name = activeItem.name;
-      if (confirm('Are you sure to delete \'' + name + '\'.')) {
+      win.confirm('Are you sure to delete \'' + name + '\'.', function(sure) {
+        if (!sure) {
+          return;
+        }
         dataCenter.rules.remove({name: name}, function(data, xhr) {
           if (data && data.ec === 0) {
             var nextItem = item && !item.active ? null : modal.getSibling(name);
@@ -2443,7 +2472,7 @@ var Index = React.createClass({
             util.showSystemError(xhr);
           }
         });
-      }
+      });
     }
   },
   removeValues: function(item) {
@@ -2452,7 +2481,10 @@ var Index = React.createClass({
     var activeItem = item || modal.getActive();
     if (activeItem && !activeItem.isDefault) {
       var name = activeItem.name;
-      if (confirm('Are you sure to delete \'' + name + '\'.')) {
+      win.confirm('Are you sure to delete \'' + name + '\'.', function(sure) {
+        if (!sure) {
+          return;
+        }
         dataCenter.values.remove({name: name}, function(data, xhr) {
           if (data && data.ec === 0) {
             var nextItem = item && !item.active ? null : modal.getSibling(name);
@@ -2466,7 +2498,7 @@ var Index = React.createClass({
             util.showSystemError(xhr);
           }
         });
-      }
+      });
     }
   },
   setRulesActive: function(name, modal) {
@@ -2495,34 +2527,40 @@ var Index = React.createClass({
   handleCreate: function(item) {
     this.state.name == 'rules' ? this.showCreateRules() : this.showCreateValues();
   },
+  saveRulesOrValues: function() {
+    var self = this;
+    var state = self.state;
+    var list;
+    var isRules = state.name == 'rules';
+    if (isRules) {
+      list = state.rules.getChangedList();
+      if(list.length) {
+        list.forEach(function(item) {
+          self.selectRules(item);
+        });
+        self.setState({});
+      }
+    } else {
+      list = state.values.getChangedList();
+      if (list.length) {
+        list.forEach(function(item) {
+          self.saveValues(item);
+        });
+        self.setState({});
+      }
+    }
+  },
   onClickMenu: function(e) {
     var target = $(e.target).closest('a');
     var self = this;
     var state = self.state;
-    var list;
     var isRules = state.name == 'rules';
     if (target.hasClass('w-edit-menu')) {
       isRules ? self.showEditRules() : self.showEditValues();
     } else if (target.hasClass('w-delete-menu')) {
       isRules ? self.removeRules() : self.removeValues();
     } else if (target.hasClass('w-save-menu')) {
-      if (isRules) {
-        list = state.rules.getChangedList();
-        if(list.length) {
-          list.forEach(function(item) {
-            self.selectRules(item);
-          });
-          self.setState({});
-        }
-      } else {
-        list = state.values.getChangedList();
-        if (list.length) {
-          list.forEach(function(item) {
-            self.saveValues(item);
-          });
-          self.setState({});
-        }
-      }
+      self.saveRulesOrValues();
     }
   },
   showSettings: function(e) {
@@ -2604,6 +2642,30 @@ var Index = React.createClass({
     this.setState({
       autoValuesLineWrapping: checked
     });
+  },
+  confirmDisableAllRules: function(e) {
+    var self = this;
+    var state = self.state;
+    if (state.disabledAllRules) {
+      self.disableAllRules();
+    } else {
+      win.confirm('Are you sure to disable all rules', function(sure) {
+        sure && self.disableAllRules();
+      });
+    }
+    e && e.preventDefault();
+  },
+  confirmDisableAllPlugins: function(e) {
+    var self = this;
+    var state = self.state;
+    if (state.disabledAllPlugins) {
+      self.disableAllPlugins();
+    } else {
+      win.confirm('Are you sure to disable all plugins', function(sure) {
+        sure && self.disableAllPlugins();
+      });
+    }
+    e && e.preventDefault();
   },
   disableAllRules: function(e, callback) {
     var self = this;
@@ -2726,7 +2788,8 @@ var Index = React.createClass({
       if (!entry) {
         return;
       }
-      var startTime = new Date(entry.startedDateTime).getTime();
+      var times = entry.whistleTimes || '';
+      var startTime = new Date(times.startTime || entry.startedDateTime).getTime();
       if (isNaN(startTime)) {
         return;
       }
@@ -2791,19 +2854,27 @@ var Index = React.createClass({
         req: req,
         res: res,
         fwdHost: entry.whistleFwdHost,
+        sniPlugin: entry.whistleSniPlugin,
         rules: entry.whistleRules || {}
       };
-      var timings = entry.timings || {};
-      var endTime = Math.round(startTime + util.getTimeFromHar(entry.time));
-      startTime = Math.floor(startTime + util.getTimeFromHar(timings.dns));
-      session.dnsTime = startTime;
-      startTime = Math.floor(startTime + util.getTimeFromHar(timings.connect)
-      + util.getTimeFromHar(timings.ssl) + util.getTimeFromHar(timings.send)
-      + util.getTimeFromHar(timings.blocked) + util.getTimeFromHar(timings.wait));
-      session.requestTime = startTime;
-      startTime = Math.floor(startTime + util.getTimeFromHar(timings.receive));
-      session.responseTime = startTime;
-      session.endTime = Math.max(startTime, endTime);
+      if (times && times.startTime) {
+        session.dnsTime = times.dnsTime;
+        session.requestTime = times.requestTime;
+        session.responseTime = times.responseTime;
+        session.endTime = times.endTime;
+      } else {
+        var timings = entry.timings || {};
+        var endTime = Math.round(startTime + util.getTimeFromHar(entry.time));
+        startTime = Math.floor(startTime + util.getTimeFromHar(timings.dns));
+        session.dnsTime = startTime;
+        startTime = Math.floor(startTime + util.getTimeFromHar(timings.connect)
+        + util.getTimeFromHar(timings.ssl) + util.getTimeFromHar(timings.send)
+        + util.getTimeFromHar(timings.blocked) + util.getTimeFromHar(timings.wait));
+        session.requestTime = startTime;
+        startTime = Math.floor(startTime + util.getTimeFromHar(timings.receive));
+        session.responseTime = startTime;
+        session.endTime = Math.max(startTime, endTime);
+      }
       sessions.push(session);
     });
     dataCenter.addNetworkList(sessions);
@@ -2811,11 +2882,11 @@ var Index = React.createClass({
   uploadSessionsForm: function(data) {
     var file = data.get('importSessions');
     if (!file || !/\.(txt|json|saz|har)$/i.test(file.name)) {
-      return alert('Only supports .txt, .json, .saz or .har file.');
+      return win.alert('Only supports .txt, .json, .saz or .har file.');
     }
 
     if (file.size > MAX_FILE_SIZE) {
-      return alert('The file size cannot exceed 64m.');
+      return win.alert('The file size cannot exceed 64m.');
     }
     var isText = /\.txt$/i.test(file.name);
     if (isText || /\.har$/i.test(file.name)) {
@@ -2829,7 +2900,7 @@ var Index = React.createClass({
             self.importHarSessions(result);
           }
         } catch (e) {
-          alert('Unrecognized format.');
+          win.alert('Unrecognized format.');
         }
       });
       return;
@@ -2928,6 +2999,19 @@ var Index = React.createClass({
       list[0].checked = !!state.network.isTreeView;
       list[1].checked = !state.disabledAllRules;
       list[2].checked = !state.disabledAllPlugins;
+      var target = $(e.target);
+      list[3].hide = true;
+      list[4].hide = true;
+      if (target.closest('.w-network-menu').length) {
+        list[3].hide = false;
+      } else if (target.closest('.w-save-menu').length) {
+        list[4].hide = false;
+        if (target.closest('.w-rules-menu').length) {
+          list[4].disabled = !state.rules.hasChanged();
+        } else {
+          list[4].disabled = !state.values.hasChanged();
+        }
+      }
       this.refs.contextMenu.show(data);
     }
     e.preventDefault();
@@ -2953,6 +3037,12 @@ var Index = React.createClass({
         self.setState({});
       });
       break;
+    case 'Clear':
+      self.clear();
+      return;
+    case 'Save':
+      self.saveRulesOrValues();
+      return;
     }
     this.refs.contextMenu.show({});
   },
@@ -3131,14 +3221,14 @@ var Index = React.createClass({
             <span className={'glyphicon glyphicon-chevron-' + (showLeftMenu ? (mustHideLeftMenu ? 'down' : 'up') : 'left')}></span>
           </a>
           <div style={{display: rulesMode ? 'none' : undefined}} onMouseEnter={this.showNetworkOptions} onMouseLeave={this.hideNetworkOptions} className={'w-nav-menu w-menu-wrapper' + (showNetworkOptions ? ' w-menu-wrapper-show' : '')}>
-            <a onClick={this.showNetwork} onDoubleClick={this.toggleTreeView} className="w-network-menu"
-              title={'Double click to show' + (isTreeView ? ' List View' : ' Tree View')} style={{background: name == 'network' ? '#ddd' : null}}
-           draggable="false"><span className={'glyphicon glyphicon-' + networkType}></span>Network</a>
+            <a onClick={this.showNetwork} onDoubleClick={this.toggleTreeView} className={'w-network-menu' + (name == 'network' ? ' w-menu-selected' : '')}
+              title={'Double click to show' + (isTreeView ? ' List View' : ' Tree View')}
+              draggable="false"><span className={'glyphicon glyphicon-' + networkType}></span>Network</a>
             <MenuItem ref="networkMenuItem" options={state.networkOptions} className="w-network-menu-item" onClickOption={this.handleNetwork} />
           </div>
           <div style={{display: pluginsMode ? 'none' : undefined}} onMouseEnter={this.showRulesOptions} onMouseLeave={this.hideRulesOptions}
             className={'w-nav-menu w-menu-wrapper' + (showRulesOptions ? ' w-menu-wrapper-show' : '') + (isRules ? ' w-menu-auto' : '')}>
-            <a onClick={this.showRules} className="w-rules-menu" style={{background: name == 'rules' ? '#ddd' : null}} draggable="false">
+            <a onClick={this.showRules} className={'w-rules-menu' + (name == 'rules' ? ' w-menu-selected' : '')}  draggable="false">
               <span className={'glyphicon glyphicon-list' + (disabledAllRules ? ' w-disabled' : '')}></span>Rules</a>
             <MenuItem ref="rulesMenuItem"  name={name == 'rules' ? null : 'Open'} options={rulesOptions} checkedOptions={uncheckedRules} disabled={disabledAllRules}
               className="w-rules-menu-item"
@@ -3148,23 +3238,24 @@ var Index = React.createClass({
           </div>
           <div style={{display: pluginsMode ? 'none' : undefined}} onMouseEnter={this.showValuesOptions} onMouseLeave={this.hideValuesOptions}
             className={'w-nav-menu w-menu-wrapper' + (showValuesOptions ? ' w-menu-wrapper-show' : '') + (isValues ? ' w-menu-auto' : '')}>
-            <a onClick={this.showValues} className="w-values-menu" style={{background: name == 'values' ? '#ddd' : null}} draggable="false"><span className="glyphicon glyphicon-folder-close"></span>Values</a>
+            <a onClick={this.showValues} className={'w-values-menu' + (name == 'values' ? ' w-menu-selected' : '')}
+              draggable="false"><span className="glyphicon glyphicon-folder-close"></span>Values</a>
             <MenuItem ref="valuesMenuItem" name={name == 'values' ? null : 'Open'} options={state.valuesOptions} className="w-values-menu-item" onClick={this.showValues} onClickOption={this.showAndActiveValues} />
           </div>
           <div style={{display: rulesOnlyMode || pluginsOnlyMode ? 'none' : undefined}} ref="pluginsMenu" onMouseEnter={this.showPluginsOptions} onMouseLeave={this.hidePluginsOptions} className={'w-nav-menu w-menu-wrapper' + (showPluginsOptions ? ' w-menu-wrapper-show' : '')}>
-            <a onClick={this.showPlugins} className="w-plugins-menu" style={{background: name == 'plugins' ? '#ddd' : null}} draggable="false">
+            <a onClick={this.showPlugins} className={'w-plugins-menu' + (name == 'plugins' ? ' w-menu-selected' : '')} draggable="false">
               <span className={'glyphicon glyphicon-list-alt' + (disabledAllPlugins ? ' w-disabled' : '')}></span>Plugins</a>
             <MenuItem ref="pluginsMenuItem" name={name == 'plugins' ? null : 'Open'} options={pluginsOptions} checkedOptions={state.disabledPlugins} disabled={disabledAllPlugins}
               className="w-plugins-menu-item" onClick={this.showPlugins} onChange={this.disablePlugin} onClickOption={this.showAndActivePlugins} />
           </div>
-          {!state.ndr && <a onClick={this.disableAllRules} className="w-enable-plugin-menu"
+          {!state.ndr && <a onClick={this.confirmDisableAllRules} className="w-enable-rules-menu"
              title={disabledAllRules ? 'Enable all rules' : 'Disable all rules'}
             style={{display: isRules ? '' : 'none', color: disabledAllRules ? '#f66' : undefined}}
             draggable="false">
             <span className={'glyphicon glyphicon-' + (disabledAllRules ? 'play-circle' : 'off')}/>
             {disabledAllRules ? 'ON' : 'OFF'}
           </a>}
-          {!state.ndp && <a onClick={this.disableAllPlugins} className="w-enable-plugin-menu"
+          {!state.ndp && <a onClick={this.confirmDisableAllPlugins} className="w-enable-plugin-menu"
             title={disabledAllPlugins ? 'Enable all plugins' : 'Disable all plugins'}
             style={{display: isPlugins ? '' : 'none', color: disabledAllPlugins ? '#f66' : undefined}}
             draggable="false">
@@ -3242,7 +3333,7 @@ var Index = React.createClass({
               className="w-help-menu-item" />
           </div>
           <Online name={name} />
-          <div onMouseDown={this.preventBlur} style={{display: state.showCreateRules ? 'block' : 'none'}} className="shadow w-input-menu-item w-create-rules-input"><input ref="createRulesInput" onKeyDown={this.createRules} onBlur={this.hideRulesInput} type="text" maxLength="64" placeholder="Input the name" /><button type="button" onClick={this.createRules} className="btn btn-primary">+Rule</button></div>
+          <div onMouseDown={this.preventBlur} style={{display: state.showCreateRules ? 'block' : 'none'}} className="shadow w-input-menu-item w-create-rules-input"><input ref="createRulesInput" onKeyDown={this.createRules} onBlur={this.hideRulesInput} type="text" maxLength="64" placeholder="Input the name" /><button type="button" onClick={this.createRules} className="btn btn-primary">+Rule</button><button style={{marginLeft: 1}} type="button" onClick={this.createRules} data-type="top" className="btn btn-default">+Top</button></div>
           <div onMouseDown={this.preventBlur} style={{display: state.showCreateValues ? 'block' : 'none'}} className="shadow w-input-menu-item w-create-values-input"><input ref="createValuesInput" onKeyDown={this.createValues} onBlur={this.hideValuesInput} type="text" maxLength="64" placeholder="Input the key" /><button type="button" onClick={this.createValues} className="btn btn-primary">+Key</button></div>
           <div onMouseDown={this.preventBlur} style={{display: state.showCreateRuleGroup ? 'block' : 'none'}} className="shadow w-input-menu-item w-create-rules-input"><input ref="createRuleGroupInput" onKeyDown={this.createRules} onBlur={this.hideRuleGroup} type="text" maxLength="64" placeholder="Input the group name" /><button type="button" onClick={this.createRuleGroup} className="btn btn-primary">+Group</button></div>
           <div onMouseDown={this.preventBlur} style={{display: state.showCreateValueGroup ? 'block' : 'none'}} className="shadow w-input-menu-item w-create-values-input"><input ref="createValueGroupInput" onKeyDown={this.createValues} onBlur={this.hideValueGroup} type="text" maxLength="64" placeholder="Input the group name" /><button type="button" onClick={this.createValueGroup} className="btn btn-primary">+Group</button></div>
@@ -3251,47 +3342,30 @@ var Index = React.createClass({
         </div>
         <div className="w-container box fill">
           <ContextMenu onClick={this.onClickContextMenu} ref="contextMenu" />
-          <div onContextMenu={this.onContextMenu} className={'w-left-menu' + (forceShowLeftMenu ? ' w-hover-left-menu' : '')}
+          <div onContextMenu={this.onContextMenu} onDoubleClick={this.onContextMenu}
+            className={'w-left-menu' + (forceShowLeftMenu ? ' w-hover-left-menu' : '')}
             style={{display: networkMode || mustHideLeftMenu ? 'none' : undefined}}
             onMouseEnter={forceShowLeftMenu} onMouseLeave={forceHideLeftMenu}>
-            <a onClick={this.showNetwork} onDoubleClick={this.toggleTreeView}
-              title={'Double click to show' + (isTreeView ? ' List View' : ' Tree View')}
-              className="w-network-menu"
-              style={{
-                background: name == 'network' ? '#ddd' : null,
-                display: rulesMode ? 'none' : undefined
-              }}
-               draggable="false">
+            <a onClick={this.showNetwork}
+              className={'w-network-menu' + (name == 'network' ? ' w-menu-selected' : '')}
+              style={{ display: rulesMode ? 'none' : undefined }} draggable="false">
                 <span className={'glyphicon glyphicon-' + networkType}></span>
                 <i className="w-left-menu-name">Network</i>
             </a>
-            <a onClick={this.showRules} className="w-save-menu w-rules-menu"
-              onDoubleClick={this.onClickMenu}
-              title="Double click to save all changed"
-              style={{
-                background: name == 'rules' ? '#ddd' : null,
-                display: pluginsMode ? 'none' : undefined
-              }} draggable="false">
+            <a onClick={this.showRules} className={'w-save-menu w-rules-menu' + (name == 'rules' ? ' w-menu-selected' : '')}
+              style={{ display: pluginsMode ? 'none' : undefined }} draggable="false">
               <span className={'glyphicon glyphicon-list' + (disabledAllRules ? ' w-disabled' : '')} ></span>
               <i className="w-left-menu-name">Rules</i>
               <i className="w-menu-changed" style={{display: state.rules.hasChanged() ? undefined : 'none'}}>*</i>
             </a>
-            <a onClick={this.showValues} className="w-save-menu w-values-menu"
-              onDoubleClick={this.onClickMenu}
-              title="Double click to save all changed"
-              style={{
-                background: name == 'values' ? '#ddd' : null,
-                display: pluginsMode ? 'none' : undefined
-              }} draggable="false">
+            <a onClick={this.showValues} className={'w-save-menu w-values-menu' + (name == 'values' ? ' w-menu-selected' : '')}
+              style={{ display: pluginsMode ? 'none' : undefined }} draggable="false">
               <span className="glyphicon glyphicon-folder-close"></span>
               <i className="w-left-menu-name">Values</i>
               <i className="w-menu-changed" style={{display: state.values.hasChanged() ? undefined : 'none'}}>*</i>
             </a>
-            <a onClick={this.showPlugins} className="w-plugins-menu"
-              style={{
-                background: name == 'plugins' ? '#ddd' : null,
-                display: rulesOnlyMode || pluginsOnlyMode ? 'none' : undefined
-              }} draggable="false">
+            <a onClick={this.showPlugins} className={'w-plugins-menu' + (name == 'plugins' ? ' w-menu-selected' : '')}
+              style={{ display: rulesOnlyMode || pluginsOnlyMode ? 'none' : undefined }} draggable="false">
               <span className={'glyphicon glyphicon-list-alt' + (disabledAllPlugins ? ' w-disabled' : '')}></span>
               <i className="w-left-menu-name">Plugins</i>
             </a>

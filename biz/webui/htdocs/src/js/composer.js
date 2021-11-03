@@ -10,11 +10,13 @@ var Divider = require('./divider');
 var ResDetail = require('./res-detail');
 var Properties = require('./properties');
 var PropsEditor = require('./props-editor');
-var HistoryData = require('./history-data');
 var message = require('./message');
-var Dialog = require('./dialog');
+var win = require('./win');
 
-var METHODS = 'GET,POST,PUT,HEAD,TRACE,DELETE,SEARCH,CONNECT,UPGRADE,PROPFIND,PROPPATCH,MKCOL,COPY,MOVE,LOCK,UNLOCK,OPTIONS,PURGE,+ Method'.split(',');
+var METHODS = ['GET', 'POST', 'PUT', 'HEAD', 'TRACE', 'DELETE', 'SEARCH', 'CONNECT', 'UPGRADE',
+  'PROPFIND', 'PROPPATCH', 'MKCOL', 'COPY', 'MOVE', 'LOCK', 'UNLOCK', 'OPTIONS', 'PURGE', 'ACL',
+  'BIND', 'CHECKOUT', 'LINK', 'M-SEARCH', 'MERGE', 'MKACTIVITY', 'MKCALENDAR', 'NOTIFY', 'PATCH',
+  'PRI', 'REBIND', 'REPORT', 'SOURCE', 'SUBSCRIBE', 'UNBIND', 'UNLINK', 'UNSUBSCRIBE'];
 var TYPES = {
   form: 'application/x-www-form-urlencoded',
   upload: 'multipart/form-data',
@@ -28,9 +30,10 @@ var WS_RE = /^wss?:\/\//i;
 var WS_CONNNECT_RE = /^\s*connection\s*:\s*upgrade\s*$/im;
 var WS_UPGRADE_RE = /^\s*upgrade\s*:\s*websocket\s*$/im;
 var REV_TYPES = {};
-var MAX_TEXT_LEN = 200;
 var MAX_HEADERS_SIZE = 1024 * 64;
 var MAX_BODY_SIZE = 1024 * 128;
+var MAX_COUNT = 64;
+var ONE_MINS = 1000 * 60;
 Object.keys(TYPES).forEach(function(name) {
   REV_TYPES[TYPES[name]] = name;
 });
@@ -48,11 +51,6 @@ function hasReqBody(method, url, headers) {
     return true;
   }
   return headers && WS_CONNNECT_RE.test(headers) && WS_UPGRADE_RE.test(headers);
-}
-
-function getCustomMethodText() {
-  var text = storage.get('customComposerMethods');
-  return typeof text === 'string' ? text.substring(0, MAX_TEXT_LEN) : '';
 }
 
 function getType(headers) {
@@ -114,22 +112,18 @@ var Composer = React.createClass({
     var useH2 = storage.get('useH2InComposer') == '1';
     var disableComposerRules = storage.get('disableComposerRules') == '1';
     var method = data.method;
-    var methods = this.getCustomMethods();
     var body = getString(data.body);
     this.uploadBodyData = util.parseJSON(storage.get('composerUploadBody'));
-    if (methods.indexOf(method) === -1 || method === '+ Method') {
-      method = 'GET';
-    }
     if (body && body !== data.body) {
       message.warn('The length of the body cannot exceed 128k, and the excess will be truncated.');
     }
     return {
+      loading: true,
       historyData: [],
+      showHistory: !!storage.get('showHistory'),
       disableBody: !!storage.get('disableComposerBody'),
       url: data.url,
-      method: method,
-      methodText: getCustomMethodText(),
-      methods: methods,
+      method: METHODS.indexOf(method) === -1 ? 'GET' : method,
       headers: getString(data.headers, MAX_HEADERS_SIZE),
       body: body,
       tabName: 'Request',
@@ -151,7 +145,11 @@ var Composer = React.createClass({
         return;
       }
       var activeItem = self.props.modal;
-      if (activeItem) {
+      if (!activeItem) {
+        return;
+      }
+      var body = util.getBody(activeItem.req);
+      var updateComposer = function() {
         var state = {
           useH2: activeItem.useH2,
           url: activeItem.url,
@@ -174,20 +172,34 @@ var Composer = React.createClass({
           self.onComposerChange();
         });
         storage.set('useH2InComposer', activeItem.useH2 ? 1 : '');
+      };
+      if (body.length > MAX_BODY_SIZE) {
+        win.confirm('The request body is too long and will be truncated, continue?', function(allow) {
+          if (allow) {
+            updateComposer();
+          }
+        });
+      } else {
+        updateComposer();
       }
     });
     events.on('updateStrictMode', function() {
       self.setState({});
     });
     self.updatePrettyData();
-    self.loadHistory();
+    self.state.showHistory && self.loadHistory();
   },
   loadHistory: function() {
     var self = this;
+    if (self.state.loading === 2) {
+      return;
+    }
+    self.state.loading = 2;
     dataCenter.getHistory(function(data) {
       if (Array.isArray(data)) {
         self.setState({
-          historyData: data
+          loading: 0,
+          historyData: self.formatHistory(data)
         });
         return;
       }
@@ -227,7 +239,7 @@ var Composer = React.createClass({
       var value = getString(body);
       bodyElem.value = value;
       if (value !== body) {
-        message.warn('The length of the body cannot exceed 128k, and the excess will be truncated.');
+        message.warn('The length of request body > 128k, and has been truncated.');
       }
     }
     this.updatePrettyData();
@@ -274,26 +286,62 @@ var Composer = React.createClass({
     }
     return params;
   },
-  showHistory: function() {
-    this.refs.historyDialog.show();
-  },
   addHistory: function(params) {
-    var historyData = this.state.historyData;
-    params.now = Date.now();
+    var self = this;
+    var historyData = self.state.historyData;
+    params.date = Date.now();
     for (var i = 0, len = historyData.length; i < len; i++) {
       var item = historyData[i];
       if (item.url === params.url && item.method === params.method
         && item.headers === params.headers && item.body === params.body) {
+        if (item.selected) {
+          self._selectedItem = item;
+          params.selected = true;
+        }
         historyData.splice(i, 1);
         break;
       }
     }
     historyData.unshift(params);
-    var overflow = historyData.length - 36;
+    var overflow = historyData.length - MAX_COUNT;
     if (overflow > 0) {
-      historyData.splice(36, overflow);
+      historyData.splice(MAX_COUNT, overflow);
+      self._selectedItem = null;
+      historyData.forEach(function(item) {
+        if (item.selected) {
+          self._selectedItem = item;
+        }
+      });
     }
-    this.setState({});
+    self.setState({historyData: self.formatHistory(historyData)});
+  },
+  formatHistory: function(historyData) {
+    var result = [];
+    var curHours;
+    historyData.forEach(function(item) {
+      if (!item.url) {
+        return;
+      }
+      var time = Math.floor(item.date / ONE_MINS);
+      if (curHours !== time) {
+        curHours = time;
+        var date = new Date(item.date);
+        result.push({
+          title: date.getFullYear() + '-' + util.padding(date.getMonth() + 1) + '-' + util.padding(date.getDate())
+            + ' ' + util.padding(date.getHours()) + ':' + util.padding(date.getMinutes()),
+          time: curHours
+        });
+      }
+      if (!item.title) {
+        var title = [item.method + ' ' + item.url + ' HTTP/' + (item.useH2 ? '2.0' : '1.1')];
+        item.body = item.body || '';
+        item.headers && title.push(item.headers);
+        title.push('\n', item.body);
+        item.title = title.join('\n');
+      }
+      result.push(item);
+    });
+    return result;
   },
   onHexTextChange: function(e) {
     var isHexText = e.target.checked;
@@ -309,8 +357,11 @@ var Composer = React.createClass({
     storage.set('useCRLBody', isCRLF ? 1 : '');
     this.setState({ isCRLF: isCRLF });
   },
-  onCompose: function(item, enableBody) {
-    this.refs.historyDialog.hide();
+  onCompose: function() {
+    var item = this._selectedItem;
+    if (!item) {
+      return;
+    }
     var refs = this.refs;
     var isHexText = !!item.isHexText;
     ReactDOM.findDOMNode(refs.url).value = item.url;
@@ -324,15 +375,19 @@ var Composer = React.createClass({
     this.state.url = item.url;
     this.state.useH2 = item.useH2;
     this.state.headers = item.headers;
-    if (enableBody && body) {
+    this.state.method = item.method;
+    if (body) {
       this.state.disableBody = false;
     }
     this.onComposerChange(true);
     storage.set('useH2InComposer', item.useH2 ? 1 : '');
   },
-  onReplay: function(item, enableBody) {
-    this.onCompose(item, enableBody);
-    this.execute();
+  onReplay: function() {
+    this.onCompose();
+    if (this._selectedItem) {
+      this.execute();
+      ReactDOM.findDOMNode(this.refs.historyList).scrollTop = 0;
+    }
   },
   onComposerChange: function(e) {
     var self = this;
@@ -342,17 +397,7 @@ var Composer = React.createClass({
     if (target) {
       if (target === true || target.nodeName === 'SELECT') {
         var method = ReactDOM.findDOMNode(self.refs.method).value;
-        if (method === '+ Method') {
-          self.refs.addMethodDialog.show();
-          setTimeout(function() {
-            var box = ReactDOM.findDOMNode(self.refs.newMethods);
-            box.select();
-            box.focus();
-          }, 600);
-        } else {
-          this.state.method = method;
-        }
-        self.setState({}, self.updatePrettyData);
+        self.setState({method: method}, self.updatePrettyData);
       }
       if (target === true || target.name === 'headers') {
         clearTimeout(self.typeTimer);
@@ -443,16 +488,24 @@ var Composer = React.createClass({
     this.setState({ showPretty: show }, this.updatePrettyData);
   },
   toggleH2: function(e) {
+    var self = this;
     if (!dataCenter.supportH2) {
-      if (window.confirm('The current version of Node.js cannot support HTTP/2.\nPlease upgrade to the latest LTS version.')) {
-        window.open('https://nodejs.org/');
-      }
-      this.setState({});
+      win.confirm('The current version of Node.js cannot support HTTP/2.\nPlease upgrade to the latest LTS version.',
+        function(sure) {
+          sure && window.open('https://nodejs.org/');
+          self.setState({});
+        });
       return;
     }
     var useH2 = e.target.checked;
     storage.set('useH2InComposer', useH2 ? 1 : '');
-    this.setState({ useH2: useH2 });
+    self.setState({ useH2: useH2 });
+  },
+  toggleHistory: function() {
+    var showHistory = !this.state.showHistory;
+    this.setState({showHistory: showHistory});
+    storage.set('showHistory', showHistory ? '1' : '');
+    showHistory && this.loadHistory();
   },
   setRulesDisable: function(disableComposerRules) {
     storage.set('disableComposerRules', disableComposerRules ? 1 : 0);
@@ -472,10 +525,10 @@ var Composer = React.createClass({
     }
     var refs = this.refs;
     var url = ReactDOM.findDOMNode(refs.url).value.trim();
-    this.onComposerChange();
-    if (!url) {
+    if (!url || this.state.pending) {
       return;
     }
+    this.onComposerChange();
     this.setState({ tabName: 'Request' });
     var disableComposerRules = dataCenter.isStrictMode() || this.state.disableComposerRules;
     var rules = disableComposerRules ? null : this.state.rules;
@@ -570,7 +623,7 @@ var Composer = React.createClass({
         if (isHexText) {
           base64 = util.getBase64FromHexText(body);
           if (base64 === false) {
-            alert('The hex text cannot be converted to binary data.\nPlease check the hex text or switch to plain text.');
+            win.alert('The hex text cannot be converted to binary data.\nPlease uncheck the checkbox of HexText option.');
             return;
           }
           body = undefined;
@@ -628,6 +681,7 @@ var Composer = React.createClass({
       processData: false
     });
     params.date = Date.now();
+    params.body = params.body || '';
     this.addHistory(params);
     events.trigger('executeComposer');
     self.setState({ result: '', pending: true });
@@ -679,36 +733,28 @@ var Composer = React.createClass({
     var disableBody = !e.target.checked;
     this.setState({ disableBody: disableBody });
     storage.set('disableComposerBody', disableBody ? 1 : '');
-  },
-  getCustomMethods: function() {
-    var result = METHODS.slice();
-    var methods = getCustomMethodText();
-    if (methods && typeof methods === 'string') {
-      var count = 6;
-      result = result.slice(0, -1);
-      methods.trim().split(/[,;\s|]+/).forEach(function(method) {
-        if (method && method.length <= 36 && !/[^\w.-]/.test(method)) {
-          method = method.toUpperCase();
-          if (result.indexOf(method) === -1 && --count >= 0) {
-            result.push(method);
-          }
-        }
-      });
-      result.push('+ Method');
+    if (!disableBody) {
+      this.setState({ tabName: 'Request' });
     }
-    return result;
-  },
-  saveMethods: function() {
-    var value = ReactDOM.findDOMNode(this.refs.newMethods).value.substring(0, 200);
-    storage.set('customComposerMethods', value);
-    this.setState({ methods: this.getCustomMethods(), methodText: value });
   },
   focusEnableBody: function() {
     this.setState({ disableBody: false });
     storage.set('disableComposerBody', '');
   },
+  selectItem: function(item) {
+    if (item.selected) {
+      return;
+    }
+    this.state.historyData.forEach(function(item) {
+      item.selected = false;
+    });
+    item.selected = true;
+    this._selectedItem = item;
+    this.setState({});
+  },
   render: function() {
-    var state = this.state;
+    var self = this;
+    var state = self.state;
     var type = state.type;
     var rules = state.rules;
     var showPretty = state.showPretty;
@@ -722,9 +768,7 @@ var Composer = React.createClass({
     var isForm = type === 'form';
     var method = state.method;
     var hasBody = hasReqBody(method, state.url, state.headers);
-    var historyData = state.historyData;
-    var disableHistory = !historyData.length || pending;
-    var showPrettyBody =  showPretty && isForm && hasBody;
+    var showPrettyBody = showPretty && isForm && hasBody;
     var showUpload = type === 'upload' && hasBody;
     var isStrictMode = dataCenter.isStrictMode();
     var disableComposerRules = isStrictMode || state.disableComposerRules;
@@ -732,133 +776,167 @@ var Composer = React.createClass({
     var isCRLF = state.isCRLF;
     var disableBody = state.disableBody;
     var lockBody = pending || disableBody;
+    var showHistory = state.showHistory;
+    var historyData = state.historyData;
+    var disabledClass = self._selectedItem && !pending ? null : 'w-disabled';
     self.hasBody = hasBody;
     
     return (
-      <div className={'fill orient-vertical-box w-detail-content w-detail-composer' + (util.getBoolean(this.props.hide) ? ' hide' : '')}>
-        <div className="w-composer-url box">
-          <select disabled={pending} value={method}
-            onChange={this.onComposerChange} ref="method"
-            className="form-control w-composer-method">
-            {state.methods.map(function(m) {
-              return <option value={m}>{m}</option>;
-            })}
-          </select>
-          <input readOnly={pending} defaultValue={state.url} onKeyUp={this.execute} onChange={this.onComposerChange} onKeyDown={this.onKeyDown} onFocus={this.selectAll} ref="url" type="text" maxLength="8192" placeholder="url" className="fill w-composer-input" />
-          <button disabled={pending} onClick={this.execute} className="btn btn-primary w-composer-execute">
-            <span className="glyphicon glyphicon-send" />
-          </button>
-        </div>
-        <div className="w-detail-inspectors-title w-composer-tabs">
-          <button onClick={this.onTabChange} name="Request" className={showRequest ? 'w-tab-btn w-active' : 'w-tab-btn'}>Request</button>
-          <button title={result.url} onClick={this.onTabChange} name="Response"  className={showResponse ? 'w-tab-btn w-active' : 'w-tab-btn'}>Response</button>
-          <label className="w-composer-use-h2">
-            <input disabled={pending} type="checkbox" onChange={this.toggleH2} checked={dataCenter.supportH2 && useH2} />
-            Use H2
-          </label>
-          <button onClick={this.showHistory} className="btn btn-default" title={historyData.length ? 'No history' : undefined}
-            disabled={disableHistory}>History</button>
-        </div>
-        <Divider vertical="true" rightWidth="120">
-          <div className="orient-vertical-box fill">
-            <Divider hide={!showRequest} vertical="true">
-              <div className="fill orient-vertical-box w-composer-headers">
-                <div className="w-composer-bar" onChange={this.onTypeChange}>
-                  <label>
-                    <input onChange={this.onShowPretty} type="checkbox" checked={showPretty} />
-                    Pretty
-                  </label>
-                  <label className="w-composer-label">Type:</label>
-                  <label>
-                    <input disabled={pending}  data-type="form" name="type" type="radio" checked={isForm} />
-                    Form
-                  </label>
-                  <label>
-                    <input disabled={pending}  data-type="upload" name="type" type="radio" checked={type === 'upload'} />
-                    Upload
-                  </label>
-                  <label>
-                    <input disabled={pending}  data-type="json" name="type" type="radio" checked={type === 'json'} />
-                    JSON
-                  </label>
-                  <label>
-                    <input disabled={pending}  data-type="text" name="type" type="radio" checked={type === 'text'} />
-                    Text
-                  </label>
-                  <label className="w-custom-type" title="Directly modify Content-Type in the headers">
-                    <input data-type="custom" name="type" type="radio" checked={type === 'custom'} disabled />
-                    Custom
-                  </label>
-                  <button disabled={pending} className={'btn btn-primary' + (showPretty ? '' : ' hide')} onClick={this.addHeader}>Add header</button>
-                </div>
-                <textarea readOnly={pending} defaultValue={state.headers} onChange={this.onComposerChange} maxLength={MAX_HEADERS_SIZE}
-                  onKeyDown={this.onKeyDown} ref="headers" placeholder="Input the headers" name="headers"
-                  className={'fill orient-vertical-box' + (showPretty ? ' hide' : '')} />
-                <PropsEditor disabled={pending} ref="prettyHeaders" isHeader="1" hide={!showPretty} onChange={this.onHeaderChange} />
-              </div>
-              <div className="fill orient-vertical-box w-composer-body">
-                <div className="w-composer-bar">
-                  <label className="w-composer-label">
-                    <input disabled={pending} checked={!disableBody} type="checkbox" onChange={this.onBodyStateChange} />
-                    Body
-                  </label>
-                  <label className={'w-composer-hex-text' + (isHexText ? ' w-checked' : '') + (showUpload ? ' hide' : '')} onDoubleClick={this.focusEnableBody}>
-                    <input disabled={lockBody} checked={isHexText} type="checkbox" onChange={this.onHexTextChange} />HexText
-                  </label>
-                  <label className={'w-composer-crlf' + (isHexText || showUpload ? ' hide' : '')
-                    + (isCRLF ? ' w-checked' : '')} onDoubleClick={this.focusEnableBody}>
-                    <input disabled={lockBody} checked={isCRLF} onChangeCapture={this.onCRLFChange} type="checkbox" />\r\n
-                  </label>
-                  <button disabled={lockBody} className={'btn btn-default' + (showPrettyBody || isHexText || showUpload ? ' hide' : '')} onClick={this.formatJSON}>Format JSON</button>
-                  <button disabled={lockBody} className={'btn btn-primary' + (showPrettyBody && !isHexText || showUpload ? '' : ' hide')} onClick={showUpload ? this.addUploadFiled : this.addField}>Add field</button>
-                </div>
-                <textarea readOnly={lockBody} defaultValue={state.body} onChange={this.onComposerChange} maxLength={MAX_BODY_SIZE} onDoubleClick={this.focusEnableBody}
-                  style={{background: hasBody && !disableBody ? 'lightyellow' : undefined, fontFamily: isHexText ? 'monospace' : undefined }}
-                  onKeyDown={this.onKeyDown} ref="body" placeholder={hasBody ? 'Input the ' + (isHexText ? 'hex text' : 'body') : method + ' operations cannot have a request body'}
-                  title={hasBody ? undefined : method + ' operations cannot have a request body'}
-                  className={'fill orient-vertical-box' + (showPrettyBody && !isHexText || showUpload ? ' hide' : '')} />
-                <PropsEditor onDoubleClick={this.focusEnableBody} disabled={lockBody} ref="prettyBody" hide={!showPrettyBody || isHexText || showUpload} onChange={this.onFieldChange} />
-                <PropsEditor onDoubleClick={this.focusEnableBody} disabled={lockBody} ref="uploadBody" hide={!showUpload} onChange={this.onUploadFieldChange} allowUploadFile title={hasBody ? undefined : method + ' operations cannot have a request body'} />
-              </div>
-            </Divider>
-            {state.initedResponse ? (
-              <div style={{display: showResponse ? undefined : 'none'}} className={'w-composer-res-' + getStatus(statusCode)}>
-                <button onClick={this.onTabChange} name="Request" className="btn btn-default w-composer-back-btn" title="Back to Request"><span className="glyphicon glyphicon-menu-left"></span></button>
-                <Properties modal={{ 'Status Code': statusCode == null ? 'aborted' : statusCode }} />
-              </div>
-            ) : undefined}
-            {state.initedResponse ? <ResDetail modal={result} hide={!showResponse} /> : undefined}
+      <div className={'fill box w-detail-content w-detail-composer' + (showHistory ? ' w-show-history' : '')
+          + (util.getBoolean(self.props.hide) ? ' hide' : '')}>
+         <Divider hideLeft={!showHistory} leftWidth="160">
+          <div className="fill orient-vertical-box w-history-data" onMouseDown={util.preventBlur}>
+            {historyData.length ? null : <div className="w-tips">
+                {state.loading ? 'Loading' : 'No history data'}
+              </div>}
+            {historyData.length ? <div className="w-history-bar">
+              <a onClick={this.onReplay} className={disabledClass} draggable="false">
+                <span className="glyphicon glyphicon-repeat"></span>Replay
+              </a>
+              <a onClick={this.onCompose} className={disabledClass} draggable="false">
+                <span className="glyphicon glyphicon-edit"></span>Compose
+              </a>
+            </div> : null}
+            <div className="fill w-history-list" ref="historyList">
+              {historyData.map(function(item) {
+                if (!item.url) {
+                  return <p>{item.title}</p>;
+                }
+                return (<div onClick={function() {
+                  self.selectItem(item);
+                }} onDoubleClick={self.onCompose} title={item.title}
+                className={item.selected ? 'w-selected' : null}>
+                  {item.method} {item.url}
+                </div>);
+              })}
+            </div>
           </div>
-          <div ref="rulesCon" onDoubleClick={this.enableRules} title={isStrictMode ? TIPS : undefined}
-            className="orient-vertical-box fill w-composer-rules">
-            <div className="w-detail-inspectors-title">
-              <label>
+          <div className="fill orient-vertical-box">
+            <div className="w-composer-url box">
+              <select disabled={pending} value={method}
+                onChange={this.onComposerChange} ref="method"
+                className="form-control w-composer-method">
+                {METHODS.map(function(m) {
+                  return <option value={m}>{m}</option>;
+                })}
+              </select>
+              <input readOnly={pending} defaultValue={state.url} onKeyUp={this.execute} onChange={this.onComposerChange} onKeyDown={this.onKeyDown}
+                onFocus={this.selectAll} ref="url" type="text" maxLength="8192" placeholder="Input the url" className="fill w-composer-input" />
+              <button disabled={pending} onClick={this.execute} className="btn btn-primary w-composer-execute">
+                <span className="glyphicon glyphicon-send" />
+              </button>
+            </div>
+            <div className="w-detail-inspectors-title w-composer-tabs">
+              <button onClick={this.onTabChange} name="Request" className={showRequest ? 'w-tab-btn w-active' : 'w-tab-btn'}>Request</button>
+              <button title={result.url} onClick={this.onTabChange} name="Response"  className={showResponse ? 'w-tab-btn w-active' : 'w-tab-btn'}>Response</button>
+              <label className="w-composer-enable-body">
+                <input disabled={pending} checked={!disableBody} type="checkbox" onChange={this.onBodyStateChange} />
+                Body
+              </label>
+              <label className="w-composer-enable-rules">
                 <input disabled={pending} onChange={this.onDisableChange} checked={!state.disableComposerRules} type="checkbox" />
                 Rules
               </label>
+              <label className="w-composer-use-h2">
+                <input disabled={pending} type="checkbox" onChange={this.toggleH2} checked={dataCenter.supportH2 && useH2} />
+                Use H2
+              </label>
+              <label className="w-composer-history">
+                <input disabled={pending} type="checkbox" onChange={this.toggleHistory} checked={showHistory} />
+                History
+              </label>
             </div>
-            <textarea
-              disabled={disableComposerRules || pending}
-              defaultValue={rules}
-              ref='composerRules'
-              onChange={this.onRulesChange}
-              style={{background: !disableComposerRules && rules ? 'lightyellow' : undefined }}
-              maxLength="8192"
-              className="fill orient-vertical-box w-composer-rules"
-              placeholder="Input the rules" />
+            <Divider vertical="true" rightWidth="120">
+              <div className="orient-vertical-box fill">
+                <Divider hide={!showRequest} vertical="true">
+                  <div className="fill orient-vertical-box w-composer-headers">
+                    <div className="w-composer-bar" onChange={this.onTypeChange}>
+                      <label>
+                        <input onChange={this.onShowPretty} type="checkbox" checked={showPretty} />
+                        Pretty
+                      </label>
+                      <label className="w-composer-label">Type:</label>
+                      <label>
+                        <input disabled={pending}  data-type="form" name="type" type="radio" checked={isForm} />
+                        Form
+                      </label>
+                      <label>
+                        <input disabled={pending}  data-type="upload" name="type" type="radio" checked={type === 'upload'} />
+                        Upload
+                      </label>
+                      <label>
+                        <input disabled={pending}  data-type="json" name="type" type="radio" checked={type === 'json'} />
+                        JSON
+                      </label>
+                      <label>
+                        <input disabled={pending}  data-type="text" name="type" type="radio" checked={type === 'text'} />
+                        Text
+                      </label>
+                      <label className="w-custom-type" title="Directly modify Content-Type in the headers">
+                        <input data-type="custom" name="type" type="radio" checked={type === 'custom'} disabled />
+                        Custom
+                      </label>
+                      <button disabled={pending} className={'btn btn-primary' + (showPretty ? '' : ' hide')} onClick={this.addHeader}>Add header</button>
+                    </div>
+                    <textarea readOnly={pending} defaultValue={state.headers} onChange={this.onComposerChange} maxLength={MAX_HEADERS_SIZE}
+                      onKeyDown={this.onKeyDown} ref="headers" placeholder="Input the headers" name="headers"
+                      className={'fill orient-vertical-box' + (showPretty ? ' hide' : '')} />
+                    <PropsEditor disabled={pending} ref="prettyHeaders" isHeader="1" hide={!showPretty} onChange={this.onHeaderChange} />
+                  </div>
+                  <div className="fill orient-vertical-box w-composer-body">
+                    <div className="w-composer-bar">
+                      <label className="w-composer-label">
+                        <input disabled={pending} checked={!disableBody} type="checkbox" onChange={this.onBodyStateChange} />
+                        Body
+                      </label>
+                      <label className={'w-composer-hex-text' + (isHexText ? ' w-checked' : '') + (showUpload ? ' hide' : '')} onDoubleClick={this.focusEnableBody}>
+                        <input disabled={lockBody} checked={isHexText} type="checkbox" onChange={this.onHexTextChange} />HexText
+                      </label>
+                      <label className={'w-composer-crlf' + (isHexText || showUpload ? ' hide' : '')
+                        + (isCRLF ? ' w-checked' : '')} onDoubleClick={this.focusEnableBody}>
+                        <input disabled={lockBody} checked={isCRLF} onChangeCapture={this.onCRLFChange} type="checkbox" />\r\n
+                      </label>
+                      <button disabled={lockBody} className={'btn btn-default' + (showPrettyBody || isHexText || showUpload ? ' hide' : '')} onClick={this.formatJSON}>Format JSON</button>
+                      <button disabled={lockBody} className={'btn btn-primary' + (showPrettyBody && !isHexText || showUpload ? '' : ' hide')} onClick={showUpload ? this.addUploadFiled : this.addField}>Add field</button>
+                    </div>
+                    <textarea readOnly={lockBody} defaultValue={state.body} onChange={this.onComposerChange} maxLength={MAX_BODY_SIZE} onDoubleClick={this.focusEnableBody}
+                      style={{background: hasBody && !disableBody ? 'lightyellow' : undefined, fontFamily: isHexText ? 'monospace' : undefined }}
+                      onKeyDown={this.onKeyDown} ref="body" placeholder={hasBody ? 'Input the ' + (isHexText ? 'hex text' : 'body') : method + ' operations cannot have a request body'}
+                      title={hasBody ? undefined : method + ' operations cannot have a request body'}
+                      className={'fill orient-vertical-box' + (showPrettyBody && !isHexText || showUpload ? ' hide' : '')} />
+                    <PropsEditor onDoubleClick={this.focusEnableBody} disabled={lockBody} ref="prettyBody" hide={!showPrettyBody || isHexText || showUpload} onChange={this.onFieldChange} />
+                    <PropsEditor onDoubleClick={this.focusEnableBody} disabled={lockBody} ref="uploadBody" hide={!showUpload} onChange={this.onUploadFieldChange} allowUploadFile title={hasBody ? undefined : method + ' operations cannot have a request body'} />
+                  </div>
+                </Divider>
+                {state.initedResponse ? (
+                  <div style={{display: showResponse ? undefined : 'none'}} className={'w-composer-res-' + getStatus(statusCode)}>
+                    <button onClick={this.onTabChange} name="Request" className="btn btn-default w-composer-back-btn" title="Back to Request"><span className="glyphicon glyphicon-menu-left"></span></button>
+                    <Properties modal={{ 'Status Code': statusCode == null ? 'aborted' : statusCode }} />
+                  </div>
+                ) : undefined}
+                {state.initedResponse ? <ResDetail modal={result} hide={!showResponse} /> : undefined}
+              </div>
+              <div ref="rulesCon" onDoubleClick={this.enableRules} title={isStrictMode ? TIPS : undefined}
+                className="orient-vertical-box fill w-composer-rules">
+                <div className="w-detail-inspectors-title">
+                  <label>
+                    <input disabled={pending} onChange={this.onDisableChange} checked={!state.disableComposerRules} type="checkbox" />
+                    Rules
+                  </label>
+                </div>
+                <textarea
+                  disabled={disableComposerRules || pending}
+                  defaultValue={rules}
+                  ref='composerRules'
+                  onChange={this.onRulesChange}
+                  style={{background: !disableComposerRules && rules ? 'lightyellow' : undefined }}
+                  maxLength="8192"
+                  className="fill orient-vertical-box w-composer-rules"
+                  placeholder="Input the rules" />
+              </div>
+            </Divider>
           </div>
         </Divider>
-        <HistoryData ref="historyDialog" onReplay={this.onReplay} onCompose={this.onCompose} data={historyData} />
-        <Dialog wstyle="w-composer-methods" ref="addMethodDialog">
-          <div className="modal-body">
-            <textarea ref="newMethods" maxLength="200" defaultValue={state.methodText}
-              placeholder="Input the new methods separated by space, newline, comma (,) or semicolon (;)" />
-          </div>
-          <div className="modal-footer">
-            <button type="button" className="btn btn-primary" data-dismiss="modal" onClick={this.saveMethods}>Save</button>
-            <button type="button" className="btn btn-default" data-dismiss="modal">Close</button>
-          </div>
-        </Dialog>
       </div>
     );
   }

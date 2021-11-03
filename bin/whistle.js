@@ -10,7 +10,6 @@ var plugin = require('./plugin');
 
 var showUsage = util.showUsage;
 var error = util.error;
-var warn = util.warn;
 var info = util.info;
 
 function showStartupInfo(err, options, debugMode, restart) {
@@ -72,7 +71,7 @@ program.setConfig({
         error('[!] ' + err.message);
       }
     } else {
-      warn('[!] No running ' + config.name);
+      showStatus.showAll(true);
     }
   }
 });
@@ -111,10 +110,12 @@ program
   .option('-t, --timeout [ms]', 'set the request timeout (' + config.timeout + 'ms by default)', parseInt, undefined)
   .option('-e, --extra [extraData]', 'set the extra parameters for plugin', String, undefined)
   .option('-f, --secureFilter [secureFilter]', 'set the path of secure filter', String, undefined)
-  .option('-r, --shadowRules [shadowRules]', 'set the shadow/default rules', String, undefined)
+  .option('-r, --shadowRules [shadowRules]', 'set the shadow (default) rules', String, undefined)
   .option('-R, --reqCacheSize [reqCacheSize]', 'set the cache size of request data (600 by default)', String, undefined)
   .option('-F, --frameCacheSize [frameCacheSize]', 'set the cache size of webSocket and socket\'s frames (512 by default)', String, undefined)
   .option('-A, --addon [pluginPaths]', 'add custom plugin paths', String, undefined)
+  .option('--config [workers]', 'start the cluster server and set worker number (os.cpus().length by default)', String, undefined)
+  .option('--cluster [config]', 'load the startup config from a local file', String, undefined)
   .option('--dnsServer [dnsServer]', 'set custom dns servers', String, undefined)
   .option('--socksPort [socksPort]', 'set the socksv5 server port', String, undefined)
   .option('--httpPort [httpPort]', 'set the http server port', String, undefined)
@@ -132,7 +133,7 @@ var removeItem = function(list, name) {
   i !== -1 && list.splice(i, 1);
 };
 if (cmd === 'status') {
-  var all = argv[3] === '--all';
+  var all = argv[3] === '--all' || argv[3] === '-l';
   if (argv[3] === '-S') {
     storage = argv[4];
   }
@@ -167,5 +168,9 @@ if (cmd === 'status') {
   argv = Array.prototype.slice.call(argv, 4);
   plugin.run(cmd, argv);
 } else {
+  var pluginIndex = argv.indexOf('--pluginPaths');
+  if (pluginIndex !== -1) {
+    argv[pluginIndex] = '--addon';
+  }
   program.parse(argv);
 }

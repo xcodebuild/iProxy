@@ -1,3 +1,88 @@
+# v2.8.2
+1. feat: `resMerge://json1 resMerge://json2` 默认采用 `extend({}, json1, json2)`，新版支持通过 `resMerge://json1 resMerge://json2 resMerge://true` 开启  `extend(true, {}, json1, json2)`
+2. refactor: 插件规则里面的 req 和 res rules 分开执行
+
+# v2.8.1
+1. refactor: 优化获取证书逻辑，合并多次相同请求
+2. refactor: 处理 `unhandledRejection` 事件
+3. feat: 支持通过请求头设置响应规则
+4. fix: sniCallback 内存泄露问题
+
+# v2.8.0
+1. feat: 支持启动 `--cluster [workers]` 模式，通过该方式可以启动多进程模式（worker 为 Whistle headless）
+2. fix: 启动时绑定非 `127.0.0.1` 网卡，插件远程规则访问失败问题
+
+# v2.7.29
+1. fix: https://github.com/avwo/whistle/issues/643
+
+# v2.7.28
+1. fix: WebSocket 无法抓包问题
+
+# v2.7.27
+1. fix: 插件用到 `storage.setProperties` 失效问题
+2. feat: 插件 `whistleConfig` 支持配置 `inheritAuth` 复用 Whistle 的登录账号
+
+# v2.7.26
+1. feat: 支持通过插件 `sniCallback(req, options)` hook 获取远程证书
+2. feat: 支持通过 `--config localFile` 加载启动配置，优先级高于命令行
+
+# v2.7.25
+1. fix: 某些情况下响应 stream pause 问题
+2. refactor: 优化 `w2 stop`，找不到指定实例时自动显示当前所有运行的实例
+3. style: 支持将 Rules 添加到最前面
+
+# v2.7.24
+1. refactor: 优化 `lineProps://proxyHost|proxyTunnel|proxyFirst`
+
+# v2.7.23
+1. style: 优化显示 Composer 历史记录列表
+2. style: 禁用 Rules、Plugins 显示小黄条提醒
+
+# v2.7.22
+1. feat: 插件 auth 方法支持 `req.setRedirect(url);`
+2. perf: 优化启动速度
+3. fix: 修复第三方集成时，一些内部请求转发问题
+
+# v2.7.21
+1. fix: 清除搜索框历史记录 js 报错问题
+2. feat: 普通 HTTP 请求也支持 `customParser`（或 `customFrames`）：https://github.com/whistle-plugins/whistle.custom-parser
+
+# v2.7.20
+1. fix: Cannot read property 'headers' of undefined
+
+# v2.7.19
+1. feat: HTTP2 支持非 HTTPS 请求
+2. feat: 插件支持通过 `options.getCert(domain, (cert || '') => {})` 获取指定域名证书
+3. refactor: 优化 `reqDelay` 和 `resDelay` 实现
+# v2.7.18
+1. feat: 支持插件设置 `tunnelKey` 将指定的隧道代理请求头带到解开后的 http/https/ws 请求头
+2. feat: 插件 `auth` 方法支持处理 Whistle 的内部请求
+3. feat: 插件 `auth` 支持设置 `req.showLoginBox` 弹出登录框
+4. style: 显示 UI 请求情况
+5. refactor: 优化内部请求转发逻辑的实现方式
+
+# v2.7.17
+1. feat: WebSocket 和 Tunnel 请求支持 `replaceStatus`
+
+# v2.7.16
+1. fix: Maximum call stack size exceeded
+
+# v2.7.15
+1. perf: 去掉 `Empty Request`，减少内存及 CPU 占用
+2. style: Network 的  `Body` 支持显示请求内容大小
+
+# v2.7.14
+1. feat: 插件支持通过 `options.require` 直接引用 Whistle 里面的第三方模块或文件
+2. refacto: 插件在不同实例使用不同的存储目录
+
+# v2.7.13
+1. fix: 特殊情况下 Whistle 无法展示 WebSocket 前几个请求帧问题
+2. feat: 支持在模板字符串里面通过 `clientPort` 和 `serverPort` 分别获取客户端和服务端端口
+3. refactor: `alert`、`confirm`、`prompt` 等浏览器内置的窗口改用自定义实现，防止 https://www.chromestatus.com/feature/5148698084376576
+
+# v2.7.12
+1. fix: `reqReplace` 及 `resReplace` 可能因为拆包导致匹配不准确问题
+2. fix: Rules 编辑器行首字母输入 `!` 报错问题
 
 # v2.7.11
 1. feat: 插件 hook 支持 `async-await`：

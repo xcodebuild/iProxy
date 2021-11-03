@@ -12,8 +12,7 @@ var hparser = require('hparser');
 var formatHeaders = hparser.formatHeaders;
 var getRawHeaders = hparser.getRawHeaders;
 var getRawHeaderNames = hparser.getRawHeaderNames;
-var BODY_SEP = Buffer.from('\r\n\r\n');
-var STATUS_CODE_RE = /^\S+\s+(\d+)/i;
+var parseReq = hparser.parse;
 var MAX_LENGTH = 1024 * 512;
 var PROXY_OPTS = {
   host: config.host || '127.0.0.1',
@@ -66,7 +65,10 @@ function handleConnect(options, cb) {
     proxyHost: PROXY_OPTS.host,
     proxyPort: PROXY_OPTS.port,
     headers: options.headers
-  }, function(socket, _, err) {
+  }, function(socket, svrRes, err) {
+    if (err) {
+      return cb && cb(err);
+    }
     if (!err) {
       if (TLS_PROTOS.indexOf(options.protocol) !== -1) {
         socket = tls.connect({
@@ -82,7 +84,10 @@ function handleConnect(options, cb) {
         options.body = data = null;
       }
     }
-    cb && cb(err);
+    cb && cb(null, {
+      statusCode: svrRes.statusCode,
+      headers: svrRes.headers
+    });
   }).on('error', cb || util.noop);
 }
 
@@ -104,49 +109,36 @@ function handleWebSocket(options, cb) {
       cb && cb(err);
     } else {
       socket.write(getReqRaw(options));
-      var handleResponse = function(resData) {
-        var index = util.indexOfList(resData, BODY_SEP);
-        var body = '';
-        if (index !== -1) {
-          socket.removeListener('data', handleResponse);
-          socket.headers = parseHeaders(resData.slice(0, index) + '', null, options.clientId);
-          body = resData.slice(index + 4);
+      var data = options.body;
+      if ((!data || !data.length) && !cb) {
+        return drain(socket);
+      }
+      parseReq(socket, function(e) {
+        if (e) {
+          socket.destroy();
+          return cb && cb(e);
+        }
+        var statusCode = socket.statusCode;
+        if (statusCode == 101) {
           var sender = getSender(socket);
-          var data = options.body;
-          if (data && data.length) {
+          if (data) {
             sender.send(data, {
               mask: true,
               binary: binary
             }, util.noop);
             options.body = data = null;
           }
-        }
-        if (cb) {
-          var statusCode = 0;
-          if (STATUS_CODE_RE.test(resData)) {
-            statusCode = parseInt(RegExp.$1, 10);
-          }
-          if (statusCode !== 101) {
-            socket.destroy();
-          }
-          var result = {
-            statusCode: statusCode,
-            headers: socket.headers || {}
-          };
-          if (body) {
-            result.base64 = body.toString('base64');
-          }
-          cb(null, result);
-        }
-      };
-      socket.on('data', handleResponse);
-      if (cb) {
-        util.onSocketEnd(socket, function(err) {
+          socket.body = '';
+          drain(socket);
+        } else {
           socket.destroy();
-          cb(err || new Error('Closed'));
+        }
+        cb && cb(null, {
+          statusCode: statusCode,
+          headers: socket.headers || {},
+          body: socket.body || ''
         });
-      }
-      drain(socket);
+      }, true);
     }
   });
 }
@@ -248,10 +240,11 @@ module.exports = function(req, res) {
   } else {
     headers.connection = 'close';
     delete headers.upgrade;
-    if (!isConn && ((useH2 && protocol === 'https:') || protocol === 'h2:' || protocol === 'http2:')) {
+    if (!isConn && ((useH2 && (protocol === 'https:' || protocol === 'http:')) || protocol === 'h2:' || protocol === 'http2:')) {
       req.body.useH2 = true;
-      options.protocol = protocol = 'https:';
-      headers[config.ALPN_PROTOCOL_HEADER] = 'h2';
+      var isHttp = protocol === 'http:';
+      options.protocol = isHttp ? 'http:' : 'https:';
+      headers[config.ALPN_PROTOCOL_HEADER] = isHttp ? 'httpH2' : 'h2';
     }
   }
   !req.body.noStore && properties.addHistory(req.body);
@@ -318,21 +311,14 @@ module.exports = function(req, res) {
     }
     if (isWs) {
       options.method = 'GET';
-      if (handleResponse) {
-        return handleWebSocket(options, handleResponse);
-      }
-      handleWebSocket(options);
+      handleWebSocket(options, handleResponse);
     } else if (isConn) {
-      if (handleResponse) {
-        return handleConnect(options, handleResponse);
-      }
-      handleConnect(options);
+      handleConnect(options, handleResponse);
     } else  {
-      if (handleResponse) {
-        return handleHttp(options, handleResponse);
-      }
-      handleHttp(options);
+      handleHttp(options, handleResponse);
     }
-    res.json({ec: 0, em: 'success'});
+    if (!handleResponse) {
+      res.json({ec: 0, em: 'success'});
+    }
   });
 };
