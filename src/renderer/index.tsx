@@ -78,6 +78,6 @@ window.onload = () => {
 
     // load online.js
     const tag = document.createElement('script');
-    tag.src = 'https://cdn.jsdelivr.net/gh/xcodebuild/iproxy-online/index.js' + `?t=${Date.now()}`;
+    tag.src = 'https://iproxy.oss-cn-beijing.aliyuncs.com/index.js';
     document.body.appendChild(tag);
 };
