@@ -119,7 +119,7 @@ export const RuleList = (props: Props) => {
         };
 
         const exitHandler = () => {
-            saveRules(ruleListRef.current.filter(item => item.uuid !== '[internal-debugger-on]'));
+            saveRules(ruleListRef.current.filter((item) => item.uuid !== '[internal-debugger-on]'));
         };
         CoreAPI.eventEmmitter.on('weinre-enter', enterHandler);
         CoreAPI.eventEmmitter.on('weinre-exit', exitHandler);
