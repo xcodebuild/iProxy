@@ -27,6 +27,8 @@ jobs:
         
         - name: Upguard whistle
           run: |
+            git config --global user.email "you@example.com"
+            git config --global user.name "Your Name"
             npm run upguard:whistle
 
         - name: Install deps
