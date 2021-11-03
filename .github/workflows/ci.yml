@@ -24,15 +24,15 @@ jobs:
           uses: actions/setup-node@v1
           with:
             node-version: 14
+        
+        - name: Upguard whistle
+          run: |
+            npm run upguard:whistle
 
         - name: Install deps
           run: |
             npm run install-deps
             npm run dateversion
-        
-        - name: Upguard whistle
-          run: |
-            npm run upguard:whistle
 
         - name: build windows app
           if: matrix.os == 'windows-latest'
