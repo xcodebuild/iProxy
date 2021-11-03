@@ -41,8 +41,8 @@ var REG_URL_SYMBOL_RE = /^(\^+)/;
 var PATTERN_FILTER_RE = /^(?:filter|ignore):\/\/(.+)\/(i)?$/;
 var LINE_PROPS_RE = /^lineProps:\/\/(.*)$/;
 var FILTER_RE = /^(?:excludeFilter|includeFilter):\/\/(.*)$/;
-var PROPS_FILTER_RE = /^(?:filter|excludeFilter|includeFilter|ignore):\/\/(m(?:ethod)?|i(?:p)?|h(?:eader)?|s(?:tatusCode)?|b(?:ody)?|clientIp|clientIP|serverIp|serverIP|re[qs](?:H(?:eaders?)?)?):(.+)$/;
-var PURE_FILTER_RE = /^(?:excludeFilter|includeFilter):\/\/(statusCode|clientIp|clientIP|serverIp|serverIP|re[qs](?:H(?:eaders?)?)?)\.(.+)$/;
+var PROPS_FILTER_RE = /^(?:filter|excludeFilter|includeFilter|ignore):\/\/(m(?:ethod)?|i(?:p)?|h(?:eader)?|s(?:tatusCode)?|b(?:ody)?|clientIp|clientIP|clientPort|serverIp|serverIP|serverPort|re[qs](?:H(?:eaders?)?)?):(.+)$/;
+var PURE_FILTER_RE = /^(?:excludeFilter|includeFilter):\/\/(statusCode|clientIp|clientIP|clientPort|serverIp|serverIP|serverPort|re[qs](?:H(?:eaders?)?)?)\.(.+)$/;
 var PATTERN_WILD_FILTER_RE = /^(?:filter|ignore):\/\/(!)?(\*+\/)/;
 var WILD_FILTER_RE = /^(\*+\/)/;
 var regUrlCache = {};
@@ -58,7 +58,7 @@ var TPL_RE = /^((?:[\w.-]+:)?\/\/)?(`.*`)$/;
 // req|res: ip, method, statusCode, headers?.key, cookies?.key
 var PLUGIN_NAME_RE = /^[a-z\d_\-]+(?:\.g?(?:all)?var(?:\$|\d*))?(?:\.replace\(.+\))?$/i;
 var VAR_INDEX_RE = /^([a-z\d_\-]+)\.(g)?(all)?var(\$|\d*)/i;
-var TPL_VAR_RE = /(\$)?\$\{(\{)?(id|reqId|whistle|now|port|realPort|version|url|hostname|query|search|queryString|searchString|path|pathname|clientId|localClientId|ip|clientIp|serverIp|method|status(?:Code)|reqCookies?|resCookies?|re[qs]H(?:eaders?)?)(?:\.([^{}]+))?\}(\})?/ig;
+var TPL_VAR_RE = /(\$)?\$\{(\{)?(id|reqId|whistle|now|port|realPort|version|url|hostname|query|search|queryString|searchString|path|pathname|clientId|localClientId|ip|clientIp|clientPort|serverIp|serverPort|method|status(?:Code)|reqCookies?|resCookies?|re[qs]H(?:eaders?)?)(?:\.([^{}]+))?\}(\})?/ig;
 var REPLACE_PATTERN_RE = /(^|\.)replace\((.+)\)$/i;
 var SEP_RE = /^[?/]/;
 var COMMA1_RE = /\\,/g;
@@ -69,13 +69,8 @@ var SUFFIX_RE = /^\\\.[\w-]+$/;
 var DOT_PATTERN_RE = /^\.[\w-]+(?:[?$]|$)/;
 var inlineValues;
 var CONTROL_RE = /[\u001e\u001f\u200e\u200f\u200d\u200c\u202a\u202d\u202e\u202c\u206e\u206f\u206b\u206a\u206d\u206c]+/g;
-var HTTP_PROXY_RE = /^x?(?:proxy|http-proxy|http2https-proxy|https2http-proxy|internal-proxy|internal-https?-proxy):\/\//;
 var ENABLE_PROXY_RE = /\bproxy(?:Host|First|Tunnel)|clientId|multiClient|singleClient\b/i;
 var PLUGIN_VAR_RE = /^%([a-z\d_\-]+)=([^\s]*)/;
-
-function filterHttpProxy(rule) {
-  return HTTP_PROXY_RE.test(rule.matcher);
-}
 
 function domainToRegExp(all, star, dot) {
   var len = star.length;
@@ -578,6 +573,8 @@ function resolveVarValue(req, escape, name, key) {
     return resolveClientIpVar(req, key);
   case 'clientid':
     return util.getClientId(req.headers);
+  case 'clientport':
+    return req.clientPort || '';
   case 'localclientid':
     return config.clientId;
   case 'statuscode':
@@ -585,6 +582,8 @@ function resolveVarValue(req, escape, name, key) {
     return resolveStatusCodeVar(req, key);
   case 'serverip':
     return resolveServerIpVar(req, key);
+  case 'serverport':
+    return req.serverPort || '';
   case 'reqh':
   case 'reqheader':
   case 'reqheaders':
@@ -1034,7 +1033,7 @@ function parseRule(rulesMgr, pattern, matcher, raw, root, options) {
     }
   }
   var rules = rulesMgr._rules;
-  var list = rules[protocol];
+  var list = protocol === 'sniCallback' ? rulesMgr._sniCallback : rules[protocol];
   var useRealPort;
   if (!list) {
     protocol = 'rule';
@@ -1116,6 +1115,7 @@ function parse(rulesMgr, text, root, append) {
   if (!append) {
     protoMgr.resetRules(rulesMgr._rules);
     rulesMgr._globalPluginVars = {};
+    rulesMgr._sniCallback = [];
   }
   if (Array.isArray(text)) {
     text.forEach(function(item) {
@@ -1278,12 +1278,26 @@ function resolveMatchFilter(list) {
       }
       var pattern;
       var isIp = propName === 'i' || propName === 'ip';
-      var isClientIp, isServerIp;
+      var isClientPort, isServerPort, isClientIp, isServerIp;
       if (!isIp) {
-        isClientIp= propName[0] === 'c';
-        isServerIp = !isClientIp && (propName === 'serverIp' || propName === 'serverIP');
+        isClientPort = propName === 'clientPort';
+        if (!isClientPort) {
+          isServerPort = propName === 'serverPort';
+          if (!isServerPort) {
+            isClientIp= propName[0] === 'c';
+            isServerIp = !isClientIp && (propName === 'serverIp' || propName === 'serverIP');
+          }
+        }
       }
-      if (isIp || isClientIp || isServerIp) {
+      if (isClientPort || isServerPort) {
+        pattern = util.toRegExp(value);
+        if (isClientPort) {
+          propName = pattern ? 'cpPattern' : 'clientPort';
+        } else {
+          propName = pattern ? 'spPattern' : 'serverPort';
+        }
+        value = pattern || value.toLowerCase();
+      } else if (isIp || isClientIp || isServerIp) {
         pattern = util.toRegExp(value);
         if (!pattern && !net.isIP(value)) {
           return;
@@ -1438,7 +1452,6 @@ function parseText(rulesMgr, text, root) {
       });
     }
   });
-  rulesMgr._pureHttpProxyRules = rulesMgr._rules.proxy.filter(filterHttpProxy);
   regUrlCache = {};
   hostCache = {};
 }
@@ -1492,6 +1505,12 @@ function matchFilter(url, filter, req) {
     return getFilterResult(result, filter); 
   }
   if (filterProp(req.hostIp, filter.serverIp, filter.serverPattern)) {
+    return getFilterResult(result, filter); 
+  }
+  if (filterProp(req.clientPort, filter.clientPort, filter.cpPattern)) {
+    return getFilterResult(result, filter); 
+  }
+  if (filterProp(req.serverPort, filter.serverPort, filter.spPattern)) {
     return getFilterResult(result, filter); 
   }
 
@@ -1574,9 +1593,7 @@ function matchExcludeFilters(url, rule, options) {
 function Rules(values) {
   this._rules = protoMgr.getRules();
   this._globalPluginVars = {};
-  this._pluginBase64Vars = {};
-  this._pureHttpProxyRules = [];
-  this._xRules = [];
+  this._sniCallback = [];
   this._orgValues = this._values = values || {};
 }
 
@@ -1861,10 +1878,11 @@ function resolveSingleRule(req, protocol, multi) {
   if (util.isIgnored(filter, protocol)) {
     return;
   }
+  var list = protocol === 'sniCallback' ? this._sniCallback : this._rules[protocol];
   if (multi) {
-    return getRuleList(req, this._rules[protocol], this._values);
+    return getRuleList(req, list, this._values);
   }
-  return getRule(req, this._rules[protocol], this._values);
+  return getRule(req, list, this._values);
 }
 
 proto.resolvePipe = function(req) {
@@ -1896,10 +1914,7 @@ proto.hasReqScript = function(req) {
   return req.isPluginReq ? null : getRule(req, this._rules.rulesFile, this._values);
 };
 
-proto.resolveProxy = function resolveProxy(req, isWebUI) {
-  if (isWebUI) {
-    return getRule(req, this._pureHttpProxyRules, this._values);
-  }
+proto.resolveProxy = function resolveProxy(req) {
   var proxy = getRule(req, this._rules.proxy, this._values);
   var matcher = proxy && proxy.matcher;
   var name = matcher && matcher.substring(0, matcher.indexOf(':'));
@@ -1921,6 +1936,10 @@ proto.resolveProxy = function resolveProxy(req, isWebUI) {
     }
   }
   return proxy;
+};
+
+proto.resolveSNICallback = function(req) {
+  return resolveSingleRule.call(this, req, 'sniCallback');
 };
 
 proto.resolveLocalRule = function(req) {

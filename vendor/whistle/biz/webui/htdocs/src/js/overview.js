@@ -10,8 +10,8 @@ var Properties = require('./properties');
 var dataCenter = require('./data-center');
 var getHelpUrl = require('./protocols').getHelpUrl;
 
-var OVERVIEW = ['Url', 'Final Url', 'Method', 'Http Version', 'Status Code', 'Status Message', 'Client IP', 'Client Port', 'Client ID', 'Server IP', 'Server Port', 'Request Length', 'Content Length'
-                      , 'Content Encoding', 'Start Date', 'DNS Lookup', 'Request Sent', 'Response Headers', 'Content Download'];
+var OVERVIEW = ['Url', 'Final Url', 'Method', 'Http Version', 'Status Code', 'Status Message', 'Client IP', 'Client Port', 'Client ID', 'Server IP', 'Server Port', 'Request Body', 'Response Body'
+                      , 'Content Encoding', 'Start Date', 'DNS Lookup', 'Request Sent', 'Response Headers', 'Content Loaded', 'Total'];
 var OVERVIEW_PROPS = ['url', 'realUrl', 'req.method', 'req.httpVersion', 'res.statusCode', 'res.statusMessage', 'req.ip', 'req.port', 'clientId', 'res.ip', 'res.port', 'req.size', 'res.size', 'contentEncoding'];
 /**
  * statusCode://, redirect://[statusCode:]url, [req, res]speed://,
@@ -50,6 +50,10 @@ function getRuleStr(rule) {
     matcher = matcher + ':' + rule.port;
   }
   return rule.rawPattern + ' ' +  matcher + getStr(props) + getStr(rule.filter);
+}
+
+function getTime(time) {
+  return time === '-' ? '' : time;
 }
 
 OVERVIEW.forEach(function(name) {
@@ -125,7 +129,7 @@ var Overview = React.createClass({
               value = formatSize(size);
               var unzipSize = value ? util.getProperty(modal, prop.substring(0, 4) + 'unzipSize') : -1;
               if (unzipSize >= 0 && unzipSize != size) {
-                value += ' / ' + formatSize(unzipSize) + ' = ' + Number(size * 100 / unzipSize).toFixed(2) + '%';
+                value += ' / ' + formatSize(unzipSize) + (unzipSize ? ' = ' + Number(size * 100 / unzipSize).toFixed(2) + '%' : '');
               }
             } else if (prop == 'realUrl') {
               if (value == modal.url) {
@@ -145,32 +149,32 @@ var Overview = React.createClass({
           var lastIndex = OVERVIEW.length - 1;
           var time;
           switch(name) {
-          case OVERVIEW[lastIndex - 4]:
+          case OVERVIEW[lastIndex - 5]:
             time = util.toLocaleString(new Date(modal.startTime));
             break;
-          case OVERVIEW[lastIndex - 3]:
-            if (modal.dnsTime) {
-              time = modal.dnsTime - modal.startTime + 'ms';
-            }
+          case OVERVIEW[lastIndex - 4]:
+            time = getTime(modal.dns);
             break;
-          case OVERVIEW[lastIndex - 2]:
+          case OVERVIEW[lastIndex - 3]:
             if (modal.requestTime) {
-              time = modal.requestTime - modal.startTime + 'ms';
+              time = getTime(modal.request);
               var protocol = modal.protocol;
               if (typeof protocol === 'string' && protocol.indexOf('>') !== -1) {
-                var diffTime =  modal.httpsTime - modal.startTime;
+                var diffTime =  modal.httpsTime - modal.dnsTime;
                 if (diffTime > 0) {
                   time += ' - ' + diffTime + 'ms(' + protocol + ') = ' + (modal.requestTime - modal.httpsTime) + 'ms';
                 }
               }
             }
             break;
+          case OVERVIEW[lastIndex - 2]:
+            time = getTime(modal.response);
+            break;
           case OVERVIEW[lastIndex - 1]:
-            if (modal.responseTime) {
-              time = modal.responseTime - modal.startTime + 'ms';
-            }
+            time = getTime(modal.download);
             break;
           case OVERVIEW[lastIndex]:
+            time = getTime(modal.time);
             if (modal.endTime) {
               time = modal.endTime - modal.startTime + 'ms';
             }
@@ -181,6 +185,9 @@ var Overview = React.createClass({
       });
       var custom1 = columns.getColumn('custom1');
       var custom2 = columns.getColumn('custom2');
+      if (modal.sniPlugin) {
+        overviewModal['SNI Plugin'] = modal.sniPlugin;
+      }
       if (custom1.selected) {
         overviewModal[(dataCenter.custom1 || 'Custom1') + ' '] = modal.custom1;
       }
@@ -204,6 +211,7 @@ var Overview = React.createClass({
         var pList = rules.P;
         if (pList) {
           pList.forEach(function(item) {
+            atCtn = atCtn || [];
             atCtn.push(getVarRule(item));
             atTitle = [item.raw];
           });
@@ -249,12 +257,22 @@ var Overview = React.createClass({
               return rule.raw;
             }).join('\n');
           } else {
-            var isProxyOrHost = name === 'proxy' || name === 'host';
-            rulesModal[name] = getRuleStr(rule);
-            if (rule) {
-              titleModal[name] = realUrl && isProxyOrHost ? 'Raw Rule: ' + rule.raw + '\nReal Url: ' + realUrl : rule.raw;
-            } else {
-              titleModal[name] = rule ? rule.raw : undefined;
+            var ruleStr = getRuleStr(rule);
+            rulesModal[name] = ruleStr;
+            titleModal[name] = rule ? rule.raw : undefined;
+            if (name === 'proxy') {
+              if (realUrl && ruleStr) {
+                rulesModal[name] += ruleStr + ' (' + realUrl + ')';
+              }
+            } else if (name === 'host') {
+              var result = [];
+              if (ruleStr) {
+                result.push(ruleStr + (realUrl ? ' (' + realUrl + ')' : ''));
+              }
+              if (rules.proxy && rules.proxy.host) {
+                result.push(getRuleStr(rules.proxy.host) + ' (' + rules.proxy.matcher + ')');
+              }
+              rulesModal[name] = result.join('\n');
             }
           }
         });

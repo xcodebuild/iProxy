@@ -133,20 +133,26 @@ var ResDetail = React.createClass({
           imgSrc = body || (res.size ? modal.url : undefined);
           isText = false;
         } else if (showImg && res.base64 && type === 'HTML') {
-          data = modal;
-          isText = false;
+          if (json && json.isJSONText) {
+            isJson = true;
+          } else if (!body || (body.indexOf('<') !== -1 && body.indexOf('>') !== -1)) {
+            data = modal;
+            isText = false;
+          }
         }
       }
-      if (modal.isHttps) {
+      if (modal.useFrames) {
+        tips = { isFrames: true };
+      } else if (modal.isHttps) {
         tips = !body && { isHttps: true };
-      } else if (headers && !body && modal.responseTime && !/^ws/.test(modal.url)) {
+      } else if (res.size >= 0 && headers && modal.useFrames !== false && !body && modal.endTime && !/^ws/.test(modal.url)) {
+        tips = { url: modal.url };
         if (res.size < 5120) {
-          tips = { message: 'No response body data' };
+          tips.message = 'No response body data';
         } else {
           raw += '(Response data too large to show)';
-          tips = { message: 'Response data too large to show' };
+          tips.message = 'Response data too large to show';
         }
-        tips.url = modal.url;
       }
       if (trailerStr) {
         raw += '\r\n\r\n' + trailerStr;

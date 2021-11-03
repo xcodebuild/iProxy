@@ -8,7 +8,7 @@ var events = require('./events');
 var createCgi = createCgiObj.createCgi;
 var MAX_INCLUDE_LEN = 5120;
 var MAX_EXCLUDE_LEN = 5120;
-var MAX_FRAMES_LENGTH = exports.MAX_FRAMES_LENGTH = 120;
+var MAX_FRAMES_LENGTH = exports.MAX_FRAMES_LENGTH = 256;
 var TIMEOUT = 20000;
 var dataCallbacks = [];
 var serverInfoCallbacks = [];
@@ -23,7 +23,7 @@ var curServerInfo;
 var initialDataPromise, initialData, startedLoad;
 var lastPageLogTime = -2;
 var lastSvrLogTime = -2;
-var dataIndex = 10000;
+var dataIndex = 1000000;
 var MAX_PATH_LENGTH = 1024;
 var lastRowId;
 var endId;
@@ -759,15 +759,24 @@ function getRawHeaders(headers, rawHeaderNames) {
 
 exports.getRawHeaders = getRawHeaders;
 
-function isSocket(item) {
-  if (!item || !item.endTime || item.reqError || item.resError) {
+function isFrames(item) {
+  if (!item) {
     return false;
   }
-  if (/^wss?:\/\//.test(item.url)) {
-    return item.res.statusCode == 101;
+  if (item.useFrames) {
+    return true;
   }
-  return item.inspect || (item.isHttps && item.req.headers['x-whistle-policy'] === 'tunnel');
+  if (item.reqError || item.resError) {
+    return false;
+  }
+  var status = item.res.statusCode;
+  if (/^wss?:\/\//.test(item.url)) {
+    return status == 101;
+  }
+  return item.inspect && status == 200;
 }
+
+exports.isFrames = isFrames;
 
 function getStyleValue(style) {
   var index = style.indexOf('&');
@@ -849,7 +858,9 @@ function setReqData(item) {
   item.clientPort = req.port;
   item.serverPort = item.res.port;
   item.contentEncoding = (resHeaders['content-encoding'] || '') + (item.res.hasGzipError ? ' (Incorrect header)' : '');
-  item.body = res.size == null ? defaultValue : res.size;
+  var reqSize = req.size == null ? defaultValue : req.size;
+  var resSize = res.size == null ? defaultValue : res.size;
+  item.body = reqSize + ' + ' + resSize;
   var result = res.statusCode == null ? defaultValue : res.statusCode;
   item.result = /^[1-9]/.test(result) && parseInt(result, 10) || result;
   item.type = (resHeaders['content-type'] || defaultValue).split(';')[0].toLowerCase();
@@ -858,12 +869,16 @@ function setReqData(item) {
     item.dns = item.dnsTime - item.startTime + 'ms';
     if (item.requestTime > 0) {
       item.request =  item.requestTime - item.dnsTime + 'ms';
-      if (item.responseTime > 0) {
+    }
+    if (item.responseTime > 0) {
+      if (!item.requestTime || item.requestTime > item.responseTime) {
+        item.response = item.responseTime - item.dnsTime + 'ms';
+      } else {
         item.response = item.responseTime - item.requestTime + 'ms';
-        if (end > 0) {
-          item.download = end - item.responseTime + 'ms';
-          item.time = end - item.startTime + 'ms';
-        }
+      }
+      if (end > 0) {
+        item.download = end - item.responseTime + 'ms';
+        item.time = end - item.startTime + 'ms';
       }
     }
   }
@@ -897,7 +912,7 @@ function setReqData(item) {
   if (item.useHttp && (item.protocol === 'HTTPS' || item.protocol === 'WSS')) {
     item.protocol = item.protocol + ' > ' + item.protocol.slice(0, -1);
   }
-  if (!item.frames && isSocket(item)) {
+  if (!item.frames && isFrames(item)) {
     item.frames = [];
   }
 }

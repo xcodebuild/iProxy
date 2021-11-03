@@ -80,8 +80,10 @@ function proxy(callback) {
   config.debug && rules.disableDnsCache();
   var count = 2;
   var execCallback = function() {
-    if (--count === 0 && typeof callback === 'function') {
-      callback.call(server, proxyEvents);
+    if (--count === 0) {
+      process.whistleStarted = true;
+      process.emit('whistleStarted');
+      typeof callback === 'function' && callback.call(server, proxyEvents);
     }
   };
   util.getBoundIp(config.host, function(host) {
@@ -201,9 +203,9 @@ function exportInterfaces(obj) {
   return obj;
 }
 
-process.on('uncaughtException', function(err){
+function handleGlobalException(err){
   var code = err && err.code;
-  if (code === 'EPIPE' || code === 'ERR_HTTP2_ERROR' ||
+  if (code === 'EPIPE' || code === 'ERR_HTTP2_ERROR' || code === 'ENETUNREACH' ||
     code === 'ERR_HTTP_TRAILER_INVALID' || code === 'ERR_INTERNAL_ASSERTION' ||
     (err && err.message === 'Cannot read property \'finishWrite\' of null')) {
     return;
@@ -215,6 +217,9 @@ process.on('uncaughtException', function(err){
     console.error(stack);
   }
   process.exit(1);
-});
+}
+
+process.on('unhandledRejection', handleGlobalException);
+process.on('uncaughtException', handleGlobalException);
 
 module.exports = exportInterfaces(proxy);

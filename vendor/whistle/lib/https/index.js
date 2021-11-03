@@ -27,10 +27,14 @@ var parseReq = hparser.parse;
 var getDomain = ca.getDomain;
 var serverAgent = ca.serverAgent;
 var getSNIServer = ca.getSNIServer;
+var getHttp2Server = ca.getHttp2Server;
+var remoteCerts = ca.remoteCerts;
 var LOCALHOST = '127.0.0.1';
 var tunnelTmplData = new LRU({max: 3000, maxAge: 30000});
+var SNI_CALLBACK_RE = /^sniCallback:\/\/(?:whistle\.|plugin\.)?([a-z\d_\-]+)(?:\(([\s\S]*)\))?$/;
 var TIMEOUT = 5000;
 var CONN_TIMEOUT = 60000;
+var certCallbacks = {};
 var X_RE = /^x/;
 var proxy, server;
 
@@ -72,6 +76,7 @@ function resolveWebsocket(socket, wss) {
     id: socket.reqId,
     url: fullUrl,
     startTime: now,
+    sniPlugin: socket.sniPlugin,
     fwdHost: socket._fwdHost,
     rules: _rules,
     req: reqData,
@@ -80,7 +85,8 @@ function resolveWebsocket(socket, wss) {
     rulesHeaders: socket.rulesHeaders
   };
 
-  var reqSocket, options, pluginRules, isXProxy, isInternalProxy, isHInternal, isHttpsInternal, origProto, done, proxyUrl, clientKey, clientCert, isPfx;
+  var reqSocket, options, isXProxy, isInternalProxy, isHInternal, isHttpsInternal;
+  var  origProto, done, proxyUrl, clientKey, clientCert, isPfx, curStatus;
   var timeout = setTimeout(function() {
     destroy(new Error('Timeout'));
   }, CONN_TIMEOUT);
@@ -94,45 +100,51 @@ function resolveWebsocket(socket, wss) {
     var body = '';
     var statusMsg;
     util.deleteReqHeaders(socket);
-    if (status === 101) {
-      statusMsg = 'HTTP/1.1 101 Switching Protocols';
-      var protocol = (headers['sec-websocket-protocol'] || '').split(/, */);
-      var key = headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
-      key = crypto.createHash('sha1')
-          .update(key, 'binary')
-          .digest('base64');
-      resHeaders['Sec-WebSocket-Accept'] = key;
-      resHeaders.Upgrade = 'websocket';
-      resHeaders.Connection = 'Upgrade';
-      if (protocol[0]) {
-        resHeaders['Sec-WebSocket-Protocol'] = protocol[0];
-      }
-      reqSocket = util.getEmptyRes();
-      reqSocket.headers = resHeaders;
-      socketMgr.handleUpgrade(socket, reqSocket);
-    } else {
-      if (!status) {
-        status = 502;
-        body = 'Invalid status code: ' + statusCode;
-        resHeaders['Content-Type'] = 'text/html; charset=utf8';
-        resHeaders['Content-Length'] = Buffer.byteLength(body) + '';
-      }
-      resHeaders.Connection = 'close';
-      statusMsg = 'HTTP/1.1 ' + status;
-    }
-    resData.statusCode = status;
     resData.body = body;
     resData.ip = resData.ip || LOCALHOST;
-    data.requestTime = data.dnsTime =Date.now();
+    data.requestTime = data.dnsTime = Date.now();
     getResRules(socket, resData, function() {
-      var rawData = statusMsg + '\r\n' + getRawHeaders(resHeaders) + '\r\n\r\n' + body;
+      status = curStatus || status;
+      if (status === 101) {
+        statusMsg = 'HTTP/1.1 101 Switching Protocols';
+        var protocol = (headers['sec-websocket-protocol'] || '').split(/, */);
+        var key = headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+        key = crypto.createHash('sha1')
+            .update(key, 'binary')
+            .digest('base64');
+        resHeaders['Sec-WebSocket-Accept'] = key;
+        resHeaders.Upgrade = 'websocket';
+        resHeaders.Connection = 'Upgrade';
+        if (protocol[0]) {
+          resHeaders['Sec-WebSocket-Protocol'] = protocol[0];
+        }
+        reqSocket = util.getEmptyRes();
+        reqSocket.headers = resHeaders;
+        socketMgr.handleUpgrade(socket, reqSocket);
+      } else {
+        if (!status) {
+          status = 502;
+          body = 'Invalid status code: ' + statusCode;
+          resHeaders['Content-Type'] = 'text/html; charset=utf8';
+          resHeaders['Content-Length'] = Buffer.byteLength(body) + '';
+        }
+        resHeaders.Connection = 'close';
+        statusMsg = 'HTTP/1.1 ' + status;
+      }
+      resData.statusCode = status;
+      var curHeaders = resHeaders;
+      if (socket.fromComposer) {
+        curHeaders = extend({}, resHeaders);
+        curHeaders['x-whistle-req-id'] = socket.reqId;
+      }
+      var rawData = statusMsg + '\r\n' + getRawHeaders(curHeaders) + '\r\n\r\n' + body;
       var end = function() {
         data.responseTime = data.endTime = Date.now();
         socket.write(rawData);
         execCallback(null, socket);
       };
-      var reqDelay = util.getMatcherValue(_rules.reqDelay) | 0;
-      var resDelay = util.getMatcherValue(_rules.resDelay) | 0;
+      var reqDelay = util.getMatcherValue(_rules.reqDelay) || 0;
+      var resDelay = util.getMatcherValue(_rules.resDelay) || 0;
       var delay = reqDelay + resDelay;
       if (delay > 0) {
         clearTimeout(timeout);
@@ -148,9 +160,10 @@ function resolveWebsocket(socket, wss) {
   var plugin = pluginMgr.resolveWhistlePlugins(socket);
   abortIfUnavailable(socket);
   pluginMgr.getRules(socket, function(rulesMgr) {
-    if (pluginRules = rulesMgr) {
+    if (rulesMgr) {
+      socket.pluginRules = rulesMgr;
       socket.curUrl = fullUrl;
-      util.mergeRules(socket, rulesMgr.resolveRules(socket));
+      util.mergeRules(socket, rulesMgr.resolveReqRules(socket));
       if (util.isIgnored(filter, 'rule')) {
         plugin = null;
       } else {
@@ -179,7 +192,7 @@ function resolveWebsocket(socket, wss) {
         ++util.proc.totalWsRequests;
         socket.isLogRequests = true;
       }
-      if (!config.rulesMode && (!filter.hide || socket.disable.hide)) {
+      if (config.captureData && (!filter.hide || socket.disable.hide)) {
         data.abort = destroy;
         proxy.emit('request', reqEmitter, data);
       }
@@ -193,6 +206,9 @@ function resolveWebsocket(socket, wss) {
       }
         
       pluginMgr.loadPlugin(plugin, function(err, ports) {
+        if (plugin) {
+          data.dnsTime = Date.now();
+        }
         if (err) {
           return execCallback(err);
         }
@@ -217,6 +233,7 @@ function resolveWebsocket(socket, wss) {
             var proxyRule = _rules.proxy;
             var connectProxy;
             var send = function() {
+              data.requestTime = Date.now();
               if (connectProxy) {
                 connectProxy();
               } else {
@@ -265,6 +282,7 @@ function resolveWebsocket(socket, wss) {
         
                 options.proxyHost = ip;
                 resData.port = options.proxyPort = proxyPort;
+                socket.serverPort = resData.port;
                 options.host = options.hostname;
                 if (!options.port) {
                   options.port = wss ? 443 : 80;
@@ -329,9 +347,20 @@ function resolveWebsocket(socket, wss) {
                     options.auths = config.getAuths(proxyOptions);
                   } else {
                     var proxyHeaders = options.headers = {};
-                    var ua = !socket.disable.proxyUA && headers['user-agent'];
-                    if (ua) {
-                      proxyHeaders['user-agent'] = ua;
+                    pluginMgr.getTunnelKeys().forEach(function(k) {
+                      var val = headers[k];
+                      if (val) {
+                        proxyHeaders[k] = val;
+                      }
+                    });
+                    var auth = headers['proxy-authorization'];
+                    if (auth) {
+                      proxyHeaders['proxy-authorization'] = auth;
+                    }
+                    if (socket.disable.proxyUA) {
+                      delete proxyHeaders['user-agent'];
+                    } else if (headers['user-agent']) {
+                      proxyHeaders['user-agent'] = headers['user-agent'];
                     }
                     if (wss && (isInternalProxy || isHttps2HttpProxy)) {
                       headers[config.HTTPS_FIELD] = 1;
@@ -344,6 +373,10 @@ function resolveWebsocket(socket, wss) {
                     }
                     if(isProxyPort) {
                       proxyHeaders[config.WEBUI_HEAD] = 1;
+                    }
+                    var clientId = headers[config.CLIENT_ID_HEADER];
+                    if (clientId) {
+                      proxyHeaders[config.CLIENT_ID_HEADER] = clientId;
                     }
                     util.checkIfAddInterceptPolicy(proxyHeaders, headers);
                     util.setClientId(proxyHeaders, socket.enable, socket.disable, clientIp, isInternalProxy);
@@ -381,7 +414,7 @@ function resolveWebsocket(socket, wss) {
                   };
                 }
                 connect();
-              });
+              }, null, null, proxyRule);
             } else {
               connect();
             }
@@ -398,6 +431,7 @@ function resolveWebsocket(socket, wss) {
       var isWss = options.protocol === 'wss:';
       var _port = port;
       resData.port = port = port || options.port || (isWss ? 443 : 80);
+      socket.serverPort = port;
       if (destroyed) {
         return;
       }
@@ -511,13 +545,9 @@ function resolveWebsocket(socket, wss) {
     util.deleteReqHeaders(socket);
     reqSocket.write(socket.getBuffer(headers, options.path));
     reqSocket.resume();
+    delete headers['x-whistle-frame-parser'];
     delete headers[config.HTTPS_FIELD];
-    var resDelay = util.getMatcherValue(_rules.resDelay);
-    if (resDelay > 0) {
-      setTimeout(_pipeData, resDelay);
-    } else {
-      _pipeData();
-    }
+    _pipeData();
   }
 
   function setupSocket(cb) {
@@ -588,6 +618,7 @@ function resolveWebsocket(socket, wss) {
                     delete curResHeaders[name];
                   });
                   util.disableResProps(socket, curResHeaders);
+                  curStatus = util.getMatcherValue(_rules.replaceStatus);
                   callback();
                 });
     });
@@ -603,34 +634,47 @@ function resolveWebsocket(socket, wss) {
       socket.resHeaders = res.headers;
       var curResHeaders = reqSocket.headers = res.headers;
       getResRules(socket, res, function() {
-        reqSocket.reqId = data.id;
-        socket.write(res.getBuffer(curResHeaders));
-        if (res.statusCode == 101) {
-          socketMgr.handleUpgrade(socket, reqSocket);
-        } else {
-          reqSocket.resume();
-        }
-        resData.body = res.body;
-        resData.headers = curResHeaders;
-        resData.rawHeaderNames = res.rawHeaderNames;
-        resData.statusCode = res.statusCode;
-        reqEmitter.emit('response', data);
-        execCallback(null, reqSocket);
+        util.delay(util.getMatcherValue(_rules.resDelay), function() {
+          reqSocket.reqId = data.id;
+          var code = curStatus || res.statusCode;
+          socket.statusCode = res.statusCode = code;
+          var curHeaders = curResHeaders;
+          if (socket.fromComposer) {
+            curHeaders = extend({}, curResHeaders);
+            curHeaders['x-whistle-req-id'] = reqSocket.reqId;
+          }
+          if (code == 101) {
+            socket.write(res.getHeaders(curHeaders, curStatus));
+            if (res.bodyBuffer.length) {
+              reqSocket.unshift(res.bodyBuffer);
+            }
+            socketMgr.handleUpgrade(socket, reqSocket);
+            resData.body = '';
+          } else {
+            socket.write(res.getBuffer(curHeaders, curStatus));
+            reqSocket.resume();
+            resData.body = res.body;
+          }
+          resData.headers = curResHeaders;
+          resData.rawHeaderNames = res.rawHeaderNames;
+          resData.statusCode = code;
+          reqEmitter.emit('response', data);
+          execCallback(null, reqSocket);
+        });
       });
     }, true);
   }
 
-  function getServerIp(url, callback, hostIp, hostPort) {
+  function getServerIp(url, callback, hostIp, hostPort, proxyRule) {
     if (plugin) {
       return callback(LOCALHOST);
     }
-    var hostHandler = function(err, ip, port, host) {
+    var hostHandler = function(err, ip, port, hostRule) {
       if (err) {
         return execCallback(err);
       }
-
-      if (host) {
-        _rules.host = host;
+      if (hostRule) {
+        (proxyRule || _rules).host = hostRule;
       }
       socket.hostIp = resData.ip = util.getHostIp(ip, port);
       data.requestTime = data.dnsTime = Date.now();
@@ -641,7 +685,7 @@ function resolveWebsocket(socket, wss) {
       hostHandler(null, hostIp, hostPort);
     } else {
       socket.curUrl = url;
-      rules.resolveHost(socket, hostHandler, pluginRules, socket.rulesFileMgr, socket.headerRulesMgr);
+      rules.resolveHost(socket, hostHandler, socket.pluginRules, socket.rulesFileMgr, socket.headerRulesMgr);
     }
   }
 
@@ -670,6 +714,7 @@ function resolveWebsocket(socket, wss) {
       return;
     }
     done = true;
+    data.dnsTime = data.dnsTime || Date.now();
     clearTimeout(timeout);
     data.responseTime = data.endTime = Date.now();
     socket.hostIp = resData.ip = resData.ip || LOCALHOST;
@@ -699,20 +744,35 @@ function addReqInfo(req) {
   var socket = req.socket;
   var remoteData = socket._remoteDataInfo || tunnelTmplData.get(socket.remotePort + ':' + socket.localPort);
   var headers = req.headers;
-  headers[config.HTTPS_FIELD] = 1;
   if (remoteData) {
+    req.isHttpH2 = remoteData.isHttpH2;
     socket._remoteDataInfo = remoteData;
     headers[config.CLIENT_IP_HEAD] = remoteData.clientIp || LOCALHOST;
     headers[config.CLIENT_PORT_HEAD] = remoteData.clientPort;
+    var tunnelFirst = remoteData.tunnelFirst;
     if (remoteData.clientId) {
       headers[config.CLIENT_ID_HEADER] = remoteData.clientId;
     }
-    if (remoteData.proxyAuth) {
+    if (remoteData.proxyAuth && (tunnelFirst || !headers['proxy-authorization'])) {
       headers['proxy-authorization'] = remoteData.proxyAuth;
     }
     if (remoteData.tunnelData) {
       headers[config.TUNNEL_DATA_HEADER] = remoteData.tunnelData;
     }
+    if (remoteData.sniPlugin) {
+      headers[config.SNI_PLUGIN_HEADER] = remoteData.sniPlugin;
+    }
+    var tunnelHeaders =  remoteData.headers;
+    if (tunnelHeaders) {
+      Object.keys(tunnelHeaders).forEach(function(key) {
+        if (tunnelFirst || !headers[key]) {
+          headers[key] = tunnelHeaders[key];
+        }
+      });
+    }
+  }
+  if (!req.isHttpH2) {
+    headers[config.HTTPS_FIELD] = 1;
   }
 }
 
@@ -798,7 +858,7 @@ function toHttp1(req, res) {
   options.port = config.port;
   options.headers = headers;
   if (isH2) {
-    headers[config.ALPN_PROTOCOL_HEADER] = 'h2';
+    headers[config.ALPN_PROTOCOL_HEADER] = req.isHttpH2 ? 'httpH2' : 'h2';
   }
   options.method = req.method;
   client = http.request(options);
@@ -850,6 +910,7 @@ var h2Handlers =  config.enableH2 ? {
 
 var CONNECT_RE = /^CONNECT\s+(\S+)\s+HTTP\/1.\d$/mi;
 var HTTP_RE = /^\w+\s+\S+\s+HTTP\/1.\d$/mi;
+var HTTP2_RE = /^PRI\s\*\s+HTTP\/2.0$/mi;
 
 function addClientInfo(socket, chunk, statusLine, clientIp, clientPort) {
   var len = Buffer.byteLength(statusLine);
@@ -869,6 +930,8 @@ function addClientInfo(socket, chunk, statusLine, clientIp, clientPort) {
 module.exports = function(socket, next, isWebPort) {
   var reqSocket, reqDestroyed, resDestroyed;
   var headersStr, statusLine;
+  var enable = socket.enable || '';
+  var disable = socket.disable || '';
   var destroy = function (err) {
     if (reqSocket) {
       if (!resDestroyed) {
@@ -916,23 +979,13 @@ module.exports = function(socket, next, isWebPort) {
       socket.resume();
       server.emit('connection', socket);
       socket.emit('data', addClientInfo(socket, chunk, statusLine, clientIp, clientPort));
-    } else if (chunk[0] != 22) {
-      next(chunk);
     } else {
-      var receiveData, authTimer;
-      var useSNI = checkSNI(chunk);
-      var domain = useSNI || socket._curHostname;
-      if (!domain || (socket.useProxifier && !ca.existsCustomCert(domain))) {
+      var isHttpH2 = HTTP2_RE.test(headersStr);
+      if (!isHttpH2 && chunk[0] != 22) {
         return next(chunk);
       }
-      domain = getDomain(domain);
-      var e = socket.enable;
-      var d = socket.disable;
-      var requestCert = (e.clientCert || e.requestCert) && !d.clientCert && !d.requestCert;
-      var key = requestCert ? ':' + domain : domain;
-      if (serverAgent.existsServer(key)) {
-        useSNI = false;
-      }
+      var receiveData, authTimer;
+      var useSNI, key;
       var checkTimeout = function() {
         authTimer = setTimeout(function() {
           if (reqSocket) {
@@ -967,12 +1020,25 @@ module.exports = function(socket, next, isWebPort) {
           if (tdKey && (!tunnelData || config.overTdKey)) {
             tunnelData = headers[tdKey] || tunnelData;
           }
+          var tunnelHeaders;
+          var tunnelKeys = pluginMgr.getTunnelKeys();
+          tunnelKeys.forEach(function(k) {
+            var val = headers[k];
+            if (val) {
+              tunnelHeaders = tunnelHeaders || {};
+              tunnelHeaders[k] = val;
+            }
+          });
           tunnelTmplData.set(reqSocket.localPort + ':' + reqSocket.remotePort, {
             clientIp: clientIp,
             clientPort: clientPort,
             clientId: headers[config.CLIENT_ID_HEADER],
-            proxyAuth:headers['proxy-authorization'],
-            tunnelData: tunnelData
+            proxyAuth: headers['proxy-authorization'],
+            tunnelData: tunnelData,
+            headers: tunnelHeaders,
+            tunnelFirst: enable.tunnelHeadersFirst && !disable.tunnelHeadersFirst,
+            isHttpH2: isHttpH2,
+            sniPlugin: socket.sniPlugin
           });
           receiveData = function(data) {
             clearTimeout(authTimer);
@@ -990,12 +1056,103 @@ module.exports = function(socket, next, isWebPort) {
         checkTimeout();
         serverAgent.createServer(key, handlers, handleConnect);
       };
-      
-      if(useSNI) {
-        checkTimeout();
-        getSNIServer(h2Handlers, handleConnect, !properties.isEnableHttp2() || util.isDisableH2(socket, true), requestCert);
+
+      var handleRequest = function() {
+        if(useSNI) {
+          checkTimeout();
+          var disableH2 = !properties.isEnableHttp2();
+          if (disable.http2) {
+            disableH2 = true;
+          } else if (enable.http2) {
+            disableH2 = false;
+          }
+          getSNIServer(h2Handlers, handleConnect, disableH2, requestCert);
+        } else if (isHttpH2) {
+          checkTimeout();
+          getHttp2Server(h2Handlers, handleConnect);
+        } else {
+          useNoSNIServer();
+        }
+      };
+      if (isHttpH2) {
+        return handleRequest();
+      }
+      useSNI = checkSNI(chunk);
+      var domain = useSNI || socket.tunnelHostname;
+      if (!domain || (useSNI ? disable.captureSNI : disable.captureNoSNI) ||
+        (socket.useProxifier && !ca.existsCustomCert(domain))) {
+        return next(chunk);
+      }
+      domain = getDomain(domain);
+      var requestCert = (enable.clientCert || enable.requestCert) && !disable.clientCert && !disable.requestCert;
+      key = requestCert ? ':' + domain : domain;
+      var plugin, pluginName;
+      var curCert = useSNI && remoteCerts.get(useSNI);
+      if (useSNI && !socket.isLocalUIUrl) {
+        socket.curUrl = socket.fullUrl = 'https://' + useSNI;
+        plugin = rules.resolveSNICallback(socket);
+        if (plugin) {
+          if (socket.rules) {
+            socket.rules.sniCallback = plugin;
+          }
+          if (SNI_CALLBACK_RE.test(plugin.matcher)) {
+            socket.sniRuleValue = RegExp.$2;
+            pluginName = RegExp.$1;
+            plugin = pluginMgr.getPlugin(pluginName + ':');
+          } else {
+            plugin = null;
+          }
+        }
+      }
+      if (plugin) {
+        socket.serverName = socket.servername = useSNI;
+        socket.commonName = domain;
+        if (curCert && curCert.name) {
+          socket.hasCertCache = curCert.name + (curCert.mtime ? '+' + curCert.mtime : '');
+        }
+        var cbKey = useSNI + '/' + pluginName;
+        var cbList = certCallbacks[cbKey];
+        var handleCert = function(cert) {
+          if (socket._hasError) {
+            return destroy();
+          }
+          if (cert === false) {
+            return next(chunk);
+          }
+          if (cert && util.isString(cert.key) && util.isString(cert.cert)) {
+            socket.sniPlugin = cert.name;
+            if (!curCert || curCert.key !== cert.key || curCert.cert !== cert.cert) {
+              remoteCerts.set(useSNI, cert);
+            }
+          } else {
+            if (curCert) {
+              if (cert) {
+                socket.sniPlugin = curCert.name;
+              } else {
+                remoteCerts.del(useSNI);
+                curCert = null;
+              }
+            }
+          }
+          handleRequest();
+        };
+        if (cbList) {
+          return cbList.push(handleCert);
+        }
+        certCallbacks[cbKey] = [handleCert];
+        pluginMgr.loadCert(socket, plugin, function(cert) {
+          cbList = certCallbacks[cbKey];
+          delete certCallbacks[cbKey];
+          cbList && cbList.forEach(function(handleCb) {
+            handleCb(cert);
+          });
+        });
       } else {
-        useNoSNIServer();
+        curCert && remoteCerts.del(useSNI);
+        if (serverAgent.existsServer(key)) {
+          useSNI = false;
+        }
+        handleRequest();
       }
     }
   }, isWebPort ? 0 : TIMEOUT);

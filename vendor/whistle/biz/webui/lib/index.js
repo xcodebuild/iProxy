@@ -2,6 +2,8 @@ var express = require('express');
 var app = express();
 var path = require('path');
 var url = require('url');
+var http = require('http');
+var https = require('https');
 var getAuth = require('basic-auth');
 var parseurl = require('parseurl');
 var bodyParser = require('body-parser');
@@ -9,11 +11,13 @@ var crypto = require('crypto');
 var cookie = require('cookie');
 var fs = require('fs');
 var zlib = require('zlib');
+var extend = require('extend');
 var htdocs = require('../htdocs');
 var handleWeinreReq = require('../../weinre');
 var setProxy = require('./proxy');
 var getRootCAFile = require('../../../lib/https/ca').getRootCAFile;
 var config = require('../../../lib/config');
+var loadAuthPlugins = require('../../../lib/plugins').loadAuthPlugins;
 
 var PARSE_CONF = { extended: true, limit: '3mb'};
 var UPLOAD_PARSE_CONF = { extended: true, limit: '30mb'};
@@ -25,7 +29,7 @@ var GET_METHOD_RE = /^get$/i;
 var WEINRE_RE = /^\/weinre\/.*/;
 var ALLOW_PLUGIN_PATHS = ['/cgi-bin/rules/list2', '/cgi-bin/values/list2', '/cgi-bin/get-custom-certs-info'];
 var DONT_CHECK_PATHS = ['/cgi-bin/server-info', '/cgi-bin/plugins/is-enable', '/cgi-bin/plugins/get-plugins',
-  '/preview.html', '/cgi-bin/rootca', '/cgi-bin/log/set'];
+  '/preview.html', '/cgi-bin/rootca', '/cgi-bin/log/set', '/cgi-bin/status'];
 var GUEST_PATHS = ['/cgi-bin/composer', '/cgi-bin/socket/data', '/cgi-bin/abort', '/cgi-bin/socket/abort',
   '/cgi-bin/socket/change-status', '/cgi-bin/sessions/export'];
 var PLUGIN_PATH_RE = /^\/(whistle|plugin)\.([^/?#]+)(\/)?/;
@@ -65,10 +69,10 @@ function getLoginKey (req, res, auth) {
   return shasum([auth.username, password, ip].join('\n'));
 }
 
-function requireLogin(res) {
+function requireLogin(res, msg) {
   res.setHeader('WWW-Authenticate', ' Basic realm=User Login');
   res.setHeader('Content-Type', 'text/html; charset=utf8');
-  res.status(401).end('Access denied, please <a href="javascript:;" onclick="location.reload()">try again</a>.');
+  res.status(401).end(msg || 'Access denied, please <a href="javascript:;" onclick="location.reload()">try again</a>.');
 }
 
 function verifyLogin(req, res, auth) {
@@ -110,7 +114,13 @@ function verifyLogin(req, res, auth) {
   }
 }
 
-function checkAuth(req, res, auth) {
+function checkAuth(req, res) {
+  var username = getUsername();
+  var auth = {
+    authKey: 'whistle_lk_' + encodeURIComponent(username),
+    username: username,
+    password: getPassword()
+  };
   if (verifyLogin(req, res, auth)) {
     return true;
   }
@@ -119,6 +129,32 @@ function checkAuth(req, res, auth) {
 }
 
 app.disable('x-powered-by');
+
+function readRemoteStream(req, res, authUrl) {
+  var client;
+  const handleError = function(err) {
+    res.emit('error', err);
+    client && client.destroy();
+  };
+  if (authUrl[0] === 'f') {
+    var stream = fs.createReadStream(authUrl.substring(7));
+    stream.on('error', handleError);
+    return stream.pipe(res);
+  }
+  var options = url.parse(authUrl);
+  options.rejectUnauthorized = false;
+  var httpModule = options.protocol === 'https:' ? https : http;
+  var headers = extend({}, req.headers);
+  delete headers.host;
+  options.headers = headers;
+  client = httpModule.request(options, function(svrRes) {
+    svrRes.on('error', handleError);
+    res.writeHead(svrRes.statusCode, svrRes.headers);
+    svrRes.pipe(res);
+  });
+  client.on('error', handleError);
+  client.end();
+}
 
 app.use(function(req, res, next) {
   proxyEvent.emit('_request', req.url);
@@ -131,10 +167,27 @@ app.use(function(req, res, next) {
   };
   req.on('error', abort);
   res.on('error', abort).on('close', abort);
-  if (config.shadowRulesOnlyMode && req.path !== '/cgi-bin/rootca') {
-    return res.status(404).end('Not Found');
-  }
-  next();
+  loadAuthPlugins(req, function(status, msg, authUrl) {
+    if (!status && !authUrl) {
+      return next();
+    }
+    res.set('x-server', 'whistle');
+    res.set('x-module', 'webui');
+    if (!msg && !authUrl) {
+      return res.redirect(status);
+    }
+    if (status === 401) {
+      return requireLogin(res, msg);
+    }
+    res.set('Content-Type', 'text/html; charset=utf8');
+    if (authUrl) {
+      return readRemoteStream(req, res, authUrl);
+    }
+    if (status === 502) {
+      return res.status(502).end(msg || 'Error');
+    }
+    res.status(403).end(msg || 'Forbidden');
+  });
 });
 
 if (typeof config.uiMiddleware === 'function') {
@@ -252,6 +305,12 @@ app.all(PLUGIN_PATH_RE, function(req, res) {
     }
     return;
   }
+  var internalId = req.headers['x-whistle-internal-id'];
+  if (internalId === util.INTERNAL_ID) {
+    delete req.headers['x-whistle-internal-id'];
+  } else if (plugin.inheritAuth && !checkAuth(req, res)) {
+    return;
+  }
   if (!slash) {
     return res.redirect(type + '.' + name + '/');
   }
@@ -278,9 +337,13 @@ app.use(function(req, res, next) {
       return pluginMgr.getPlugin(name + ':') ? next() : res.sendStatus(403);
     }
   }
-  var authKey = config.authKey;
-  if ((authKey && authKey === req.headers['x-whistle-auth-key'])
-    || doNotCheckLogin(req)) {
+  if (doNotCheckLogin(req)) {
+    return next();
+  }
+  if (config.disableWebUI && !config.debugMode) {
+    return res.status(404).end('Not Found');
+  }
+  if (config.authKey && config.authKey === req.headers['x-whistle-auth-key']) {
     return next();
   }
   var guestAuthKey = config.guestAuthKey;
@@ -289,14 +352,7 @@ app.use(function(req, res, next) {
     || WEINRE_RE.test(req.path) || GUEST_PATHS.indexOf(req.path) !== -1)) {
     return next();
   }
-  var username = getUsername();
-  var password = getPassword();
-  var authConf = {
-    authKey: 'whistle_lk_' + encodeURIComponent(username),
-    username: username,
-    password: password
-  };
-  if (checkAuth(req, res, authConf)) {
+  if (checkAuth(req, res)) {
     next();
   }
 });
@@ -351,7 +407,6 @@ if (!config.debugMode) {
   app.get('/', sendIndex);
   app.get('/index.html', sendIndex);
 }
-app.use(express.static(path.join(__dirname, '../htdocs'), {maxAge: 300000}));
 
 app.get('/', function(req, res) {
   res.sendFile(htdocs.getHtmlFile('index.html'));
@@ -375,6 +430,8 @@ function init(proxy) {
   util = proxy.util;
   setProxy(proxy);
 }
+
+app.use(express.static(path.join(__dirname, '../htdocs'), {maxAge: 300000}));
 
 exports.init = init;
 exports.setupServer = function(server) {

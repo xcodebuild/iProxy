@@ -157,6 +157,29 @@ function readFirstChunk(req, res, src, cb) {
   });
 }
 
+function checkH2(req, isHttps) {
+  if (!config.enableH2) {
+    return;
+  }
+  req.useH2 = req.isH2;
+  var d = req.disable;
+  var e = req.enable;
+  if (isHttps) {
+    if (d.h2 || d.httpsH2) {
+      req.useH2 = false;
+    } else if (e.h2 || e.httpsH2) {
+      req.useH2 = true;
+    }
+  } else {
+    if (d.httpH2) {
+      req.useH2 = false;
+    } else if (e.httpH2) {
+      req.useH2 = true;
+    }
+    req.useHttpH2 = req.useH2;
+  }
+}
+
 module.exports = function(req, res, next) {
   var origProto;
   var resRules = req.rules;
@@ -196,8 +219,10 @@ module.exports = function(req, res, next) {
             }
           }
           req.curUrl = curUrl;
-          req.setServerPort = req.setServerPort || util.noop;
-          rules.resolveHost(req, function(err, ip, port, host) {
+          req.setServerPort = req.setServerPort || function (serverPort) {
+            req.serverPort = serverPort;
+          };
+          rules.resolveHost(req, function(err, ip, port, hostRule) {
             var setHostsInfo = function(_ip, _port, _host, withPort) {
               ip = _ip || '127.0.0.1';
               port = _port;
@@ -207,7 +232,11 @@ module.exports = function(req, res, next) {
                 resRules.host = _host;
               }
             };
-            setHostsInfo(hostIp || ip, hostPort || port, host);
+            if (proxyUrl && proxyRule && hostRule) {
+              proxyRule.host = hostRule;
+              hostRule = null;
+            }
+            setHostsInfo(hostIp || ip, hostPort || port, hostRule);
             if (err) {
               showDnsError(res, err);
               return;
@@ -224,6 +253,7 @@ module.exports = function(req, res, next) {
                 options.agent = isHttps ? config.httpsAgent : config.httpAgent;
               }
             };
+            !isInternalProxy && checkH2(req, isHttps);
             if (proxyUrl) {
               proxyOptions = url.parse(proxyUrl);
               proxyOptions.host = ip;
@@ -235,8 +265,10 @@ module.exports = function(req, res, next) {
               }
               if (proxyOptions.auth) {
                 auth = 'Basic ' + util.toBuffer(proxyOptions.auth + '').toString('base64');
+              } else {
+                auth = headers['proxy-authorization'];
               }
-              if (isHttps || isSocks || isHttpsProxy || req._phost) {
+              if (isHttps || req.useH2 || isSocks || isHttpsProxy || req._phost) {
                 isProxyPort = util.isProxyPort(proxyPort);
                 if (isProxyPort && util.isLocalAddress(ip)) {
                   req.setServerPort(config.port);
@@ -252,17 +284,24 @@ module.exports = function(req, res, next) {
                     host: options.hostname + ':' + curServerPort,
                     'proxy-connection': req.disable.proxyConnection ? 'close' : 'keep-alive'
                   };
+                  pluginMgr.getTunnelKeys().forEach(function(k) {
+                    var val = headers[k];
+                    if (val) {
+                      proxyHeaders[k] = val;
+                    }
+                  });
                   if (auth) {
                     proxyHeaders['proxy-authorization'] = auth;
                   }
-                  var ua = !req.disable.proxyUA && headers['user-agent'];
-                  if (ua) {
-                    proxyHeaders['user-agent'] = ua;
+                  if (req.disable.proxyUA) {
+                    delete proxyHeaders['user-agent'];
+                  } else if (headers['user-agent']) {
+                    proxyHeaders['user-agent'] = headers['user-agent'];
                   }
                   if (!util.isLocalAddress(req.clientIp)) {
                     proxyHeaders[config.CLIENT_IP_HEAD] = req.clientIp;
                   }
-                  if (isHttps) {
+                  if (isHttps || req.useH2) {
                     util.checkIfAddInterceptPolicy(proxyHeaders, headers);
                   }
                   if (isProxyPort) {
@@ -270,11 +309,17 @@ module.exports = function(req, res, next) {
                   } else if (util.isProxyPort(curServerPort)) {
                     headers[config.WEBUI_HEAD] = 1;
                   }
+                  var clientId = req.headers[config.CLIENT_ID_HEADER];
+                  if (clientId) {
+                    proxyHeaders[config.CLIENT_ID_HEADER] = clientId;
+                  }
                   util.setClientId(proxyHeaders, req.enable, req.disable, req.clientIp, isInternalProxy);
+                  var phost = req._phost;
                   var opts = {
                     isSocks: isSocks,
                     isHttps: isHttps,
-                    proxyServername: isHttpsProxy ? proxyOptions.hostname : null,
+                    _phost: phost,
+                    proxyServername: isHttpsProxy ? proxyOptions.hostname : null, 
                     proxyHost: ip,
                     clientIp: proxyHeaders[config.CLIENT_IP_HEAD],
                     proxyPort: proxyPort,
@@ -282,7 +327,6 @@ module.exports = function(req, res, next) {
                     auth: proxyOptions.auth,
                     headers: proxyHeaders
                   };
-                  var phost = req._phost;
                   if (phost) {
                     options.host = phost.hostname;
                     if (phost.port > 0) {
@@ -467,8 +511,11 @@ module.exports = function(req, res, next) {
                   return;
                 }
                 req.useH2 = false;
-                if (options._proxyOptions) {
-                  setProxyAgent(options, options._proxyOptions);
+                var proxyOpts = options._proxyOptions;
+                if (proxyOpts) {
+                  if (!req.useHttpH2 || proxyOpts._phost) {
+                    setProxyAgent(options, proxyOpts);
+                  }
                   delete options._proxyOptions;
                 }
                 req.setServerPort(options._proxyPort || options.port || (isHttps ? 443 : 80));
@@ -547,15 +594,13 @@ module.exports = function(req, res, next) {
                   req.setClientId && req.setClientId(clientId);
                 }
               }
-              if (req.isH2 && (headers[config.HTTPS_FIELD] || options.isPlugin)) {
+              if (req.useH2 && (isInternalProxy || headers[config.HTTPS_FIELD] || options.isPlugin)) {
                 headers[config.ALPN_PROTOCOL_HEADER] = 'h2';
               }
               options.headers = optHeaders = formatHeaders(optHeaders, req.rawHeaderNames);
               delete headers[config.WEBUI_HEAD];
-              if (headers[config.HTTPS_FIELD]) {
-                delete headers[config.HTTPS_FIELD];
-                delete headers[config.ALPN_PROTOCOL_HEADER];
-              }
+              delete headers[config.HTTPS_FIELD];
+              delete headers[config.ALPN_PROTOCOL_HEADER];
               if (transfer) {
                 optHeaders['Transfer-Encoding'] = transfer;
               }
@@ -563,14 +608,9 @@ module.exports = function(req, res, next) {
                 optHeaders[config.PLUGIN_HOOK_NAME_HEADER] = config.PLUGIN_HOOKS.HTTP;
               }
               req.noReqBody = !util.hasRequestBody(req);
-              if (req._hasError) {
-                return;
-              }
               if (req.method === 'DELETE' && (req._hasInjectBody ||
                 req.headers['transfer-encoding'] || req.headers['content-length'] > 0)) {
                 req.useH2 = false;
-              } else {
-                req.useH2 = isHttps && config.enableH2 && ((req.isH2 && !util.isDisableH2(req)) || util.isEnableH2(req));
               }
               req.setServerPort(options._proxyPort || options.port || (isHttps ? 443 : 80));
               req.options = options;
@@ -670,13 +710,7 @@ module.exports = function(req, res, next) {
             if (resRules.resCharset) {
               data.charset = util.getMatcherValue(resRules.resCharset);
             }
-
-            var resDelay = util.getMatcherValue(resRules.resDelay);
-            resDelay = resDelay && parseInt(resDelay, 10);
-            if (resDelay > 0) {
-              data.delay = resDelay;
-            }
-
+  
             var resSpeed = util.getMatcherValue(resRules.resSpeed);
             resSpeed = resSpeed && parseFloat(resSpeed);
             if (resSpeed > 0) {
@@ -685,7 +719,7 @@ module.exports = function(req, res, next) {
 
             util.readInjectFiles(data, function(data) {
               var headers = _res.headers;
-              var type, cusHeaders;
+              var type, customHeaders;
               if (data.headers) {
                 setCookies(headers, data);
                 type = data.headers['content-type'];
@@ -701,8 +735,8 @@ module.exports = function(req, res, next) {
                 } else {
                   delete data.headers['content-type'];
                 }
-                cusHeaders = data.headers;
-                extend(headers, cusHeaders);
+                customHeaders = data.headers;
+                extend(headers, customHeaders);
               }
 
               if (data.charset && typeof data.charset == 'string') {
@@ -734,6 +768,9 @@ module.exports = function(req, res, next) {
                 isHtml && resRules.htmlPrepend, isJs && resRules.jsPrepend, isCss && resRules.cssPrepend],
               function(resBody, resPrepend, resAppend, htmlAppend, jsAppend, cssAppend,
                 htmlBody, jsBody, cssBody, htmlPrepend, jsPrepend, cssPrepend) {
+                if (req._hasError) {
+                  return;
+                }
                 if (resBody != null) {
                   data.body = resBody || util.EMPTY_BUFFER;
                 }
@@ -841,7 +878,6 @@ module.exports = function(req, res, next) {
                 if (hasData) {
                   !req.enable.keepCSP && util.disableCSP(headers);
                   !req._customCache && util.disableResStore(headers);
-                  extend(headers, cusHeaders);
                 }
 
                 if (!hasResBody) {
@@ -873,6 +909,9 @@ module.exports = function(req, res, next) {
                 var bodyFile = hasResBody ? getWriterFile(util.getRuleFile(resRules.resWrite), _res.statusCode) : null;
                 var rawFile = getWriterFile(util.getRuleFile(resRules.resWriteRaw), _res.statusCode);
                 util.getFileWriters([bodyFile, rawFile], function(writer, rawWriter) {
+                  if (req._hasError) {
+                    return;
+                  }
                   res.on('src', function(_res) {
                     if (writer) {
                       res.addZipTransform(new FileWriterTransform(writer, _res));
@@ -890,84 +929,90 @@ module.exports = function(req, res, next) {
                   if (headers[config.ALPN_PROTOCOL_HEADER] === 'h2') {
                     req.useH2 = true;
                   }
-                  res.src(_res, null, firstChunk);
-                  var rawNames = res.rawHeaderNames || {};
-
-                  if (req.enable.gzip) {
-                    rawNames['content-encoding'] = rawNames['content-encoding'] || 'Content-Encoding';
-                    headers['content-encoding'] = 'gzip';
-                    delete headers['content-length'];
-                  } else if (req._pipePluginPorts.resReadPort || req._pipePluginPorts.resWritePort) {
-                    delete req.headers['content-length'];
-                  }
-                  util.disableResProps(req, headers);
-                  if (req.filter.showHost || req.enable.showHost) {
-                    headers['x-host-ip'] = req.hostIp || LOCALHOST;
-                  }
-                  const ruleRaw = req.rules && req.rules.rule && req.rules.rule.raw;
-                  headers['__iproxy-host-ip__'] = req.hostIp || LOCALHOST;
-
-                  const strwrap = (str) => str.replace(/[^\x00-\x7F]/g, '_');
-
-                  headers['__iproxy-rules__'] = strwrap(JSON.stringify(ruleRaw) || 'none');
-                  headers['__iproxy-real-url__'] = strwrap(req.realUrl || 'none');
-
-                  headers['__iproxy-help__'] = 'See https://github.com/xcodebuild/iproxy';
-                  // clientReady.then(() => {
-                  //   wsClient.send(
-                  //     'whistle-hit'.padEnd(50, ' ') +
-                  //         JSON.stringify({
-                  //           method: 'match-rule',
-                  //           rule: ruleRaw,
-                  //           hostip: req.hostIp,
-                  //           host: req.get('host')
-                  //         })
-                  //   );
-                  // })
-
-                  util.setResponseFor(resRules, headers, req, req.hostIp);
-                  pluginMgr.postStats(req, res);
-                  if (!hasResBody && headers['content-length'] > 0 && !util.isHead(req)) {
-                    delete headers['content-length'];
-                  }
-                  if (!req.disable.trailerHeader) {
-                    util.addTrailerNames(_res, newTrailers, rawNames, delProps.trailers, req);
-                  }
-                  try {
-                    res.writeHead(_res.statusCode, formatHeaders(headers, rawNames));
-                    util.onResEnd(_res, function() {
-                      var trailers = _res.trailers;
-                      if (!res.chunkedEncoding || req.disable.trailers || req.disable.trailer ||
-                        (util.isEmptyObject(trailers) && util.isEmptyObject(newTrailers))) {
-                        return;
-                      }
-                      var rawHeaderNames = _res.rawTrailers ? getRawHeaderNames(_res.rawTrailers) : {};
-                      if (newTrailers) {
-                        newTrailers = util.lowerCaseify(newTrailers, rawHeaderNames);
-                        if (trailers) {
-                          extend(trailers, newTrailers);
-                        } else {
-                          trailers = newTrailers;
-                        }
-                      }
-                      var delTrailers = delProps.trailers;
-                      Object.keys(delTrailers).forEach(function(prop) {
-                        delete trailers[prop];
-                      });
-                      util.handleHeaderReplace(trailers, hr.trailer);
-                      res.setCurTrailers && res.setCurTrailers(trailers, rawHeaderNames);
-                      try {
-                        util.removeIllegalTrailers(trailers);
-                        res.addTrailers(formatHeaders(trailers, rawHeaderNames));
-                      } catch (e) {}
-                    });
-                    if (res.flushHeaders && (!req.disable.flushHeaders || req.enable.flushHeaders)) {
-                      res.flushHeaders();
+                  util.delay(util.getMatcherValue(resRules.resDelay), function() {
+                    if (req._hasError) {
+                      return;
                     }
-                  } catch(e) {
-                    e._resError = true;
-                    util.emitError(res, e);
-                  }
+                    res.src(_res, null, firstChunk);
+                    var rawNames = res.rawHeaderNames || {};
+                    
+                    if (req.enable.gzip) {
+                      rawNames['content-encoding'] = rawNames['content-encoding'] || 'Content-Encoding';
+                      headers['content-encoding'] = 'gzip';
+                      delete headers['content-length'];
+                    } else if (req._pipePluginPorts.resReadPort || req._pipePluginPorts.resWritePort) {
+                      delete req.headers['content-length'];
+                    }
+                    util.disableResProps(req, headers);
+                    if (req.filter.showHost || req.enable.showHost) {
+                      headers['x-host-ip'] = req.hostIp || LOCALHOST;
+                    }
+                    const ruleRaw = req.rules && req.rules.rule && req.rules.rule.raw;
+                    headers['__iproxy-host-ip__'] = req.hostIp || LOCALHOST;
+  
+                    const strwrap = (str) => str.replace(/[^\x00-\x7F]/g, '_');
+  
+                    headers['__iproxy-rules__'] = strwrap(JSON.stringify(ruleRaw) || 'none');
+                    headers['__iproxy-real-url__'] = strwrap(req.realUrl || 'none');
+  
+                    headers['__iproxy-help__'] = 'See https://github.com/xcodebuild/iproxy';
+                    
+                    util.setResponseFor(resRules, headers, req, req.hostIp);
+                    pluginMgr.postStats(req, res);
+                    if (!hasResBody && headers['content-length'] > 0 && !util.isHead(req)) {
+                      delete headers['content-length'];
+                    }
+                    if (!req.disable.trailerHeader) {
+                      util.addTrailerNames(_res, newTrailers, rawNames, delProps.trailers, req);
+                    }
+                    if (req.enableCustomParser) {
+                      if (_res.isCustomRes || headers['x-whistle-disable-custom-frames']) {
+                        delete headers['x-whistle-disable-custom-frames'];
+                        req.disableCustomParser();
+                      } else {
+                        req.enableCustomParser(_res);
+                      }
+                    }
+                    var curHeaders = headers;
+                    if (req.fromComposer) {
+                      curHeaders = extend({}, headers);
+                      curHeaders['x-whistle-req-id'] = req.reqId;
+                    }
+                    try {
+                      res.writeHead(_res.statusCode, formatHeaders(curHeaders, rawNames));
+                      util.onResEnd(_res, function() {
+                        var trailers = _res.trailers;
+                        if (!res.chunkedEncoding || req.disable.trailers || req.disable.trailer ||
+                          (util.isEmptyObject(trailers) && util.isEmptyObject(newTrailers))) {
+                          return;
+                        }
+                        var rawHeaderNames = _res.rawTrailers ? getRawHeaderNames(_res.rawTrailers) : {};
+                        if (newTrailers) {
+                          newTrailers = util.lowerCaseify(newTrailers, rawHeaderNames);
+                          if (trailers) {
+                            extend(trailers, newTrailers);
+                          } else {
+                            trailers = newTrailers;
+                          }
+                        }
+                        var delTrailers = delProps.trailers;
+                        Object.keys(delTrailers).forEach(function(prop) {
+                          delete trailers[prop];
+                        });
+                        util.handleHeaderReplace(trailers, hr.trailer);
+                        res.setCurTrailers && res.setCurTrailers(trailers, rawHeaderNames);
+                        try {
+                          util.removeIllegalTrailers(trailers);
+                          res.addTrailers(formatHeaders(trailers, rawHeaderNames));
+                        } catch (e) {}
+                      });
+                      if (res.flushHeaders && (!req.disable.flushHeaders || req.enable.flushHeaders)) {
+                        res.flushHeaders();
+                      }
+                    } catch(e) {
+                      util.emitError(res, e);
+                    }
+                  });
                 });
               }, !hasResBody, charset, isHtml);
             });

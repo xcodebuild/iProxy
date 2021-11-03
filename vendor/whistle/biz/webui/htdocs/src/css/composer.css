@@ -7,6 +7,7 @@
 .w-composer-execute {padding: 0 8px; line-height: 24px; margin-left: 4px;}
 .w-composer-tabs {
   position: relative;
+  padding: 0!important;
 }
 .w-composer-tabs .btn {
   position: absolute;
@@ -143,32 +144,48 @@
     left: 210px;
 }
 
-.w-composer-history td {
+.w-history-data {
+  position: relative;
+  overflow: hidden;
+  font-size: 12px;
+}
+
+.w-history-bar {
+  line-height: 30px;
+  padding-left: 10px;
+  border-bottom: 1px solid #ccc;
+  background-color: #f1f3f4;
+  padding: 0!important;
+}
+
+.w-history-bar>a:first-child {
+  margin-right: 15px;
+}
+
+.w-history-list p {
+  padding: 0 0 0 5px;
+  line-height: 22px;
+  margin: 8px 0 0;
+  color: #666;
+}
+
+.w-history-list div {
+  line-height: 22px;
+  padding: 0 10px;
   white-space: nowrap;
   text-overflow: ellipsis;
   overflow: hidden;
-}
-.w-composer-history th {
-  padding: 8px!important;
-}
-.w-composer-history-order {
-  width: 40px;
-}
-.w-composer-history-date {
-  width: 200px;
-}
-.w-composer-history-method {
-  width: 110px;
-}
-.w-composer-history-operation {
-  width: 136px;
-}
-.w-composer-history-url strong {
-  margin-right: 5px;
+  width: 100%;
+  cursor: default;
 }
 
-.w-composer-history-body {
-  width: 260px;
+.w-history-list div.w-selected{
+  background-color: #337ab7!important;
+  color: #fff!important;
+}
+
+.w-history-list div:hover {
+  color: #337ab7;
 }
 
 .w-composer-history-operation .btn {
@@ -212,13 +229,44 @@
   background-color: lightyellow;
 }
 
-.w-composer-use-h2 {
+.w-composer-use-h2, .w-composer-enable-rules, .w-composer-enable-body {
   position: absolute;
   top: 0;
-  right: 90px;
+}
+.w-composer-use-h2 {
+  right: 75px;
 }
 
-.w-composer-use-h2 input {
+.w-composer-history {
+  right: 2px;
+  position: absolute;
+}
+
+.w-history-list {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.w-history-data .w-tips {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  margin-top: -15px;
+  text-align: center;
+  width: 100%;
+  color: #999;
+  font-size: 13px;
+}
+
+.w-composer-enable-rules {
+  right: 145px;
+}
+
+.w-composer-enable-body {
+  right: 210px;
+}
+
+.w-composer-tabs input {
   margin-right: 5px;
 }
 

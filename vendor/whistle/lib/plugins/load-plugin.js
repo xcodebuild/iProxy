@@ -1,5 +1,6 @@
 var listenerCount = require('../util/patch').listenerCount;
 var path = require('path');
+var express = require('express');
 var LRU = require('lru-cache');
 var iconv = require('iconv-lite');
 var wsParser = require('ws-parser');
@@ -15,10 +16,13 @@ var parseUrl = require('../util/parse-url');
 var hparser = require('hparser');
 var transproto = require('../util/transproto');
 var common = require('../util/common');
+var rootRequire = require('../../require');
 
 var getEncodeTransform = transproto.getEncodeTransform;
 var getDecodeTransform = transproto.getDecodeTransform;
 
+var URL_RE = /^https?:\/\/[^\s]+$/;
+var MAX_BODY_SIZE = 1024 * 256;
 var sessionStorage = new LRU({
   maxAge: 1000 * 60 * 12,
   max: 1600
@@ -31,6 +35,7 @@ var getRawHeaderNames = hparser.getRawHeaderNames;
 var getRawHeaders = hparser.getRawHeaders;
 var STATUS_CODES = http.STATUS_CODES || {};
 
+var TUNNEL_HOST_RE = /^[^:\/]+\.[^:\/]+:\d+$/;
 var QUERY_RE = /\?.*$/;
 var REQ_ID_RE = /^\d{13,15}-\d{1,5}$/;
 var sessionOpts, sessionTimer, sessionPending;
@@ -42,7 +47,7 @@ var parserCallbacks = {};
 var framesList = [];
 var framesCallbacks = [];
 var MAX_LENGTH = 100;
-var MAX_BUF_LEN = 1024 * 200;
+var MAX_BUF_LEN = 1024 * 1024;
 var TIMEOUT = 300;
 var REQ_INTERVAL = 16;
 var pluginOpts, storage;
@@ -56,9 +61,12 @@ var SESSION_KEY = typeof Symbol === 'undefined' ? '$session_' + Date.now() : Sym
 var FRAME_KEY = typeof Symbol === 'undefined' ? '$frame_' + Date.now() : Symbol();
 var REQ_KEY = typeof Symbol === 'undefined' ? '$req_' + Date.now() : Symbol();
 var CLOSED = typeof Symbol === 'undefined' ? '$colsed_' + Date.now() : Symbol();
+var NOT_NAME_RE = /[^\w.-]/;
 /* eslint-enable no-undef */
 var index = 1000;
 var noop = function() {};
+var certsCache = new LRU({max: 256});
+var certsCallbacks = {};
 var ctx, PLUGIN_HOOK_NAME_HEADER;
 
 var appendTrailers = function(_res, res, newTrailers, req) {
@@ -149,7 +157,7 @@ var getFrameId = function () {
 
 var addFrame = function(frame) {
   framesList.push(frame);
-  if (framesList.length > 600) {
+  if (framesList.length > 720) {
     framesList.splice(0, 80);
   }
 };
@@ -356,32 +364,22 @@ function getPluginVars(req, key) {
 }
 
 var initReq = function(req, res, isServer) {
-  var destroy = function(e) {
+  var destroy = function() {
     if (!req._hasError) {
       req._hasError = true;
-      req.destroy && req.destroy(e);
-      res.destroy && res.destroy(e);
+      req.destroy && req.destroy();
+      res.destroy && res.destroy();
     }
   };
   req.on('error', destroy);
   res.on('error', destroy);
-
-  req.unsafe_getReqSession = function(cb) {
+  req.getReqSession = req.unsafe_getReqSession = function(cb) {
     return getSession(req, cb, true);
   };
-  req.unsafe_getSession = function(cb) {
+  req.getSession = req.unsafe_getSession = function(cb) {
     return getSession(req, cb);
   };
-  req.unsafe_getFrames = function(cb) {
-    return getFrames(req, cb);
-  };
-  req.getReqSession = function(cb) {
-    return getSession(req, cb, true);
-  };
-  req.getSession = function(cb) {
-    return getSession(req, cb);
-  };
-  req.getFrames = function(cb) {
+  req.getFrames = req.unsafe_getFrames = function(cb) {
     return getFrames(req, cb);
   };
 
@@ -391,22 +389,37 @@ var initReq = function(req, res, isServer) {
   setContext(req);
   oReq.clientIp = req.clientIp;
   if (isServer) {
-    var customParserHeader = req.headers[pluginOpts.CUSTOM_PARSER_HEADER];
-    if (customParserHeader && typeof customParserHeader === 'string') {
-      addParserApi(req, res, customParserHeader, reqId);
-      req.customParser = oReq.customParser = true;
-    }
+    var parseStatus = req.headers[pluginOpts.CUSTOM_PARSER_HEADER];
+    req.customParser = oReq.customParser = notEmptyStr(parseStatus);
+    req.customParser && addParserApi(req, res, parseStatus, reqId);
   }
   var headers = extractHeaders(req, pluginKeyMap);
   req[REQ_ID_KEY] = oReq.id = reqId;
   addSessionStorage(req, reqId);
   oReq.headers = headers;
-  oReq.isFromPlugin = headers[pluginOpts.PLUGIN_REQUEST_HEADER] == '1';
+  oReq.isHttp2 = oReq.isH2 = !!req.headers[pluginOpts.config.ALPN_PROTOCOL_HEADER];
+  oReq.existsCustomCert = req.headers[pluginOpts.CUSTOM_CERT_HEADER] == '1';
+  oReq.isUIRequest = req.isUIRequest = req.headers[pluginOpts.UI_REQUEST_HEADER] == '1';
+  oReq.enableCapture = req.headers[pluginOpts.ENABLE_CAPTURE_HEADER] == '1';
+  oReq.isFromPlugin = req.headers[pluginOpts.PLUGIN_REQUEST_HEADER] == '1';
   oReq.ruleValue = getValue(req, pluginOpts.RULE_VALUE_HEADER);
   oReq.ruleUrl = getValue(req, pluginOpts.RULE_URL_HEADER) || oReq.ruleValue;
   oReq.pipeValue = getValue(req, pluginOpts.PIPE_VALUE_HEADER);
+  oReq.sniValue = getValue(req, pluginOpts.SNI_VALUE_HEADER);
   oReq.hostValue = getValue(req, pluginOpts.HOST_VALUE_HEADER);
   oReq.url = oReq.fullUrl = getValue(req, pluginOpts.FULL_URL_HEADER);
+  oReq.servername = oReq.serverName = getValue(req, pluginOpts.SERVER_NAME_HEAD);
+  var certCacheInfo = getValue(req, pluginOpts.CERT_CACHE_INFO);
+  oReq.certCacheName = certCacheInfo;
+  oReq.certCacheTime = 0;
+  if (certCacheInfo) {
+    var sepIndex = certCacheInfo.indexOf('+');
+    if (sepIndex !== -1) {
+      oReq.certCacheName = certCacheInfo.substring(0, sepIndex);
+      oReq.certCacheTime = parseInt(certCacheInfo.substring(sepIndex + 1)) || 0;
+    }
+  }
+  oReq.commonName = getValue(req, pluginOpts.COMMON_NAME_HEAD);
   oReq.realUrl = getValue(req, pluginOpts.REAL_URL_HEADER) || oReq.url;
   oReq.relativeUrl = getValue(req, pluginOpts.RELATIVE_URL_HEADER);
   oReq.method = getValue(req, pluginOpts.METHOD_HEADER) || 'GET';
@@ -529,6 +542,9 @@ var requestFrames = function() {
     return;
   }
   var req = cb[REQ_KEY];
+  if (req[CLOSED]) {
+    return cb('');
+  }
   framesPending = true;
   var query = '?curReqId=' + req[REQ_ID_KEY] + '&lastFrameId=' + (req[FRAME_KEY] || '');
   framesOpts.path = framesOpts.path.replace(QUERY_RE, query);
@@ -539,7 +555,7 @@ var requestFrames = function() {
       return retryRequestFrames();
     }
     var frames = result.frames;
-    var closed = !frames;
+    var closed;
     if (Array.isArray(frames)) {
       var last = frames[frames.length - 1];
       var frameId = last && last.frameId;
@@ -548,15 +564,17 @@ var requestFrames = function() {
         frames.forEach(defineProps);
         closed = !!(last.closed || last.err);
       }
+    } else {
+      closed = !frames;
     }
-    if (!frames || frames.length) {
+    if (closed || frames.length) {
+      req[CLOSED] = closed;
       try {
         cb(frames || '');
       } catch(e) {}
     } else {
       framesCallbacks.push(cb);
     }
-    req[CLOSED] = closed;
     retryRequestFrames(REQ_INTERVAL);
   });
 };
@@ -596,28 +614,28 @@ var customParser = function() {
   });
 };
 
+function isFrames(item) {
+  if (/^wss?:\/\//.test(item.url)) {
+    return item.res.statusCode == 101;
+  }
+  return item.inspect || item.useFrames;
+}
+
 var getFrames = function(req, cb) {
   var reqId = req[REQ_ID_KEY];
   if (!REQ_ID_RE.test(reqId) || typeof cb !== 'function') {
     return;
   }
-  var url = req.originalReq.url;
-  var isTunnel = !req[CLOSED] && /^tunnel/.test(url);
-  if (!isTunnel && !/^ws/.test(url)) {
+  if (req[CLOSED]) {
     return cb('');
   }
   cb[REQ_KEY] = req;
-  framesCallbacks.push(cb);
   getSession(req, function(session) {
-    if (!session || session.reqError || session.resError
-        || (isTunnel && !session.inspect)) {
-      framesCallbacks.forEach(function(_cb) {
-        req[CLOSED] = 1;
-        _cb('');
-      });
-      framesCallbacks = [];
-      return;
+    if (!session || session.reqError || session.resError || !isFrames(session)) {
+      req[CLOSED] = 1;
+      return cb('');
     }
+    framesCallbacks.push(cb);
     requestFrames();
   });
 };
@@ -897,12 +915,13 @@ module.exports = async function(options, callback) {
   options.parseUrl = parseUrl;
   options.formatHeaders = formatRawHeaders;
   options.wsParser = wsParser;
+  options.require = rootRequire;
   var config = options.config;
   var boundIp = config.host;
   var PROXY_ID_HEADER = config.PROXY_ID_HEADER;
   var name = options.name;
-  var PLUGIN_HOOKS = options.config.PLUGIN_HOOKS;
-  var RES_RULES_HEAD = options.config.RES_RULES_HEAD;
+  var PLUGIN_HOOKS = config.PLUGIN_HOOKS;
+  var RES_RULES_HEAD = config.RES_RULES_HEAD;
   var getRulesStr = function(obj) {
     obj = JSON.stringify({
       rules: typeof obj === 'string' ? obj : obj.rules,
@@ -911,10 +930,17 @@ module.exports = async function(options, callback) {
     });
     return encodeURIComponent(obj);
   };
+  var SHOW_LOGIN_BOX = options.SHOW_LOGIN_BOX;
+  delete options.SHOW_LOGIN_BOX;
 
-  PLUGIN_HOOK_NAME_HEADER = options.config.PLUGIN_HOOK_NAME_HEADER;
+  PLUGIN_HOOK_NAME_HEADER = config.PLUGIN_HOOK_NAME_HEADER;
   options.shortName = name.substring(name.indexOf('/') + 1);
-  storage = new Storage(path.join(options.config.baseDir, '.plugins', options.name));
+  var pluginDataDir = config.pluginBaseDir = path.join(config.baseDir, '.plugins', options.name);
+  if (config.storage) {
+    pluginDataDir += encodeURIComponent('/' + config.storage);
+  }
+  config.pluginDataDir = pluginDataDir;
+  storage = new Storage(pluginDataDir);
   options.storage = options.localStorage = storage;
   pluginOpts = options;
   Object.keys(options).forEach(function(key) {
@@ -1002,13 +1028,15 @@ module.exports = async function(options, callback) {
     return [uri, cb, isHttps, opts];
   };
 
-  var port, statsPort, resStatsPort, uiPort, rulesPort, resRulesPort, tunnelRulesPort, tunnelPort;
+  var authPort, sniPort, port, statsPort, resStatsPort, uiPort, rulesPort, resRulesPort, tunnelRulesPort, tunnelPort;
   var reqWritePort, reqReadPort, resWritePort, resReadPort;
   var wsReqWritePort, wsReqReadPort, wsResWritePort, wsResReadPort;
   var tunnelReqWritePort, tunnelReqReadPort, tunnelResWritePort, tunnelResReadPort;
   var upgrade;
   var callbackHandler = function() {
     callback(null, {
+      authPort,
+      sniPort,
       port: port,
       upgrade: upgrade,
       statsPort: statsPort,
@@ -1054,6 +1082,7 @@ module.exports = async function(options, callback) {
   var certsInfoUrlOpts = parseCgiUrl(baseUrl + 'get-custom-certs-info');
   var enableOpts = parseCgiUrl(baseUrl + 'plugins/is-enable');
   var updateRulesOpts = parseCgiUrl(baseUrl + 'plugins/update-rules');
+  var httpsStatusOpts = parseCgiUrl(baseUrl + 'https-status');
   var updateTimer;
   composeOpts.method = 'POST';
   composeOpts.headers['Content-Type'] = 'application/json';
@@ -1064,23 +1093,74 @@ module.exports = async function(options, callback) {
     request(opts, function(err, body, res) {
       if (body && res.statusCode == 200) {
         try {
-          return cb(JSON.parse(body) || '');
+          return cb(JSON.parse(body) || '', res);
         } catch (e) {}
       }
-      cb('', res);
+      cb('', res, err);
     });
   };
 
+  var getCert = function(domain, callback) {
+    if (!domain || typeof domain !== 'string') {
+      return callback('');
+    }
+    var index = domain.indexOf(':');
+    if (index !== -1) {
+      domain = domain.substring(0, index);
+      if (!domain) {
+        return callback('');
+      }
+    }
+    if (domain !== 'rootCA') {
+      domain = domain.toLowerCase();
+    }
+    var cert = certsCache.get(domain);
+    if (cert) {
+      return callback(cert);
+    }
+    var cbs = certsCallbacks[domain];
+    if (cbs) {
+      return cbs.push(callback);
+    }
+    cbs = [callback];
+    certsCallbacks[domain] = cbs;
+    var opts = parseCgiUrl(baseUrl + 'get-cert?domain=' + domain);
+    requestCgi(opts, function(cert) {
+      cert && certsCache.set(domain, cert);
+      delete certsCallbacks[domain];
+      cbs.forEach(function(cb) {
+        cb(cert);
+      });
+    });
+  };
+
+  options.getCert = getCert;
+  options.getRootCA = function(callback) {
+    return getCert('rootCA', callback);
+  };
+  options.getHttpsStatus = function(callback) {
+    requestCgi(httpsStatusOpts, callback);
+  };
   options.getTop = options.getProcessData = options.getPerfData = function(callback) {
     requestCgi(topOpts, callback);
   };
 
+  var waitingUpdateRules;
   var updateRules = function() {
     requestCgi(updateRulesOpts, noop);
-    updateTimer = null;
+    if (waitingUpdateRules) {
+      waitingUpdateRules = false;
+      updateTimer = setTimeout(updateRules, 300);
+    } else {
+      updateTimer = null;
+    }
   };
   options.updateRules = function() {
-    updateTimer = updateTimer || setTimeout(updateRules, 500);
+    if (updateTimer) {
+      waitingUpdateRules = true;
+    } else {
+      updateTimer = setTimeout(updateRules, 600);
+    }
   };
   options.composer = options.compose = function(data, cb) {
     var needResponse = typeof cb === 'function';
@@ -1158,6 +1238,8 @@ module.exports = async function(options, callback) {
   var initServers = function(_ctx) {
     ctx = _ctx || ctx;
     var execPlugin = require(options.value) || '';
+    var execAuth = getFunction(execPlugin.auth) || getFunction(execPlugin.verify);
+    var sniCallback = getFunction(execPlugin.sniCallback) || getFunction(execPlugin.SNICallback);
     var startServer = getFunction(execPlugin.pluginServer || execPlugin.server || execPlugin);
     var startStatsServer = getFunction(execPlugin.statServer || execPlugin.statsServer
       || execPlugin.reqStatServer || execPlugin.reqStatsServer);
@@ -1179,7 +1261,15 @@ module.exports = async function(options, callback) {
     var startTunnelReqWrite = getFunction(execPlugin.tunnelReqWrite || execPlugin.tunnelReqWriteServer);
     var startTunnelResRead = getFunction(execPlugin.tunnelResRead || execPlugin.tunnelResReadServer);
     var startTunnelResWrite = getFunction(execPlugin.tunnelResWrite || execPlugin.tunnelResWriteServer);
-    var hasServer = startServer || startStatsServer || startResStatsServer || startUIServer || startRulesServer
+    var staticDir = !startUIServer && options.staticDir;
+    if (staticDir) {
+      var app = express();
+      startUIServer = function(server) {
+        app.use(express.static(path.join(options.value, staticDir), {maxAge: 60000}));
+        server.on('request', app);
+      };
+    }
+    var hasServer = execAuth || sniCallback || startServer || startStatsServer || startResStatsServer || startUIServer || startRulesServer
       || startResRulesServer || startTunnelRulesServer || startTunnelServer || startReqRead || startReqWrite
       || startResRead || startResWrite || startWsReqRead || startWsReqWrite || startWsResRead || startWsResWrite
       || startTunnelReqRead || startTunnelReqWrite || startTunnelResRead || startTunnelResWrite;
@@ -1190,7 +1280,7 @@ module.exports = async function(options, callback) {
 
     getServer(async function(server, _port) {
       var maxWsPayload;
-      var uiServer, httpServer, statsServer, resStatsServer;
+      var authServer, sniServer, uiServer, httpServer, statsServer, resStatsServer;
       var rulesServer, resRulesServer, tunnelRulesServer, tunnelServer;
       var reqRead, reqWrite, resWrite, resRead;
       var wsReqRead, wsReqWrite, wsResWrite, wsResRead;
@@ -1203,6 +1293,125 @@ module.exports = async function(options, callback) {
         uiServer = createServer();
         await startUIServer(uiServer, options);
         uiPort = _port;
+      }
+
+      var transferError = function (req, res) {
+        res.once('error', function(err) {
+          req.emit('error', err);
+        });
+        res.once('close', function(err) {
+          req.emit('close', err);
+        });
+      };
+
+      if (execAuth) {
+        authServer = createServer();
+        authServer.on('request', async function(req, res) {
+          initReq(req, res);
+          transferError(req, res);
+          var customHeaders = {};
+          var htmlBody, htmlUrl, location;
+          var setHeader = function(key, value) {
+            if (!notEmptyStr(key) || NOT_NAME_RE.test(key) || typeof value !== 'string') {
+              return;
+            }
+            key = key.toLowerCase();
+            if (key.indexOf('x-whistle-') === 0 || key === 'proxy-authorization') {
+              customHeaders[key] = value;
+            }
+          };
+          req.setHtml = function(html) {
+            if (!html || html == null) {
+              htmlBody = null;
+            } else if (typeof html === 'string' || Buffer.isBuffer(html)) {
+              htmlBody = html;
+              location = null;
+              htmlUrl = null;
+            }
+          };
+          req.setUrl = req.setFile = function(url) {
+            if (!url || /[\s]/.test(url)) {
+              htmlUrl = null;
+            } else {
+              htmlUrl = url;
+              location = null;
+              htmlBody = null;
+              req.showLoginBox = false;
+            }
+          };
+          req.set = req.setHeader = setHeader;
+          req.setRedirect = function(url) {
+            if (!url) {
+              location = null;
+            } else if (URL_RE.test(url)) {
+              location = url;
+              htmlBody = null;
+              htmlUrl = null;
+              req.showLoginBox = false;
+            }
+          };
+          req.setLogin = function(login) {
+            req.showLoginBox = login !== false;
+            if (req.showLoginBox) {
+              location = null;
+              htmlUrl = null;
+            }
+          };
+          try {
+            const result = await execAuth(req, options);
+            if (req.showLoginBox) {
+              customHeaders[SHOW_LOGIN_BOX] = '1';
+            }
+            if (result === false) {
+              customHeaders['x-auth-status'] = '1';
+              if (location) {
+                customHeaders.location = location;
+              } else if (htmlUrl) {
+                customHeaders['x-auth-html-url'] = encodeURIComponent(htmlUrl);
+              } else if (typeof htmlBody === 'string') {
+                htmlBody = Buffer.from(htmlBody);
+                if (htmlBody.length > MAX_BODY_SIZE) {
+                  htmlBody = htmlBody.slice(0, MAX_BODY_SIZE);
+                }
+              }
+              htmlBody = htmlBody || 'Forbidden';
+            } else {
+              htmlBody = null;
+            }
+            res.writeHead(200, customHeaders);
+            res.end(htmlBody);
+          } catch (e) {
+            res.end(e && e.message && typeof e.message === 'string' ? e.message : 'Error');
+          }
+          htmlBody = null;
+        });
+        authPort = _port;
+      }
+
+      if (sniCallback) {
+        sniServer = createServer();
+        sniServer.on('request', async function(req, res) {
+          initReq(req, res);
+          transferError(req, res);
+          try {
+            const result = await sniCallback(req, options);
+            if (result === false || result === true) {
+              res.end(result + '');
+            } else if (result && notEmptyStr(result.key) && notEmptyStr(result.cert)) {
+              res.end(JSON.stringify({
+                key: result.key,
+                cert: result.cert,
+                mtime: result.mtime > 0 ? result.mtime : undefined,
+                name: name
+              }));
+            } else {
+              res.end();
+            }
+          } catch (e) {
+            res.end(e && e.message && typeof e.message === 'string' ? e.message : 'Error');
+          }
+        });
+        sniPort = _port;
       }
 
       if (startServer) {
@@ -1337,6 +1546,18 @@ module.exports = async function(options, callback) {
       server.timeout = config.timeout;
       server.on('request', function(req, res) {
         switch(getHookName(req)) {
+        case  PLUGIN_HOOKS.AUTH:
+          if (authServer) {
+            setContext(req);
+            authServer.emit('request', req, res);
+          }
+          break;
+        case  PLUGIN_HOOKS.SNI:
+          if (sniServer) {
+            setContext(req);
+            sniServer.emit('request', req, res);
+          }
+          break;
         case PLUGIN_HOOKS.UI:
           if (uiServer) {
             setContext(req);
@@ -1345,7 +1566,7 @@ module.exports = async function(options, callback) {
           break;
         case PLUGIN_HOOKS.HTTP:
           if (httpServer) {
-            initReq(req, res);
+            initReq(req, res, true);
             var alpnProtocol = req.headers[config.ALPN_PROTOCOL_HEADER];
             var curUrl = req.originalReq.realUrl;
             var svrRes = '';
@@ -1374,11 +1595,12 @@ module.exports = async function(options, callback) {
               var args = normalizeArgs(uri, cb, req, curUrl, false, opts, alpnProtocol);
               uri = args[0];
               cb = args[1];
+              opts = args[3];
               uri.agent = false;
               var client = (args[2] ? httpsRequest : httpRequest)(uri, function(_res) {
                 svrRes = _res;
                 res.once('_wroteHead', function() {
-                  appendTrailers(_res, res, args[3] && args[3].trailers, req);
+                  appendTrailers(_res, res, opts && opts.trailers, req);
                 });
                 if (typeof cb === 'function') {
                   cb.call(this, _res);
@@ -1505,7 +1727,8 @@ module.exports = async function(options, callback) {
                 }
               });
               addErrorHandler(req, client);
-              return client.end();
+              client.end();
+              return client;
             };
             req.passThrough = function(uri) {
               req.request(uri, function(resSock) {
@@ -1617,21 +1840,36 @@ module.exports = async function(options, callback) {
           if (tunnelServer) {
             initConnectReq(req, socket);
             req.sendEstablished(function() {
-              req.connect = function(cb, opts) {
+              req.connect = function(uri, cb, opts) {
                 var headers = extractHeaders(req, pluginKeyMap);
                 var policy = headers['x-whistle-policy'];
-                if (policy) {
-                  headers['x-whistle-policy'] = policy;
+                if (TUNNEL_HOST_RE.test(uri)) {
+                  headers.host = uri;
+                } else if (typeof uri === 'function') {
+                  opts = cb;
+                  cb = uri;
+                } else if (uri) {
+                  if (TUNNEL_HOST_RE.test(uri.url)) {
+                    if (uri.headers) {
+                      headers = uri.headers;
+                      if (policy && !headers['x-whistle-policy']) {
+                        headers['x-whistle-policy'] = policy;
+                      }
+                    }
+                    headers.host = uri.url;
+                    if (cb && typeof cb !== 'function') {
+                      opts = cb;
+                      cb = null;
+                    }
+                  } else {
+                    opts = uri;
+                  }
                 }
-                var uri = {
+                uri = {
                   method: 'CONNECT',
                   agent: false,
                   path: headers.host
                 };
-                if (cb && typeof cb !== 'function') {
-                  opts = cb;
-                  cb = null;
-                }
                 if (!opts || !notEmptyStr(opts.host)) {
                   headers[PROXY_ID_HEADER] = req[REQ_ID_KEY];
                   uri.host = boundIp;
@@ -1664,10 +1902,11 @@ module.exports = async function(options, callback) {
                   }
                 });
                 addErrorHandler(req, client);
-                return client.end();
+                client.end();
+                return client;
               };
-              req.passThrough = function() {
-                req.connect(function(svrSock) {
+              req.passThrough = function(uri) {
+                req.connect(uri, function(svrSock) {
                   svrSock.pipe(socket).pipe(svrSock);
                 });
               };

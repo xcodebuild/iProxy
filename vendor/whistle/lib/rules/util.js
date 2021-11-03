@@ -12,11 +12,11 @@ var MAX_URL_LEN = 10 * 1024;
 var MAX_HEADERS_LEN = 128 * 1024;
 var MAX_BODY_LEN = 256 * 1024;
 var MAX_METHOD_LEN = 64;
-var MAX_HISTORY_LEN = 36;
+var MAX_HISTORY_LEN = 64;
 var history = [];
-var rulesStorage = new Storage(config.rulesDir, { Default: true });
-var valuesStorage = new Storage(config.valuesDir);
-var propertiesStorage = new Storage(config.propertiesDir);
+var rulesStorage = new Storage(config.rulesDir, { Default: true }, config.disableWebUI);
+var valuesStorage = new Storage(config.valuesDir, null, config.disableWebUI);
+var propertiesStorage = new Storage(config.propertiesDir, null, config.disableWebUI);
 var LINE_END_RE = /\n|\r\n|\r/g;
 var MAX_REMOTE_RULES_COUNT = 12;
 var REMOTE_RULES_RE = /^\s*@(`?)(whistle\.[a-z\d_\-]+(?:\/[^\s#]*)?|(?:https?:\/\/|[a-z]:[\\/]|~?\/)[^\s#]+)\s*\1(?:#.*)?$/img;
@@ -84,8 +84,14 @@ try {
 } catch (e) {}
 
 function checkHistory(data) {
-  return typeof data.url === 'string' && typeof data.method === 'string'
-   && typeof data.headers === 'string' && typeof data.body === 'string';
+  if (typeof data.url === 'string' && typeof data.method === 'string'
+    && typeof data.headers === 'string') {
+    if (!data.body) {
+      data.body = '';
+      return true;
+    }
+    return typeof data.body === 'string';
+  }
 }
 
 
@@ -159,11 +165,7 @@ function parseRules() {
         return '';
       }
       ++index;
-      rulesUrl = util.getPluginRulesUrl(rulesUrl);
-      if (apo) {
-        rulesUrl = util.setConfigVar(rulesUrl);
-      }
-      var remoteRules = httpMgr.add(rulesUrl, config.runtimeHeaders);
+      var remoteRules = util.getRemoteRules(apo, rulesUrl);
       return backRulesFirst ? reverseRules(remoteRules) : remoteRules;
     });
   }
@@ -294,6 +296,15 @@ function resetRulesIfResort(fromName, toName) {
   parseRules();
 }
 
+function moveRulesTo(fromName, toName, clientId) {
+  if (rulesStorage.moveTo(fromName, toName)) {
+    resetRulesIfResort(fromName, toName);
+    config.setModified(clientId, true);
+    proxy.emit('rulesDataChange', 'move', fromName, toName);
+    return true;
+  }
+}
+
 exports.rules = {
   recycleBin: rulesStorage.recycleBin,
   enableBackRulesFirst: function(backRulesFirst) {
@@ -303,13 +314,10 @@ exports.rules = {
       parseRules();
     }
   },
-  moveTo: function(fromName, toName, clientId) {
-    if (rulesStorage.moveTo(fromName, toName)) {
-      resetRulesIfResort(fromName, toName);
-      config.setModified(clientId, true);
-      proxy.emit('rulesDataChange', 'move', fromName, toName);
-      return true;
-    }
+  moveTo: moveRulesTo,
+  moveToTop: function(name, clientId) {
+    var first = name && getAllRulesFile()[0];
+    first && moveRulesTo(name, first.name, clientId);
   },
   get: function(file) {
     return rulesStorage.readFile(file);

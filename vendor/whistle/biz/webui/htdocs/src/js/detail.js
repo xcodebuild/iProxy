@@ -9,6 +9,7 @@ var Inspectors = require('./inspectors');
 var Frames = require('./frames');
 var Timeline = require('./timeline');
 var Composer = require('./composer');
+var dataCenter = require('./data-center');
 var Tools = require('./tools');
 
 var ReqData = React.createClass({
@@ -59,11 +60,11 @@ var ReqData = React.createClass({
     }).on('toggleInspectors', function() {
       var modal = self.props.modal;
       var item = modal && modal.getActive();
-      var isWs = item && /^ws/.test(item.url);
+      var isFrames = dataCenter.isFrames(item);
       var tab = self.state.tab;
       if (!tab || tab === tabs[0]) {
         self.toggleTab(tabs[1]);
-      } else if (isWs && tab === tabs[1]) {
+      } else if (isFrames && tab === tabs[1]) {
         self.toggleTab(tabs[2]);
       } else {
         self.toggleTab(tabs[0]);
@@ -205,13 +206,10 @@ var ReqData = React.createClass({
     }
     var name = curTab && curTab.name;
 
-    var frames;
-    if (activeItem && !activeItem.reqError && !activeItem.resError) {
-      frames = activeItem.frames;
-    }
+    var frames = activeItem && activeItem.frames;
     var dockToBottom = this.props.dockToBottom;
     return (
-        <div className="fill orient-vertical-box w-detail" onDragEnter={this.onDragEnter} onDrop={this.onDrop}>
+        <div className={'fill orient-vertical-box w-detail' + (dockToBottom ? ' w-detail-bottom' : '')} onDragEnter={this.onDragEnter} onDrop={this.onDrop}>
         <BtnGroup dockBtn={
           <button
             onClick={this.props.onDockChange}
@@ -220,7 +218,7 @@ var ReqData = React.createClass({
           </button>
         } onDoubleClick={this.onDoubleClick} onClick={this.toggleTab} tabs={tabs} />
         {this.state.initedOverview ? <Overview modal={overview} hide={name != tabs[0].name} /> : ''}
-        {this.state.initedInspectors ? <Inspectors modal={activeItem} hide={name != tabs[1].name} /> : ''}
+        {this.state.initedInspectors ? <Inspectors modal={activeItem} frames={frames} hide={name != tabs[1].name} /> : ''}
         {this.state.initedFrames ? <Frames data={activeItem} frames={frames} hide={name != tabs[2].name} /> : ''}
         {this.state.initedTimeline ? <Timeline data={data} modal={modal} hide={name != tabs[4].name} /> : ''}
         {this.state.initedComposer ? <Composer modal={this.state.activeItem} hide={name != tabs[3].name} /> : ''}

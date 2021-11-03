@@ -9,6 +9,7 @@ var json2 = require('./components/json');
 var evalJson = require('./components/json/eval');
 var isUtf8 = require('./is-utf8');
 var message = require('./message');
+var win = require('./win');
 
 var CRLF_RE = /\r\n|\r|\n/g;
 var BIG_NUM_RE = /[:\[][\s\n\r]*-?[\d.]{16,}[\s\n\r]*[,\}\]]/;
@@ -22,6 +23,7 @@ var INDEX_RE = /^\[(\d+)\]$/;
 var ARR_FILED_RE = /(.)?(?:\[(\d+)\])$/;
 var LEVELS = ['fatal', 'error', 'warn', 'info', 'debug'];
 var useCustomEditor = window.location.search.indexOf('useCustomEditor') !== -1;
+var isJSONText;
 
 function replaceCrLf(char) {
   return char === '\\r' ? '\r' : '\n';
@@ -247,13 +249,13 @@ exports.showSystemError = function(xhr) {
   xhr = xhr || {};
   var status = xhr.status;
   if (!status) {
-    return alert('Please check the proxy settings or whether whistle has been started.');
+    return win.alert('Please check the proxy settings or whether whistle has been started.');
   }
   var msg = STATUS_CODES[status];
   if (msg) {
-    return alert('[' + status + '] ' + msg + '.');
+    return win.alert('[' + status + '] ' + msg + '.');
   }
-  alert('[' + status + '] Unknown error, try again later.');
+  win.alert('[' + status + '] Unknown error, try again later.');
 };
 
 exports.getClasses = function getClasses(obj) {
@@ -512,6 +514,7 @@ var parseJ = function (str, resolve) {
 exports.evalJson = evalJson;
 
 function parseJSON(str, resolve) {
+  isJSONText = false;
   if (typeof str !== 'string' || !(str = str.trim())) {
     return;
   }
@@ -519,7 +522,11 @@ function parseJSON(str, resolve) {
     if (!/({[\w\W]*}|\[[\w\W]*\])/.test(str)) {
       return;
     }
-    str = RegExp.$1;
+    if (str === RegExp.$1) {
+      isJSONText = true;
+    } else {
+      str = RegExp.$1;
+    }
   }
   try {
     return parseJ(str, resolve);
@@ -1249,6 +1256,7 @@ exports.getJson = function(data, isReq, decode) {
     body = body && resolveJSON(body, decode);
     data[JSON_KEY] = body ? {
       json: body,
+      isJSONText: isJSONText,
       str: (window._$hasBigNumberJson ? json2 : JSON).stringify(body, null, '    ')
     } : '';
   }
@@ -1475,7 +1483,7 @@ function readFile(file, callback, type) {
     done = true;
     if (err) {
       reader.abort();
-      return alert(err.message);
+      return win.alert(err.message);
     }
     callback(result);
   };
@@ -1812,6 +1820,8 @@ function padding(num) {
   return num < 10 ? '0' + num : num;
 }
 
+exports.padding = padding;
+
 function paddingMS(ms) {
   if (ms > 99) {
     return ms;
@@ -2034,6 +2044,14 @@ exports.toHar = function(item) {
     time: time,
     whistleRules: item.rules,
     whistleFwdHost: item.fwdHost,
+    whistleSniPlugin: item.sniPlugin,
+    whistleTimes: {
+      startTime: item.startTime,
+      dnsTime: item.dnsTime,
+      requestTime: item.requestTime,
+      responseTime: item.responseTime,
+      endTime: item.endTime
+    },
     request: toHarReq(item),
     response: toHarRes(item),
     frames: item.frames,

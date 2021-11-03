@@ -6,15 +6,29 @@ var CopyBtn = require('./copy-btn');
 var util = require('./util');
 var dataCenter = require('./data-center');
 var message = require('./message');
+var win = require('./win');
+var events = require('./events');
 
 var MAX_LENGTH = 1024 * 6;
+
+function showFrames() {
+  events.trigger('showFrames');
+}
 
 var Tips = React.createClass({
   render: function() {
     var data = this.props.data || { hide: true };
+    var className = 'w-textview-tips' + (data.hide ? ' hide' : '');
+    if (data.isFrames) {
+      return  (
+        <a className={className} onClick={showFrames}>
+          View in Frames
+        </a>
+      );
+    }
     if (data.isHttps) {
       return (
-        <div className={'w-textview-tips' + (data.hide ? ' hide' : '')}>
+        <div className={className}>
           <p>Tunnel</p>
           <a href="https://avwo.github.io/whistle/webui/https.html" target="_blank">
             Click here for more information
@@ -23,7 +37,7 @@ var Tips = React.createClass({
       );
     }
     return (
-      <div className={'w-textview-tips' + (data.hide ? ' hide' : '')}>
+      <div className={className}>
         <p>{data.message}</p>
         {data.url ? <a href={data.url} target="_blank">Open the URL in a new window</a> : undefined}
       </div>
@@ -88,35 +102,39 @@ var Textarea = React.createClass({
     }
     var target = ReactDOM.findDOMNode(this.refs.nameInput);
     var name = target.value.trim();
-    if (this.state.showDownloadInput) {
-      this.download();
+    var self = this;
+    if (self.state.showDownloadInput) {
+      self.download();
       return;
     }
     if (!name) {
-      message.error('Value name cannot be empty.');
+      message.error('The key cannot be empty.');
       return;
     }
 
     if (/\s/.test(name)) {
-      message.error('Name cannot have spaces.');
+      message.error('The key cannot have spaces.');
       return;
     }
-
-    if (modal.exists(name) &&
-      !confirm('The name \'' + name + '\' already exists.\nDo you want to override it.')) {
-      return;
-    }
-
-    var value = (this.props.value || '').replace(/\r\n|\r/g, '\n');
-    dataCenter.values.add({name: name, value: value}, function(data, xhr) {
-      if (data && data.ec === 0) {
-        modal.add(name, value);
-        target.value = '';
-        target.blur();
-      } else {
-        util.showSystemError(xhr);
+    var handleSubmit = function(sure) {
+      if (!sure) {
+        return;
       }
-    });
+      var value = (self.props.value || '').replace(/\r\n|\r/g, '\n');
+      dataCenter.values.add({name: name, value: value}, function(data, xhr) {
+        if (data && data.ec === 0) {
+          modal.add(name, value);
+          target.value = '';
+          target.blur();
+        } else {
+          util.showSystemError(xhr);
+        }
+      });
+    };
+    if (!modal.exists(name)) {
+      return handleSubmit(true);
+    }
+    win.confirm('The key \'' + name + '\' already exists.\nDo you want to override it.', handleSubmit);
   },
   hideNameInput: function() {
     this.state.showNameInput = false;
@@ -146,7 +164,7 @@ var Textarea = React.createClass({
             {isHexView ? <CopyBtn name="AsHex" value={util.getHexText(this.props.value)} /> : undefined}
             <a className="w-download" onDoubleClick={this.download}
               onClick={this.showNameInput} draggable="false">Download</a>
-            {showAddToValuesBtn ? <a className="w-add" onClick={this.showNameInput} draggable="false">+Value</a> : ''}
+            {showAddToValuesBtn ? <a className="w-add" onClick={this.showNameInput} draggable="false">+Key</a> : ''}
             <a className="w-edit" onClick={this.edit} draggable="false">ViewAll</a>
             <div onMouseDown={this.preventBlur}
               style={{display: this.state.showNameInput ? 'block' : 'none'}}
@@ -156,7 +174,7 @@ var Textarea = React.createClass({
               type="text"
               maxLength="64"
               placeholder={this.state.showDownloadInput ? 'Input the filename' : 'Input the key'}
-            /><button type="button" onClick={this.submit} className="btn btn-primary">OK</button></div>
+            /><button type="button" onClick={this.submit} className="btn btn-primary">{this.state.showDownloadInput ? 'OK' : '+Key'}</button></div>
           </div>
           <TextView className={this.props.className || ''} value={value} />
           <form ref="downloadForm" action="cgi-bin/download" style={{display: 'none'}}

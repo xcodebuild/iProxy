@@ -41,6 +41,7 @@ if (config.networkMode && !config.shadowRulesMode) {
   };
 }
 exports.append = rules.append.bind(rules);
+exports.resolveSNICallback = rules.resolveSNICallback.bind(rules);
 exports.resolveHost = rules.resolveHost.bind(rules);
 exports.resolveInternalHost = rules.resolveInternalHost.bind(rules);
 exports.resolveProxy = rules.resolveProxy.bind(rules);
@@ -68,9 +69,13 @@ var P_HOST_RE = /[?&]host=([\w.:-]+)(?:&|$)/i;
 
 function isProxyHost(req, proxy, host) {
   if (proxy) {
-    req._proxyTunnel =  proxy.lineProps.proxyTunnel || util.isEnable(req, 'proxyTunnel') || isProxyEnable(req, 'proxyTunnel');
+    req._proxyTunnel = isLineProp(proxy, 'proxyTunnel') || isLineProp(host, 'proxyTunnel') ||
+      util.isEnable(req, 'proxyTunnel') || isProxyEnable(req, 'proxyTunnel');
+    if (isLineProp(proxy, 'proxyHost')) {
+      return true;
+    }
   }
-  return host && host.lineProps.proxyHost;
+  return isLineProp(host, 'proxyHost');
 }
 
 function isProxyEnable(req, name) {
@@ -82,7 +87,11 @@ function isProxyEnable(req, name) {
   return props && util.isEnable(props, name);
 }
 
-function getProxy(url, req, callback, isHttpProxy) {
+function isLineProp(rule, name) {
+  return rule && rule.lineProps[name];
+}
+
+exports.getProxy = function(url, req, callback) {
   if (!req) {
     return callback();
   }
@@ -107,11 +116,11 @@ function getProxy(url, req, callback, isHttpProxy) {
   var ignoreProxy;
   var proxy;
   if (config.multiEnv) {
-    proxy = (pRules && pRules.resolveProxy(req, isHttpProxy)) || (hRules && hRules.resolveProxy(req, isHttpProxy))
-    || rules.resolveProxy(req, isHttpProxy) || (fRules && fRules.resolveProxy(req, isHttpProxy));
+    proxy = (pRules && pRules.resolveProxy(req)) || (hRules && hRules.resolveProxy(req))
+    || rules.resolveProxy(req) || (fRules && fRules.resolveProxy(req));
   } else {
-    proxy = (pRules && pRules.resolveProxy(req, isHttpProxy)) || rules.resolveProxy(req, isHttpProxy) ||
-    (fRules && fRules.resolveProxy(req, isHttpProxy)) || (hRules && hRules.resolveProxy(req, isHttpProxy));
+    proxy = (pRules && pRules.resolveProxy(req)) || rules.resolveProxy(req) ||
+    (fRules && fRules.resolveProxy(req)) || (hRules && hRules.resolveProxy(req));
   }
   var proxyHost = util.isEnable(req, 'proxyHost') || isProxyEnable(req, 'proxyHost');
   if (proxy) {
@@ -126,7 +135,7 @@ function getProxy(url, req, callback, isHttpProxy) {
   var host = rules.getHost(req, pRules, fRules, hRules);
   proxyHost = isProxyHost(req, proxy, host) || proxyHost; // 不能调换顺序
   var setHost = function() {
-    if (!host) {
+    if (!host || req._isProxyReq) {
       return false;
     }
     reqRules.host = host;
@@ -143,7 +152,8 @@ function getProxy(url, req, callback, isHttpProxy) {
   if (host) {
     if (proxyHost) {
       req._phost = parseUrl(util.setProtocol(host.matcher + (host.port ? ':' + host.port : '')));
-    } else if (!util.isEnable(req, 'proxyFirst') && !isProxyEnable(req, 'proxyFirst')) {
+    } else if (!isLineProp(proxy, 'proxyFirst') && !isLineProp(host, 'proxyFirst') &&
+      !util.isEnable(req, 'proxyFirst') && !isProxyEnable(req, 'proxyFirst')) {
       return setHost();
     }
     proxyHost = true;
@@ -209,12 +219,11 @@ function getProxy(url, req, callback, isHttpProxy) {
     }
     cachedPacs[pacUrl] = pac = new Pac(pacUrl, dnsResolve);
   }
-  return pac.findWhistleProxyForURL(url.replace('tunnel:', 'https:'), function (
-    err, rule) {
+  return pac.findWhistleProxyForURL(url.replace('tunnel:', 'https:'), function(err, rule) {
     if (rule) {
       tempRules.parse(pacRule.rawPattern + ' ' + rule);
       req.curUrl = url;
-      if (proxy = tempRules.resolveProxy(req, isHttpProxy)) {
+      if (proxy = tempRules.resolveProxy(req)) {
         proxyHost = isProxyHost(req, proxy) || proxyHost; // 不能调换顺序
         var protocol = proxy.matcher.substring(0, proxy.matcher.indexOf(':'));
         if (!util.isIgnored(filter, protocol)) {
@@ -231,17 +240,6 @@ function getProxy(url, req, callback, isHttpProxy) {
     }
     logger.error(err);
   });
-}
-
-exports.getHttpProxy = function(url, req, callback) {
-  req.rules = req.rules || {};
-  req.disable = rules.resolveDisable(req);
-  req.enable = rules.resolveEnable(req);
-  return getProxy(url, req, callback, true);
-};
-
-exports.getProxy = function(url, req, callback) {
-  return getProxy(url, req, callback);
 };
 
 function tpl(str, data) {
@@ -422,7 +420,7 @@ function resolveRulesFile(req, callback) {
       req._scriptValues = vals;
       req.rulesFileMgr = rulesFileMgr;
       req.curUrl = req.fullUrl;
-      text = req.rulesFileMgr.resolveRules(req);
+      text = req.rulesFileMgr.resolveReqRules(req);
     }
     // 不能放到if里面
     util.mergeRules(req, text);
@@ -529,9 +527,9 @@ function initRules(req) {
   if (req.headerRulesMgr) {
     if (config.multiEnv) {
       req.rules = resolveReqRules(req);
-      util.mergeRules(req, req.headerRulesMgr.resolveRules(req));
+      util.mergeRules(req, req.headerRulesMgr.resolveReqRules(req));
     } else {
-      req.rules = req.headerRulesMgr.resolveRules(req);
+      req.rules = req.headerRulesMgr.resolveReqRules(req);
       util.mergeRules(req, resolveReqRules(req));
     }
   } else {

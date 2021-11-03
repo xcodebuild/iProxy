@@ -25,6 +25,7 @@ var PLUGIN_MAIN = path.join(__dirname, './load-plugin');
 var PIPE_PLUGIN_RE = /^pipe:\/\/(?:whistle\.|plugin\.)?([a-z\d_\-]+)(?:\(([\s\S]*)\))?$/;
 var REQ_FROM_HEADER = config.WHISTLE_REQ_FROM_HEADER;
 var RULE_VALUE_HEADER = 'x-whistle-rule-value';
+var SNI_VALUE_HEADER = 'x-whistle-sni-value';
 var GLOBAL_PLUGIN_VARS_HEAD = 'x-whistle-global-plugin-vars' + config.uid;
 var PLUGIN_VARS_HEAD = 'x-whistle-plugin-vars' + config.uid;
 var RULE_URL_HEADER = 'x-whistle-rule-url';
@@ -33,6 +34,7 @@ var MAX_AGE_HEADER = 'x-whistle-max-age';
 var FULL_URL_HEADER = 'x-whistle-full-url';
 var REAL_URL_HEADER = 'x-whistle-real-url';
 var RELATIVE_URL_HEADER = 'x-whistle-relative-url';
+var UI_REQUEST_HEADER = 'x-whistle-auth-ui-request';
 var REQ_ID_HEADER = 'x-whistle-req-id';
 var PIPE_VALUE_HEADER = 'x-whistle-pipe-value';
 var CUSTOM_PARSER_HEADER = 'x-whistle-frame-parser';
@@ -42,20 +44,31 @@ var LOCAL_HOST_HEADER = 'x-whistle-local-host';
 var PROXY_VALUE_HEADER = 'x-whistle-proxy-value';
 var PAC_VALUE_HEADER = 'x-whistle-pac-value';
 var METHOD_HEADER = 'x-whistle-method';
+var SHOW_LOGIN_BOX = 'x-whistle2-show-login-box.' + config.uid;
 var CLIENT_PORT_HEAD = config.CLIENT_PORT_HEAD;
 var HOST_IP_HEADER = 'x-whistle-host-ip';
 var GLOBAL_VALUE_HEAD = 'x-whistle-global-value';
+var SERVER_NAME_HEAD = 'x-whistle-server-name';
+var COMMON_NAME_HEAD = 'x-whistle-common-name';
+var CERT_CACHE_INFO = 'x-whistle-cert-cache-info';
+var STATUS_ERR = new Error('Non 200');
 var INTERVAL = 6000;
 var CHECK_INTERVAL = 1000 * 60 * 60;
+var MAX_CERT_SIZE = 72 * 1024;
 var portsField = typeof Symbol === 'undefined' ? '_ports' : Symbol('_ports'); // eslint-disable-line
 var UTF8_OPTIONS = {encoding: 'utf8'};
 var notLoadPlugins = config.networkMode || config.rulesOnlyMode;
 var allPlugins = notLoadPlugins ? {} : getPluginsSync();
+var authPlugins = [];
+var tunnelKeys = [];
 var LOCALHOST = '127.0.0.1';
 var MAX_RULES_LENGTH = 1024 * 256;
 var rulesCache = new LRU({max: 36});
+var CUSTOM_CERT_HEADER = config.CUSTOM_CERT_HEADER;
+var ENABLE_CAPTURE_HEADER = config.ENABLE_CAPTURE_HEADER;
 var PLUGIN_HOOKS = config.PLUGIN_HOOKS;
 var PLUGIN_HOOK_NAME_HEADER = config.PLUGIN_HOOK_NAME_HEADER;
+var HTTP_RE = /^https?:\/\//;
 var conf = {};
 var EXCLUDE_NAMES = {
   password: 1,
@@ -63,6 +76,7 @@ var EXCLUDE_NAMES = {
   rules: 1,
   values: 1
 };
+var debugMode = config.debugMode;
 var whistleProxy;
 
 if (notLoadPlugins) {
@@ -79,6 +93,8 @@ Object.keys(config).forEach(function(name) {
   var value = config[name];
   if (name === 'passwordHash') {
     conf.password = value;
+  } if (name === 'globalData') {
+    conf.globalData = value;
   } else {
     var type = typeof value;
     if (type == 'string' || type == 'number' || type === 'boolean') {
@@ -98,9 +114,15 @@ if (pluginHostMap) {
   });
 }
 
+pluginMgr.getTunnelKeys = function() {
+  return tunnelKeys;
+};
+
 pluginMgr.on('updateRules', function() {
   rulesMgr.clearAppend();
   var hasRulesUrl;
+  authPlugins = [];
+  tunnelKeys = [];
   Object.keys(allPlugins).sort(function(a, b) {
     var p1 = allPlugins[a];
     var p2 = allPlugins[b];
@@ -111,14 +133,20 @@ pluginMgr.on('updateRules', function() {
     }
     var plugin = allPlugins[name];
     var rules = plugin.rules;
+    if (plugin.enableAuthUI) {
+      authPlugins.push(plugin);
+    }
+    if (plugin.tunnelKey) {
+      plugin.tunnelKey.forEach(function(key) {
+        if (tunnelKeys.indexOf(key) === -1) {
+          tunnelKeys.push(key);
+        }
+      });
+    }
     if (rules) {
       rules = rules.replace(REMOTE_RULES_RE, function (_, apo, rulesUrl) {
         hasRulesUrl = true;
-        rulesUrl = util.getPluginRulesUrl(rulesUrl);
-        if (apo) {
-          rulesUrl = util.setConfigVar(rulesUrl);
-        }
-        return httpMgr.add(rulesUrl, config.runtimeHeaders);
+        return util.getRemoteRules(apo, rulesUrl);
       });
       rulesMgr.append(rules, plugin.path);
     }
@@ -137,6 +165,54 @@ httpMgr.addChangeListener(updateRules);
 
 pluginMgr.updateRules = updateRules;
 
+pluginMgr.loadCert = function(req, plugin, callback) {
+  loadPlugin(plugin, function(err, ports) {
+    if (err || !ports || !ports.sniPort) {
+      return callback();
+    }
+    var options = getOptions(req);
+    options.maxLength = MAX_CERT_SIZE;
+    options.headers[PLUGIN_HOOK_NAME_HEADER] = PLUGIN_HOOKS.SNI;
+    options.headers[SERVER_NAME_HEAD] = encodeURIComponent(req.serverName);
+    options.headers[COMMON_NAME_HEAD] = encodeURIComponent(req.commonName);
+    if (req.sniRuleValue) {
+      options.headers[SNI_VALUE_HEADER] = encodeURIComponent(req.sniRuleValue);
+    }
+    if (req.hasCertCache) {
+      options.headers[CERT_CACHE_INFO] = req.hasCertCache;
+    }
+    options.port = ports.sniPort;
+    requestPlugin(options, function(err, body, res) {
+      if (err || res.statusCode !== 200) {
+        return callback(err || STATUS_ERR);
+      }
+      if (!body) {
+        return callback();
+      }
+      if (body === 'false') {
+        return callback(false);
+      }
+      if (body === 'true') {
+        return callback(true);
+      }
+      try {
+        body = JSON.parse(body);
+        if (!body || !body.name || !util.isString(body.key) ||!util.isString(body.cert)) {
+          return callback();
+        }
+        callback({
+          key: body.key,
+          cert: body.cert,
+          name: body.name,
+          mtime: body.mtime > 0 ? body.mtime : undefined
+        });
+      } catch (e) {
+        callback(e);
+      }
+    });
+  });
+};
+
 pluginMgr.on('update', function(result) {
   Object.keys(result).forEach(function(name) {
     pluginMgr.stopPlugin(result[name]);
@@ -149,7 +225,7 @@ pluginMgr.on('uninstall', function(result) {
 });
 
 function showVerbose(oldData, newData) {
-  if (!config.debugMode) {
+  if (!debugMode) {
     return;
   }
   var uninstallData, installData, updateData;
@@ -183,15 +259,33 @@ function showVerbose(oldData, newData) {
   });
 }
 
+function readFile(filepath, callback) {
+  fs.readFile(filepath, UTF8_OPTIONS, function(err, text) {
+    if (!err) {
+      return callback(err, text);
+    }
+    fs.readFile(filepath, UTF8_OPTIONS, callback);
+  });
+}
+
 function readReqRules(dir, callback) {
-  fs.readFile(path.join(path.join(dir, '_rules.txt')), UTF8_OPTIONS, function(err, rulesText) {
+  readFile(path.join(path.join(dir, '_rules.txt')), function(err, rulesText) {
     if (err) {
-      fs.readFile(path.join(path.join(dir, 'reqRules.txt')), UTF8_OPTIONS, function(_, rulesText) {
+      readFile(path.join(path.join(dir, 'reqRules.txt')), function(_, rulesText) {
         callback(util.trim(rulesText));
       });
       return;
     }
     callback(util.trim(rulesText));
+  });
+}
+
+function readJson(pkgPath, callback) {
+  fse.readJson(pkgPath, function(err, json) {
+    if (!err) {
+      return callback(err, json);
+    }
+    fse.readJson(pkgPath, callback);
   });
 }
 
@@ -208,12 +302,16 @@ function readPackages(obj, callback) {
     var newPkg = obj[name];
     if (!pkg || pkg.path != newPkg.path || pkg.mtime != newPkg.mtime) {
       ++count;
-      fse.readJson(newPkg.pkgPath, function(err, result) {
+      readJson(path.join(newPkg.path, 'package.json'), function(_, result) {
         if (result && result.version) {
           var conf = result.whistleConfig || '';
           var hintList = util.getHintList(conf);
           var simpleName = name.slice(0, -1);
+          newPkg.enableAuthUI = !!conf.enableAuthUI;
+          newPkg.inheritAuth = !!conf.inheritAuth;
+          newPkg.tunnelKey = util.getTunnelKey(conf);
           newPkg.version = result.version;
+          newPkg.staticDir = util.getStaticDir(conf);
           newPkg.priority = parseInt(conf.priority, 10) || parseInt(result.pluginPriority, 10) || 0;
           newPkg.rulesUrl = util.getCgiUrl(conf.rulesUrl);
           newPkg.valuesUrl = util.getCgiUrl(conf.valuesUrl);
@@ -230,16 +328,17 @@ function readPackages(obj, callback) {
           newPkg.description = result.description;
           newPkg.moduleName = result.name;
           newPkg.pluginHomepage = pluginUtil.getPluginHomepage(result);
+          newPkg.openInPlugins = conf.openInPlugins ? 1 : undefined;
           newPkg.registry = util.getRegistry(result);
           newPkg.latest = pkg && pkg.latest;
           _plugins[name] = newPkg;
-          fs.readFile(path.join(path.join(newPkg.path, 'rules.txt')), UTF8_OPTIONS, function(err, rulesText) {
+          readFile(path.join(path.join(newPkg.path, 'rules.txt')), function(err, rulesText) {
             newPkg.rules = util.renderPluginRules(util.trim(rulesText), result, simpleName);
             readReqRules(newPkg.path, function(rulesText) {
               newPkg._rules = util.renderPluginRules(util.trim(rulesText), result, simpleName);
-              fs.readFile(path.join(path.join(newPkg.path, '_values.txt')), UTF8_OPTIONS, function(err, rulesText) {
+              readFile(path.join(path.join(newPkg.path, '_values.txt')), function(err, rulesText) {
                 newPkg[util.PLUGIN_VALUES] = pluginUtil.parseValues(util.renderPluginRules(rulesText, result, simpleName));
-                fs.readFile(path.join(path.join(newPkg.path, 'resRules.txt')), UTF8_OPTIONS, function(err, rulesText) {
+                readFile(path.join(path.join(newPkg.path, 'resRules.txt')), function(err, rulesText) {
                   newPkg.resRules = util.renderPluginRules(util.trim(rulesText), result, simpleName);
                   callbackHandler();
                 });
@@ -392,8 +491,26 @@ function addPluginVars(req, headers, rule) {
 }
 
 function addRuleHeaders(req, rules, headers, isPipe) {
-  rules = rules || '';
   headers = headers || req.headers;
+  if (req.reqId) {
+    headers[REQ_ID_HEADER] = req.reqId;
+  }
+  if (req.fullUrl) {
+    headers[FULL_URL_HEADER] = encodeURIComponent(req.fullUrl);
+  }
+  var clientIp = req.clientIp || util.getClientIp(req);
+  if (clientIp) {
+    headers[config.CLIENT_IP_HEAD] = clientIp;
+  }
+  var clientPort = req.clientPort || util.getClientPort(req);
+  if (clientPort) {
+    headers[config.CLIENT_PORT_HEAD] = clientPort;
+  }
+  if (req._isUIRequest) {
+    headers[UI_REQUEST_HEADER] = '1';
+    return headers;
+  }
+  rules = rules || '';
   var localHost = getValue(rules.host);
   if (localHost) {
     headers[LOCAL_HOST_HEADER] = localHost;
@@ -424,24 +541,13 @@ function addRuleHeaders(req, rules, headers, isPipe) {
   if (pac) {
     headers[PAC_VALUE_HEADER] = pac;
   }
-  if (req.reqId) {
-    headers[REQ_ID_HEADER] = req.reqId;
-  }
   if (req._pipeValue) {
     headers[PIPE_VALUE_HEADER] = encodeURIComponent(req._pipeValue);
   }
   if (req.customParser) {
     headers[CUSTOM_PARSER_HEADER] = req.customParser;
-  }
-
-  if (req.fullUrl) {
-    headers[FULL_URL_HEADER] = encodeURIComponent(req.fullUrl);
-  }
-  if (req.clientIp) {
-    headers[config.CLIENT_IP_HEAD] = req.clientIp;
-  }
-  if (req.clientPort) {
-    headers[config.CLIENT_PORT_HEAD] = req.clientPort;
+  } else {
+    delete headers[CUSTOM_CERT_HEADER];
   }
   if (req.globalValue) {
     headers[GLOBAL_VALUE_HEAD] = encodeURIComponent(req.globalValue);
@@ -470,8 +576,12 @@ function loadPlugin(plugin, callback) {
       name: moduleName,
       script: PLUGIN_MAIN,
       value: plugin.path,
+      staticDir: plugin.staticDir,
+      CUSTOM_CERT_HEADER: CUSTOM_CERT_HEADER,
+      ENABLE_CAPTURE_HEADER: ENABLE_CAPTURE_HEADER,
       REQ_FROM_HEADER: REQ_FROM_HEADER,
       RULE_VALUE_HEADER: RULE_VALUE_HEADER,
+      SNI_VALUE_HEADER: SNI_VALUE_HEADER,
       GLOBAL_PLUGIN_VARS_HEAD: GLOBAL_PLUGIN_VARS_HEAD,
       PLUGIN_VARS_HEAD: PLUGIN_VARS_HEAD,
       RULE_URL_HEADER: RULE_URL_HEADER,
@@ -490,11 +600,16 @@ function loadPlugin(plugin, callback) {
       PROXY_VALUE_HEADER: PROXY_VALUE_HEADER,
       PAC_VALUE_HEADER: PAC_VALUE_HEADER,
       METHOD_HEADER: METHOD_HEADER,
+      SHOW_LOGIN_BOX: SHOW_LOGIN_BOX,
       CLIENT_IP_HEADER: config.CLIENT_IP_HEAD,
       CLIENT_PORT_HEAD: CLIENT_PORT_HEAD,
+      UI_REQUEST_HEADER: UI_REQUEST_HEADER,
       GLOBAL_VALUE_HEAD: GLOBAL_VALUE_HEAD,
+      SERVER_NAME_HEAD: SERVER_NAME_HEAD,
+      COMMON_NAME_HEAD: COMMON_NAME_HEAD,
+      CERT_CACHE_INFO: CERT_CACHE_INFO,
       HOST_IP_HEADER: HOST_IP_HEADER,
-      debugMode: config.debugMode,
+      debugMode: debugMode,
       config: conf
     }, function(err, ports, child, first) {
       callback(err, ports);
@@ -505,7 +620,7 @@ function loadPlugin(plugin, callback) {
         whistleProxy.emit('pluginLoadError', err, name, moduleName);
         logger.error(err);
         var mode = process.env.PFORK_MODE;
-        if (config.debugMode || mode === 'inline' || mode === 'bind') {
+        if (debugMode || mode === 'inline' || mode === 'bind') {
           console.log(err);
         }
       } else {
@@ -520,6 +635,10 @@ function loadPlugin(plugin, callback) {
 }
 
 pluginMgr.loadPlugin = loadPlugin;
+
+pluginMgr.loadPluginByName = function(name, callback) {
+  loadPlugin(getActivePluginByName(name), callback);
+};
 
 pluginMgr.stopPlugin = function(plugin) {
   p.kill({
@@ -549,9 +668,12 @@ function _getPlugin(protocol) {
 
 pluginMgr.isDisabled = pluginIsDisabled;
 pluginMgr.getPlugin = _getPlugin;
-rulesMgr.getPlugin = function(name) {
+
+function getActivePluginByName(name) {
   return pluginIsDisabled(name) ? null : allPlugins[name + ':'];
-};
+}
+
+rulesMgr.getPlugin = getActivePluginByName;
 
 function getPluginByName(name) {
   return name && allPlugins[name + ':'];
@@ -573,14 +695,11 @@ function getPluginByRuleUrl(ruleUrl) {
 
 pluginMgr.getPluginByRuleUrl = getPluginByRuleUrl;
 
-function loadPlugins(plugins, callback) {
-  plugins = plugins.map(function(plugin) {
-    return plugin.plugin;
-  });
+function _loadPlugins(plugins, callback) {
   var rest = plugins.length;
   var results = [];
   var execCallback = function() {
-    --rest <= 0 && callback(results);
+    --rest === 0 && callback(results);
   };
   plugins.forEach(function(plugin, i) {
     loadPlugin(plugin, function(err, ports) {
@@ -590,6 +709,43 @@ function loadPlugins(plugins, callback) {
     });
   });
 }
+
+function loadPlugins(plugins, callback) {
+  plugins = plugins.map(function(plugin) {
+    return plugin.plugin;
+  });
+  _loadPlugins(plugins, callback);
+}
+
+pluginMgr.loadAuthPlugins = function(req, callback) {
+  if (!authPlugins.length) {
+    return callback();
+  }
+  req._isUIRequest = true;
+  _loadPlugins(authPlugins, function(ports) {
+    ports = ports.map(function(port, i) {
+      return {
+        authPort: port && port.authPort,
+        plugin: authPlugins[i]
+      };
+    });
+    var rest = ports.length;
+    if (!rest) {
+      return callback();
+    }
+    var options = getOptions(req);
+    authReq(true, ports, req, options, function(forbidden) {
+      if (forbidden) {
+        if (req._redirectUrl || req._authHtmlUrl) {
+          return callback(req._redirectUrl, null, req._authHtmlUrl);
+        }
+        var status = req._authStatus ? (req._showLoginBox ? 401 : 403) : 502;
+        return callback(status, forbidden);
+      }
+      return callback();
+    });
+  });
+};
 
 function parseRulesList(req, results, isResRules) {
   var values = {};
@@ -606,18 +762,84 @@ function parseRulesList(req, results, isResRules) {
   return pluginRulesMgr;
 }
 
+function getPluginReqOpts(item, req, options, port) {
+  var opts = extend({}, options);
+  opts.headers = extend({}, options.headers);
+  opts.port = port;
+  addPluginVars(req, opts.headers, item);
+  addRealUrl(req, opts.headers);
+  return opts;
+}
+
+function authReq(isReq, ports, req, options, callback) {
+  if (!isReq) {
+    return callback();
+  }
+  var rest = ports.length;
+  var forbidden;
+  var execCallback = function() {
+    if (--rest === 0) {
+      callback(forbidden);
+    }
+  };
+  ports.forEach(function(item) {
+    if (!item.authPort) {
+      return execCallback();
+    }
+    options.headers[PLUGIN_HOOK_NAME_HEADER] = PLUGIN_HOOKS.AUTH;
+    var opts = getPluginReqOpts(item, req, options, item.authPort);
+    opts.maxLength = MAX_RULES_LENGTH;
+    requestPlugin(opts, function(err, body, res) {
+      var headers = res && res.headers;
+      if (err || body) {
+        if (!forbidden) {
+          if (debugMode) {
+            forbidden = err ? (err.message || 'Error') : body;
+          } else {
+            forbidden = err ? 'Error' : body;
+          }
+          if (headers) {
+            var authHtmlUrl = headers['x-auth-html-url'];
+            req._authStatus = headers['x-auth-status'];
+            if (authHtmlUrl) {
+              try {
+                authHtmlUrl = decodeURIComponent(authHtmlUrl);
+                req._authHtmlUrl = HTTP_RE.test(authHtmlUrl) ? authHtmlUrl : 'file://' + authHtmlUrl;
+              } catch (e) {}
+            } else if (headers.location) {
+              req._redirectUrl = headers.location;
+            } else if (headers[SHOW_LOGIN_BOX]) {
+              req._showLoginBox = true;
+            }
+          }
+        }
+        err && logger.error(err);
+      }
+      if (!forbidden && headers) {
+        Object.keys(headers).forEach(function(key) {
+          if (key.indexOf('x-whistle-') === 0 || key === 'proxy-authorization') {
+            var value = headers[key];
+            if (key === config.WHISTLE_POLICY_HEADER && value === 'enableCaptureByAuth') {
+              req._forceCapture = true;
+            }
+            req.headers[key] = value;
+            options.headers[key] = value;
+          }
+        });
+      }
+      execCallback();
+    });
+  });
+}
+
 function getRulesFromPlugins(type, req, res, callback) {
   var plugins = req.whistlePlugins;
   loadPlugins(plugins, function(ports) {
-    var needNetworkData;
     ports = ports.map(function(port, i) {
       var plugin = plugins[i];
-      if (!needNetworkData && port && type === 'rules' && 
-        (port.statsPort || port.resRulesPort || port.resStatsPort)) {
-        needNetworkData = true;
-      }
       return {
         port: port && port[type + 'Port'],
+        authPort: port && port.authPort,
         plugin: plugin.plugin,
         value: plugin.value,
         url: plugin.url
@@ -632,124 +854,134 @@ function getRulesFromPlugins(type, req, res, callback) {
     var results = [];
     var options = getOptions(req, res, type);
     var isResRules = type == 'resRules';
-    var hookName = isResRules ? 'RES_RULES' : (type === 'tunnelRules' ? 'TUNNEL_RULES' : 'REQ_RULES');
-    options.headers[PLUGIN_HOOK_NAME_HEADER] = PLUGIN_HOOKS[hookName];
-    var execCallback = function() {
-      if (--rest === 0) {
-        if (req.resScriptRules) {
-          results = results.concat(req.resScriptRules);
-        }
-        callback(parseRulesList(req, results, isResRules));
-      }
-    };
-    ports.forEach(function(item, i) {
-      var plugin = item.plugin;
-      if (!item.port) {
-        var rulesText = isResRules ? plugin.resRules : plugin._rules;
-        if (rulesText) {
-          results[i] = {
-            text: rulesText,
-            values: plugin[util.PLUGIN_VALUES],
-            root: plugin.path
-          };
-        }
-        return execCallback();
-      }
-
-      var opts = extend({}, options);
-      opts.headers = extend({}, options.headers);
-      opts.port = item.port;
-      addPluginVars(req, opts.headers, item);
-      addRealUrl(req, opts.headers);
-      var cacheKey = plugin.moduleName + '\n' + type;
-      var data = rulesCache.get(cacheKey);
-      var updateMaxAge = function(obj, age) {
-        if (age >= 0) {
-          obj.maxAge = age;
-          obj.now = Date.now();
-        }
-      };
-      var handleRules = function(err, body, values, raw, res) {
-        if (err === false && data) {
-          body = data.body;
-          values = data.values;
-          raw = data.raw;
-          updateMaxAge(data, res && res.headers[MAX_AGE_HEADER]);
-        } else if (res) {
-          var etag = res.headers[ETAG_HEADER];
-          var maxAge = res.headers[MAX_AGE_HEADER];
-          var newData;
-          if (maxAge >= 0) {
-            newData = newData || {};
-            updateMaxAge(newData, maxAge);
-          }
-          if (etag) {
-            newData = newData || {};
-            newData.etag = etag;
-          }
-          if (newData) {
-            newData.body = body;
-            newData.values = values;
-            newData.raw = raw;
-            rulesCache.set(cacheKey, newData);
-          } else {
-            rulesCache.del(cacheKey);
-          }
-        }
-        var pendingCallbacks = data && data.pendingCallbacks;
-        if (pendingCallbacks) {
-          delete data.pendingCallbacks;
-          pendingCallbacks.forEach(function(cb) {
-            cb(err, body, values, raw);
-          });
-        }
-        body = body || '';
-        if (isResRules) {
-          body += plugin.resRules ? '\n' + plugin.resRules : ''; 
+    authReq(!isResRules, ports, req, options, function(forbidden) {
+      if (forbidden) {
+        var mgr = new RulesMgr({ msg: forbidden });
+        if (req._authHtmlUrl) {
+          mgr.parse('* ignore://!method|!file|!http|!https method://get ' + req._authHtmlUrl);
+        } else if (req._redirectUrl) {
+          mgr.parse('* ignore://!redirect redirect://' + req._redirectUrl);
         } else {
-          body += plugin._rules ? '\n' + plugin._rules : '';
+          var status = req._authStatus ? (req._showLoginBox ? 401 : 403) : 502;
+          mgr.parse('* ignore://!statusCode|!resBody|!resType|!resCharset status://' + status + ' resBody://{msg} resType://html resCharset://utf8');
         }
-        if (body || values) {
-          var pluginVals = plugin[util.PLUGIN_VALUES];
-          if (values && pluginVals) {
-            var vals = extend({}, pluginVals);
-            values = extend(vals, values);
-          } else {
-            values = values || pluginVals;
-          }
-          results[i] = {
-            text: body,
-            values: values,
-            root: plugin.path
-          };
-        }
-        execCallback();
-      };
-      delete opts.headers[ETAG_HEADER];
-      if (data) {
-        if (Date.now() - data.now <= data.maxAge) {
-          return handleRules(false);
-        }
-        if (data.etag) {
-          opts.headers[ETAG_HEADER] = data.etag;
-        }
-        if (data.maxAge >= 0) {
-          if (data.pendingCallbacks) {
-            data.pendingCallbacks.push(handleRules);
-            return;
-          }
-          data.pendingCallbacks = [];
-        }
+        return callback(mgr);
       }
-      opts.ignoreExceedError = true;
-      opts.maxLength = MAX_RULES_LENGTH;
-      requestRules(opts, handleRules);
+      var hookName = isResRules ? 'RES_RULES' : (type === 'tunnelRules' ? 'TUNNEL_RULES' : 'REQ_RULES');
+      options.headers[PLUGIN_HOOK_NAME_HEADER] = PLUGIN_HOOKS[hookName];
+      var execCallback = function() {
+        if (--rest <= 0) {
+          if (req.resScriptRules) {
+            results = results.concat(req.resScriptRules);
+          }
+          callback(parseRulesList(req, results, isResRules));
+        }
+      };
+      ports.forEach(function(item, i) {
+        var plugin = item.plugin;
+        if (!item.port) {
+          var rulesText = isResRules ? plugin.resRules : plugin._rules;
+          if (rulesText) {
+            results[i] = {
+              text: rulesText,
+              values: plugin[util.PLUGIN_VALUES],
+              root: plugin.path
+            };
+          }
+          return execCallback();
+        }
+
+        var opts =getPluginReqOpts(item, req, options, item.port);
+        var cacheKey = plugin.moduleName + '\n' + type;
+        var data = rulesCache.get(cacheKey);
+        var updateMaxAge = function(obj, age) {
+          if (age >= 0) {
+            obj.maxAge = age;
+            obj.now = Date.now();
+          }
+        };
+        var handleRules = function(err, body, values, raw, res) {
+          if (err === false && data) {
+            body = data.body;
+            values = data.values;
+            raw = data.raw;
+            updateMaxAge(data, res && res.headers[MAX_AGE_HEADER]);
+          } else if (res) {
+            var etag = res.headers[ETAG_HEADER];
+            var maxAge = res.headers[MAX_AGE_HEADER];
+            var newData;
+            if (maxAge >= 0) {
+              newData = newData || {};
+              updateMaxAge(newData, maxAge);
+            }
+            if (etag) {
+              newData = newData || {};
+              newData.etag = etag;
+            }
+            if (newData) {
+              newData.body = body;
+              newData.values = values;
+              newData.raw = raw;
+              rulesCache.set(cacheKey, newData);
+            } else {
+              rulesCache.del(cacheKey);
+            }
+          }
+          var pendingCallbacks = data && data.pendingCallbacks;
+          if (pendingCallbacks) {
+            delete data.pendingCallbacks;
+            pendingCallbacks.forEach(function(cb) {
+              cb(err, body, values, raw);
+            });
+          }
+          body = body || '';
+          if (isResRules) {
+            body += plugin.resRules ? '\n' + plugin.resRules : ''; 
+          } else {
+            body += plugin._rules ? '\n' + plugin._rules : '';
+          }
+          if (body || values) {
+            var pluginVals = plugin[util.PLUGIN_VALUES];
+            if (values && pluginVals) {
+              var vals = extend({}, pluginVals);
+              values = extend(vals, values);
+            } else {
+              values = values || pluginVals;
+            }
+            results[i] = {
+              text: body,
+              values: values,
+              root: plugin.path
+            };
+          }
+          execCallback();
+        };
+        delete opts.headers[ETAG_HEADER];
+        if (data) {
+          if (Date.now() - data.now <= data.maxAge) {
+            return handleRules(false);
+          }
+          if (data.etag) {
+            opts.headers[ETAG_HEADER] = data.etag;
+          }
+          if (data.maxAge >= 0) {
+            if (data.pendingCallbacks) {
+              data.pendingCallbacks.push(handleRules);
+              return;
+            }
+            data.pendingCallbacks = [];
+          }
+        }
+        opts.ignoreExceedError = true;
+        opts.maxLength = MAX_RULES_LENGTH;
+        requestRules(opts, handleRules);
+      });
     });
   });
 }
 
 function getOptions(req, res, type, isPipe) {
-  var fullUrl = req.fullUrl;
+  var fullUrl = req.fullUrl || util.getFullUrl(req);
   var options = util.parseUrl(fullUrl);
   var isResRules = res && type === 'resRules';
   var headers = extend({}, isResRules ? res.headers : req.headers);
@@ -775,6 +1007,13 @@ function getOptions(req, res, type, isPipe) {
     headers[PLUGIN_REQUEST_HEADER] = 1;
   }
 
+  if (req._existsCustomCert) {
+    headers[CUSTOM_CERT_HEADER] = 1;
+  }
+  if (req._enableCapture) {
+    headers[ENABLE_CAPTURE_HEADER] = 1;
+  }
+
   options.protocol = 'http:';
   options.host = LOCALHOST;
   options.hostname = null;
@@ -783,16 +1022,24 @@ function getOptions(req, res, type, isPipe) {
   return options;
 }
 
-function requestRules(options, callback, retryCount) {
+function requestPlugin(options, callback, retryCount) {
   retryCount = retryCount || 0;
   util.request(options, function(err, body, res) {
     if (err && retryCount < 5) {
-      return requestRules(options, callback, ++retryCount);
+      return requestPlugin(options, callback, ++retryCount);
     }
     if (res && res.statusCode == 304) {
+      return callback(false, null, res);
+    }
+    callback(null, body && body.trim(), res);
+  });
+}
+
+function requestRules(options, callback) {
+  requestPlugin(options, function(err, body, res) {
+    if (err === false) {
       return callback(false, null, null, null, res);
     }
-    body = body && body.trim();
     var rules = body;
     var values = null;
     var data = !err && rulesToJson(body);
@@ -833,6 +1080,7 @@ function getPluginRulesCallback(req, callback) {
   return function(pluginRules) {
     req.pluginRules = pluginRules;
     if (req.headers[REQ_FROM_HEADER] === 'W2COMPOSER') {
+      req.fromComposer = true;
       delete req.headers[REQ_FROM_HEADER];
     }
     callback(pluginRules);
@@ -902,7 +1150,7 @@ function getPipe(type, hookName) {
         if (client) {
           destroy();
           if (err) {
-            config.debugMode && console.log(req._pipeRule.matcher, type);
+            debugMode && console.log(req._pipeRule.matcher, type);
             (res || req).emit('error', err);
           }
         }
@@ -971,8 +1219,18 @@ pluginMgr.getRules = function(req, callback) {
 
 pluginMgr.getResRules = function(req, res, callback) {
   req.curUrl = req.fullUrl;
+  if (!req.resHeaders && res) {
+    req.resHeaders = res.headers;
+  }
   var resRules = rulesMgr.resolveResRules(req, true);
-  util.mergeRules(req, resRules, true);
+  var pRules = req.pluginRules && req.pluginRules.resolveResRules(req, true);
+  var fRules = req.rulesFileMgr && req.rulesFileMgr.resolveResRules(req, true);
+  var hRules = req.headerRulesMgr && req.headerRulesMgr.resolveResRules(req, true);
+  fRules && util.mergeRules(req, fRules, true);
+  config.multiEnv && util.mergeRules(req, resRules, true);
+  hRules && util.mergeRules(req, hRules, true);
+  pRules && util.mergeRules(req, pRules, true);
+  !config.multiEnv && util.mergeRules(req, resRules, true);
   var resScriptRules;
   var resHeaderRules = res.headers[config.RES_RULES_HEAD];
   if (resHeaderRules) {
@@ -1120,5 +1378,7 @@ pluginMgr.updatePluginRules = function(name) {
 pluginMgr.setProxy = function(p) {
   whistleProxy = p;
 };
+
+httpMgr.setPluginMgr(pluginMgr);
 
 module.exports = pluginMgr;

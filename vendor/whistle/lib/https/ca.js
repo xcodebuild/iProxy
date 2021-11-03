@@ -6,18 +6,19 @@ var crypto = require('crypto');
 var LRU = require('lru-cache');
 var hagent = require('hagent');
 var extend = require('extend');
-var getServer = require('./h2').getServer;
-var pki = forge.pki;
+var h2 = require('./h2');
 var createSecureContext = require('tls').createSecureContext || crypto.createCredentials;
 var util = require('../util');
 var config = require('../config');
 
+
+var pki = forge.pki;
 var CUR_VERSION = process.version;
 var requiredVersion = parseInt(CUR_VERSION.slice(1), 10) >= 6;
 var HTTPS_DIR = mkdir(path.join(config.getDataDir(), 'certs'));
 var ROOT_NEW_KEY_FILE = path.join(HTTPS_DIR, 'root_new.key');
 var ROOT_NEW_CRT_FILE = path.join(HTTPS_DIR, 'root_new.crt');
-var CUSTOM_CERTS_DIR = config.CUSTOM_CERTS_DIR;
+var CUSTOM_CERTS_DIR = config.disableCustomCerts ? null : config.CUSTOM_CERTS_DIR;
 var useNewKey = fs.existsSync(ROOT_NEW_KEY_FILE) && fs.existsSync(ROOT_NEW_CRT_FILE);
 var ROOT_KEY_FILE = useNewKey ? ROOT_NEW_KEY_FILE : path.join(HTTPS_DIR, 'root.key');
 var ROOT_CRT_FILE = useNewKey ? ROOT_NEW_CRT_FILE : path.join(HTTPS_DIR, 'root.crt');
@@ -28,11 +29,15 @@ var customCertsFiles = {};
 var customCertCount = 0;
 var cachePairs = new LRU({max: 5120});
 var certsCache = new LRU({max: 256});
+var remoteCerts = new LRU({max: 1280});
 var ILEGAL_CHAR_RE = /[^a-z\d-]/i;
 var RANDOM_SERIAL = '.' + Date.now() + '.' + Math.floor(Math.random() * 10000);
 var PORT_RE = /:\d*$/;
 var customRoot;
 var ROOT_KEY, ROOT_CRT;
+var rootKey, rootCrt;
+
+exports.remoteCerts = remoteCerts;
 
 if (!useNewKey && requiredVersion && !checkCertificate()) {
   try {
@@ -250,12 +255,11 @@ function createRootCA() {
   if (ROOT_KEY && ROOT_CRT) {
     return;
   }
-  var rootKey, rootCrt;
   try {
     ROOT_KEY = fs.readFileSync(ROOT_KEY_FILE);
     ROOT_CRT = fs.readFileSync(ROOT_CRT_FILE);
-    rootKey = ROOT_KEY;
-    rootCrt = ROOT_CRT;
+    rootKey = ROOT_KEY.toString();
+    rootCrt = ROOT_CRT.toString();
   } catch (e) {
     ROOT_KEY = ROOT_CRT = null;
   }
@@ -284,10 +288,10 @@ function createRootCA() {
     var cert = createCACert();
     ROOT_CRT = cert.cert;
     ROOT_KEY = cert.key;
-    rootKey = pki.privateKeyToPem(ROOT_KEY);
-    rootCrt = pki.certificateToPem(ROOT_CRT);
-    fs.writeFileSync(ROOT_KEY_FILE, rootKey.toString());
-    fs.writeFileSync(ROOT_CRT_FILE, rootCrt.toString());
+    rootKey = pki.privateKeyToPem(ROOT_KEY).toString();
+    rootCrt = pki.certificateToPem(ROOT_CRT).toString();
+    fs.writeFileSync(ROOT_KEY_FILE, rootKey);
+    fs.writeFileSync(ROOT_CRT_FILE, rootCrt);
   }
 }
 
@@ -384,20 +388,31 @@ function getRootCAFile() {
 createRootCA();// 启动生成ca
 
 hagent.serverAgent.createCertificate = createCertificate;
-var getHttpsServer = hagent.create(getServer, 43900);
+var getHttp2Server =  hagent.create(h2.getHttpServer, 42900);
+var getHttpsServer = hagent.create(h2.getServer, 43900);
 var cbs = {};
 var ports = {};
 var TIMEOUT = 6000;
 
 var SNICallback = function(serverName, cb) {
-  serverName = getDomain(serverName);
-  var options = createCertificate(serverName);
+  var options = remoteCerts.get(serverName);
+  if (!options) {
+    serverName = getDomain(serverName);
+    options = createCertificate(serverName);
+  }
   if (!options._ctx) {
     try {
       options._ctx = createSecureContext(options);
     } catch (e) {}
   }
   cb(null, options._ctx);
+};
+
+exports.getRootCA = function() {
+  return {
+    key: rootKey,
+    cert: rootCrt
+  };
 };
 
 exports.getCustomCertsInfo = function() {
@@ -412,6 +427,59 @@ exports.serverAgent = hagent.serverAgent;
 
 var SNI_OPTIONS = { SNICallback: SNICallback };
 exports.SNI_OPTIONS = SNI_OPTIONS;
+
+function addCallback(name, callback) {
+  var cbList = cbs[name];
+  if (!cbList) {
+    cbList = [];
+    cbs[name] = cbList;
+  }
+  cbList.push(callback);
+  return cbList;
+}
+
+function createServer(name, cbList, listener, options) {
+  var removeServer = function() {
+    ports[name] = null;
+    try {
+      this.close();
+    } catch(e) {} //重复关闭会导致异常
+  };
+  ports[name] = false; // pending
+  var getServer = options ? getHttpsServer : getHttp2Server;
+  getServer(options, listener, function(server, port) {
+    server.on('error', removeServer);
+    var timeout = setTimeout(removeServer, TIMEOUT);
+    var clearup = function() {
+      clearTimeout(timeout);
+    };
+    if (options) {
+      server.once('tlsClientError', clearup);
+      server.once('secureConnection', clearup);
+    } else {
+      server.once('connection', clearup);
+    }
+    ports[name] = port;
+    cbList.forEach(function(cb) {
+      cb(port);
+    });
+    cbs[name] = [];
+  });
+}
+
+exports.getHttp2Server = function (listener, callback) {
+  var name = 'httpH2';
+  var curPort = ports[name];
+  if (curPort) {
+    return callback(curPort);
+  }
+  var cbList = addCallback(name, callback);
+  if (curPort === false) {
+    return;
+  }
+  createServer(name, cbList, listener);
+};
+
 exports.getSNIServer = function(listener, callback, disableH2, requestCert) {
   var enableH2 = config.enableH2 && !disableH2;
   var name = (enableH2 ? 'h2Sni' : 'sni') + (requestCert ? 'WithCert' : '');
@@ -419,25 +487,10 @@ exports.getSNIServer = function(listener, callback, disableH2, requestCert) {
   if (curPort) {
     return callback(curPort);
   }
-  var cbList = cbs[name];
-  if (!cbList) {
-    cbList = [];
-    cbs[name] = cbList;
-  }
+  var cbList = addCallback(name, callback);
   if (curPort === false) {
-    return cbList.push(callback);
+    return;
   }
-  var setPort = function(port) {
-    curPort = port;
-    ports[name] = port;
-  };
-  var removeServer = function() {
-    setPort(null);
-    try {
-      this.close();
-    } catch(e) {} //重复关闭会导致异常
-  };
-  setPort(false); // pending
   var options = SNI_OPTIONS;
   options.allowHTTP1 = enableH2; // 是否启用http2
   if (requestCert) {
@@ -446,20 +499,7 @@ exports.getSNIServer = function(listener, callback, disableH2, requestCert) {
       rejectUnauthorized: false
     }, options);
   }
-  getHttpsServer(options, listener, function(server, port) {
-    server.on('error', removeServer);
-    var timeout = setTimeout(removeServer, TIMEOUT);
-    var clearup = function() {
-      clearTimeout(timeout);
-    };
-    server.once('tlsClientError', clearup);
-    server.once('secureConnection', clearup);
-    setPort(port);
-    cbList.forEach(function(cb) {
-      cb(port);
-    });
-    cbs[name] = [];
-  });
+  createServer(name, cbList, listener, options);
 };
 
 var files = Object.keys(customCertsFiles);

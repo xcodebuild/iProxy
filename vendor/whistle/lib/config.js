@@ -18,10 +18,9 @@ var pkgConf = require('../package.json');
 var config = extend(exports, pkgConf);
 var tunnel = require('hagent').agent;
 var socks = require('sockx');
-var ClientRequest = require('http').ClientRequest;
 const json5 = require('json5');
 
-var emptyReq, customUIHost;
+var customUIHost;
 var customHostPluginMap = {};
 var customPluginNameHost = {};
 var WHISTLE_PLUGIN_RE = /^(?:whistle\.)?([a-z\d_\-]+)$/;
@@ -36,8 +35,8 @@ var IPV4_RE = /^([\d.]+)(:\d{1,5})?$/;
 var IPV6_RE = /^\[([\w:]+)\](:\d{1,5})?$/;
 var noop = function() {};
 var DATA_KEY_RE = /^(clientip|clientid|tunneldata)([=.])([\w.-]+)$/i;
-var LOCAL_UI_HOST_LIST = ['local.whistlejs.com', 'local.wproxy.org', 'l.wproxy.org', 'l.wisl.pro', 'rootca.pro'];
-var variableProperties = ['encrypted', 'sockets', 'dataDirname', 'storage', 'baseDir', 'noGlobalPlugins', 'pluginsDataMap',
+var LOCAL_UI_HOST_LIST = ['local.whistlejs.com', 'local.wproxy.org', 'l.wproxy.org', 'rootca.pro'];
+var variableProperties = ['encrypted', 'sockets', 'dataDirname', 'storage', 'baseDir', 'noGlobalPlugins', 'pluginsDataMap', 'globalData',
 'username', 'password', 'debugMode', 'localUIHost', 'extra', 'rules', 'values', 'dnsCache', 'allowDisableShadowRules'];
 
 config.uid = uid;
@@ -46,6 +45,8 @@ config.enableH2 = version[0] > 12 || (version[0] == 12 && version[1] >= 12);
 config.ASSESTS_PATH = path.join(__dirname, '../assets');
 config.WHISTLE_REQ_FROM_HEADER = 'x-whistle-request-from';
 config.WHISTLE_POLICY_HEADER = 'x-whistle-policy';
+config.CUSTOM_CERT_HEADER = 'x-whistle-exists-custom-cert';
+config.ENABLE_CAPTURE_HEADER = 'x-whistle-enable-capture';
 config.CLIENT_IP_HEAD = 'x-forwarded-for';
 config.HTTPS_FIELD = 'x-whistle-https-request';
 config.HTTPS_PROTO_HEADER = 'x-forwarded-proto';
@@ -53,6 +54,7 @@ config.REAL_HOST_HEADER = 'x-whistle-real-host';
 config.FWD_HOST_HEADER = 'x-forwarded-host';
 config.INTERNAL_ID = Date.now() + '/' + process.pid + '/' + Math.floor(Math.random() * 100000);
 config.INTERNAL_ID_HEADER = '_x-whistle-internal-id';
+config.SNI_PLUGIN_HEADER = 'x-whistle-sni-callback-plugin-' + uid;
 config.DATA_ID = 'x-whistle-data-id-' + uid;
 config.PROXY_ID_HEADER = 'x-whistle-proxy-id-' + uid;
 config.CLIENT_PORT_HEAD = 'x-whistle-client-port';
@@ -69,6 +71,8 @@ config.TEMP_CLIENT_ID_HEADER = 'x-whistle-client-id-' + uid;
 config.TEMP_TUNNEL_DATA_HEADER = 'x-whistle-tunnel-data-' + uid;
 config.ALPN_PROTOCOL_HEADER = 'x-whistle-alpn-protocol';
 config.PLUGIN_HOOKS = {
+  SNI: 'sni-' + uid,
+  AUTH: 'auth-' + uid,
   HTTP: 'http-' + uid,
   UI: 'ui-' + uid,
   TUNNEL: 'tunnel-' + uid,
@@ -127,6 +131,7 @@ config.baseDir = getDataDir();
 config.SYSTEM_PLUGIN_PATH = path.join(getWhistlePath(), 'plugins');
 config.CUSTOM_PLUGIN_PATH = path.join(getWhistlePath(), 'custom_plugins');
 config.CUSTOM_CERTS_DIR = path.resolve(getWhistlePath(), 'custom_certs');
+
 try {
   fse.ensureDirSync(config.CUSTOM_CERTS_DIR);
 } catch (e) {}
@@ -144,27 +149,6 @@ var emptyHandle = {
   getAsyncId: noop
 };
 
-function getEmptyReq() {
-  if (!emptyReq) {
-    emptyReq = new ClientRequest();
-    emptyReq.on('error', noop);
-  }
-  return emptyReq;
-}
-
-function packHttpMessage() {
-  if (!this._httpMessage) {
-    emptyReq = getEmptyReq();
-    emptyReq.socket = this;
-    this._httpMessage = emptyReq;
-  }
-}
-function packSocket(socket) {
-  if (socket.listeners('close').indexOf(packHttpMessage) === -1) {
-    socket.once('close', packHttpMessage);
-  }
-  return socket;
-}
 function createAgent(agentConfig, https) {
   var agent = new (https ? httpsAgent : httpAgent)(agentConfig);
   if (async_id_symbol) {
@@ -173,7 +157,7 @@ function createAgent(agentConfig, https) {
       // fix: https://github.com/nodejs/node/issues/13539
       var freeSockets = this.freeSockets[this.getName(options)];
       if (freeSockets && freeSockets.length) {
-        var socket = packSocket(freeSockets[0]);
+        var socket = freeSockets[0];
         var handle = socket._handle;
         if (!handle) {
           socket._handle = emptyHandle;
@@ -196,17 +180,11 @@ function createAgent(agentConfig, https) {
         try {
           socket[async_id_symbol] = socket._handle.getAsyncId();
         } catch(e) {}
-        packSocket(socket);
         onSocket.apply(this, arguments);
       };
       addRequest.apply(this, arguments);
     };
   }
-  var createConnection = agent.createConnection;
-  agent.createConnection = function() {
-    var s = createConnection.apply(this, arguments);
-    return packSocket(s);
-  };
   return agent;
 }
 
@@ -244,13 +222,6 @@ function getHttpsAgent(options, reqOpts) {
     agent = new tunnel[agentName](options);
     httpsAgents.set(key, agent);
     agent.on('free', preventThrowOutError);
-    var createSocket = agent.createSocket;
-    agent.createSocket = function(opts, cb) {
-      createSocket.call(this, opts, function(socket) {
-        packSocket(socket);
-        cb(socket);
-      });
-    };
   }
   return agent;
 }
@@ -512,6 +483,12 @@ function createHash(str) {
   return shasum.digest('hex');
 }
 
+function readFileText(filepath) {
+  try {
+    return fs.readFileSync(filepath, { encoding: 'utf8' }).trim();
+  } catch(e) {}
+}
+
 function getHostPort(str) {
   if (!/^(?:([\w.-]+):)?([1-9]\d{0,4})$/.test(str)) {
     return;
@@ -544,8 +521,12 @@ function parseString(str) {
   if (!str) {
     return '';
   }
+  var data = readFileText(str);
+  if (data) {
+    return data;
+  }
   try {
-    var data = JSON.parse(str);
+    data = JSON.parse(str);
     if (typeof data === 'string') {
       return data;
     }
@@ -582,6 +563,7 @@ function getPluginList(list) {
 exports.extend = function(newConf) {
   config.pluginHostMap = {};
   config.uiport = config.port;
+
   if (newConf) {
     config.uiMiddleware = newConf.uiMiddleware;
     if (newConf.cmdName && CMD_RE.test(newConf.cmdName)) {
@@ -592,6 +574,13 @@ exports.extend = function(newConf) {
 
     if (newConf.webUIPath && /^[\w.-]+$/.test(newConf.webUIPath)) {
       config.WEBUI_PATH = '/.' + newConf.webUIPath + config.WEBUI_PATH.substring(1);
+    }
+    if (newConf.cluster) {
+      config.headless = true;
+      config.workerIndex = process.env.workerIndex;
+      if (typeof newConf.mode !== 'string') {
+        newConf.mode = '';
+      }
     }
     var dnsServer = newConf.dnsServer;
     var resolve6;
@@ -688,17 +677,7 @@ exports.extend = function(newConf) {
     if (isPort(newConf.realPort) && config.realPort != config.port) {
       config.realPort = newConf.realPort;
     }
-    var port = getHostPort(newConf.port);
-    if (port) {
-      config.host = port.host;
-      config.uiport = config.port = port.port;
-    }
-    var uiPort = getHostPort(newConf.uiport);
-    if (uiPort) {
-      config.customUIPort = uiPort.port != config.port;
-      config.uiport = uiPort.port;
-      config.uihost = uiPort.host;
-    }
+    
     var socksPort = getHostPort(newConf.socksPort);
     if (socksPort) {
       config.socksPort = socksPort.port;
@@ -733,14 +712,18 @@ exports.extend = function(newConf) {
     }
     config.allowMultipleChoice = newConf.allowMultipleChoice;
     if (typeof newConf.mode === 'string') {
-      var mode = newConf.mode.trim().split('|');
+      var mode = newConf.mode.trim().split(/\s*[|,&]\s*/);
       mode.forEach(function(m) {
         m = m.trim();
-        if (/^(pureProxy|debug|nohost|strict|multiEnv|multienv|encrypted|noGzip|disableUpdateTips|proxifier2?)$/.test(m)) {
+        if (/^(pureProxy|debug|captureData|headless|strict|proxyServer|encrypted|noGzip|disableUpdateTips|proxifier2?)$/.test(m)) {
           config[m] = true;
-          if (m === 'nohost' || m === 'multienv') {
-            config.multiEnv = true;
-          }
+        } else if (m === 'disableCustomCerts') {
+          config.disableCustomCerts = true;
+        } else if (m === 'nohost' || m === 'multienv' || m === 'multiEnv') {
+          config[m] = true;
+          config.multiEnv = true;
+        } else if (m === 'proxyOnly') {
+          config.pureProxy = true;
         } else if (m === 'disableForwardedHost' || m === 'disableForwardedPorto') {
           config[m] = true;
         } else if (m === 'useMultipleRules' || m === 'enableMultipleRules') {
@@ -768,7 +751,7 @@ exports.extend = function(newConf) {
           config.shadowRulesMode = true;
         } else if (m === 'shadowRulesOnly') {
           config.shadowRulesMode = true;
-          config.shadowRulesOnlyMode = true;
+          config.disableWebUI = true;
         } else if (m === 'plugins') {
           config.pluginsMode = true;
         } else if (m === 'pluginsOnly') {
@@ -825,8 +808,12 @@ exports.extend = function(newConf) {
       if (config.disableForwardedHost) {
         config.FWD_HOST_HEADER = config.REAL_HOST_HEADER;
       }
-
-      if (config.shadowRulesMode) {
+      if (config.headless) {
+        config.noGlobalPlugins = true;
+        config.pluginsOnlyMode = true;
+        config.disableWebUI = true;
+        delete config.rulesOnlyMode;
+      } else if (config.shadowRulesMode) {
         config.networkMode = true;
         delete config.rulesOnlyMode;
         delete config.pluginsOnlyMode;
@@ -890,6 +877,26 @@ exports.extend = function(newConf) {
         }
       });
     }
+  
+    var port = getHostPort(newConf.port);
+    if (port) {
+      config.host = port.host;
+      config.uiport = config.port = port.port;
+    }
+    if (config.disableWebUI) {
+      config.notAllowedDisablePlugins = true;
+    } else {
+      var uiPort = getHostPort(newConf.uiport);
+      if (uiPort) {
+        config.customUIPort = uiPort.port != config.port;
+        config.uiport = uiPort.port;
+        config.uihost = uiPort.host;
+      }
+    }
+  }
+
+  if (!config.rulesMode) {
+    config.captureData = true;
   }
 
   if (!config.authKey) {
@@ -915,12 +922,6 @@ exports.extend = function(newConf) {
   };
   
   config.localUIHost = 'local.whistlejs.com';
-
-  function readFileText(filepath) {
-    try {
-      return fs.readFileSync(filepath, { encoding: 'utf8' }).trim();
-    } catch(e) {}
-  }
 
   var isWebUIHost = function(host) {
     if (host === 'local.wproxy.org' || uiHostList.indexOf(host) !== -1 || (customUIHost && customUIHost.indexOf(host) !== -1)) {

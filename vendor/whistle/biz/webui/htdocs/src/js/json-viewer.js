@@ -5,6 +5,7 @@ var ReactDOM = require('react-dom');
 var TextView = require('./textview');
 var CopyBtn = require('./copy-btn');
 var message = require('./message');
+var win = require('./win');
 
 var JSONTree = require('./components/react-json-tree')['default'];
 var dataCenter = require('./data-center');
@@ -69,34 +70,39 @@ var JsonViewer = React.createClass({
     }
     var target = ReactDOM.findDOMNode(this.refs.nameInput);
     var name = target.value.trim();
-    if (this.state.showDownloadInput) {
-      this.download();
+    var self = this;
+    if (self.state.showDownloadInput) {
+      self.download();
       return;
     }
     if (!name) {
-      message.error('Value name cannot be empty.');
+      message.error('The key cannot be empty.');
       return;
     }
 
     if (/\s/.test(name)) {
-      message.error('Name cannot have spaces.');
+      message.error('The key cannot have spaces.');
       return;
     }
-    if (modal.exists(name) &&
-      !confirm('The name \'' + name + '\' already exists.\nDo you want to override it.')) {
-      return;
-    }
-
-    var value = (this.state.lastData.str || '').replace(/\r\n|\r/g, '\n');
-    dataCenter.values.add({name: name, value: value}, function(data, xhr) {
-      if (data && data.ec === 0) {
-        modal.add(name, value);
-        target.value = '';
-        target.blur();
-      } else {
-        util.showSystemError(xhr);
+    var handleSubmit = function(sure) {
+      if (!sure) {
+        return;
       }
-    });
+      var value = (self.state.lastData.str || '').replace(/\r\n|\r/g, '\n');
+      dataCenter.values.add({name: name, value: value}, function(data, xhr) {
+        if (data && data.ec === 0) {
+          modal.add(name, value);
+          target.value = '';
+          target.blur();
+        } else {
+          util.showSystemError(xhr);
+        }
+      });
+    };
+    if (!modal.exists(name)) {
+      return handleSubmit(true);
+    }
+    win.confirm('The key \'' + name + '\' already exists.\nDo you want to override it.', handleSubmit);
   },
   download: function() {
     var target = ReactDOM.findDOMNode(this.refs.nameInput);
@@ -158,7 +164,7 @@ var JsonViewer = React.createClass({
             <a className="w-download" onDoubleClick={this.download}
               onClick={this.showNameInput} draggable="false">Download</a>
               <a className="w-add" onClick={this.showNameInput}
-                draggable="false">+Value</a>
+                draggable="false">+Key</a>
               {viewSource ? <a className="w-edit" onClick={this.edit} draggable="false">ViewAll</a> : undefined}
             <a onClick={this.toggle} className="w-properties-btn">{ viewSource ? 'JSON' : 'Text' }</a>
             <div onMouseDown={this.preventBlur}
@@ -169,7 +175,7 @@ var JsonViewer = React.createClass({
               type="text"
               maxLength="64"
               placeholder={state.showDownloadInput ? 'Input the filename' : 'Input the key'}
-            /><button type="button" onClick={this.submit} className="btn btn-primary">OK</button></div>
+            /><button type="button" onClick={this.submit} className="btn btn-primary">{state.showDownloadInput ? 'OK' : '+Key'}</button></div>
             <form ref="downloadForm" action="cgi-bin/download" style={{display: 'none'}}
               method="post" target="downloadTargetFrame">
               <input ref="filename" name="filename" type="hidden" />

@@ -199,3 +199,19 @@ a {
   height: 320px;
   padding: 5px;
 }
+
+.w-win-dialog .modal-dialog {
+  width: 420px;
+}
+
+.w-win-dialog pre {
+  font-size: 15px;
+  padding: 12px 10px;
+  line-height: 2;
+  margin: 0;
+  word-break: break-word;
+}
+
+.w-win-dialog .modal-body {
+  margin: 0;
+}
