@@ -86,7 +86,7 @@ For new contributors you can try to fix a [🏅send-a-PR](https://github.com/xco
 
 | 钉钉群 | 微信群 |
 | ------------- | ------------- |
-|![image](https://user-images.githubusercontent.com/5436704/125047063-2b0d2300-e0d1-11eb-9451-e3b50a81123c.png)| ![a90ea80de81df965c87ae42eaa3dcb19](https://user-images.githubusercontent.com/5436704/125046773-e84b4b00-e0d0-11eb-8c46-9a76d705d1b0.png)|
+|![image](https://user-images.githubusercontent.com/5436704/125047063-2b0d2300-e0d1-11eb-9451-e3b50a81123c.png)| ![image](https://user-images.githubusercontent.com/5436704/140032152-52ecba45-32eb-4ba1-85eb-62392a0869e9.png)|
 
 ## Contributors ✨
 <p align="center">
