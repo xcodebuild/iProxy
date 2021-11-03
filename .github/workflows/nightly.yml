@@ -24,6 +24,10 @@ jobs:
             npm run install-deps
             npm run nightlyversion
 
+        - name: Upguard whistle
+          run: |
+            npm run upguard:whistle
+
         - name: build windows app
           if: matrix.os == 'windows-latest'
           run: |
