@@ -112,6 +112,7 @@ class InnerSettingForm extends React.Component {
                     }, 800);
                 }
             } catch (e) {
+                // @ts-ignore
                 message.error(e.toString());
             }
             this.setState({

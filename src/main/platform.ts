@@ -119,11 +119,11 @@ export async function setSystemProxy(port: number) {
         } else {
             return globalProxy
                 .disable()
-                .then(stdout => {
+                .then((stdout) => {
                     console.log(stdout);
                     execSync(PROXY_REFRESH_WINDOWS_HELPER_PATH);
                 })
-                .catch(error => {
+                .catch((error) => {
                     console.log(error);
                 });
         }
@@ -141,16 +141,16 @@ export async function setSystemProxy(port: number) {
              gsettings set org.gnome.system.proxy.http host "127.0.0.1" && 
              gsettings set org.gnome.system.proxy.http port ${port} &&
              gsettings set org.gnome.system.proxy.https host "127.0.0.1" && 
-             gsettings set org.gnome.system.proxy.https port ${port}`
-        );        
+             gsettings set org.gnome.system.proxy.https port ${port}`,
+        );
     } else {
         return globalProxy
             .enable('127.0.0.1', port, 'http')
-            .then(stdout => {
+            .then((stdout) => {
                 console.log(stdout);
                 execSync(PROXY_REFRESH_WINDOWS_HELPER_PATH);
             })
-            .catch(error => {
+            .catch((error) => {
                 console.log(error);
             });
     }

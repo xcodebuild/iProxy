@@ -12,7 +12,7 @@ import path from 'path';
 import { IPROXY_FILES_DIR, SYSTEM_IS_MACOS, SYSTEM_IS_LINUX } from './const';
 import { app, nativeTheme, BrowserWindow } from 'electron';
 import http from 'http';
-import * as process from "process";
+import * as process from 'process';
 
 interface SwpanModuleProp {
     moduleId: string;
@@ -33,7 +33,7 @@ async function spawnModule(props: any) {
     const nodeModulePath = path.join(IPROXY_FILES_DIR, `/node/node_modules/`);
     const modulePath = encodeURIComponent(path.join(nodeModulePath, `${moduleId}/index.js`));
 
-    let nodeEXE = "";
+    let nodeEXE = '';
     if (SYSTEM_IS_MACOS) {
         nodeEXE = path.join(IPROXY_FILES_DIR, './node/node-mac');
         const nodeExe = nodeEXE;
@@ -89,11 +89,11 @@ require(decodeURIComponent('${modulePath}'));`;
             child?.kill();
         });
 
-        child?.stderr?.on('data', data => {
+        child?.stderr?.on('data', (data) => {
             logger.error(`[pid ${child.pid}]stderr: ${data.toString()}`);
         });
 
-        child?.stdout?.on('data', data => {
+        child?.stdout?.on('data', (data) => {
             logger.info(`[pid ${child.pid}]stdout: ${data.toString()}`);
         });
 
@@ -109,8 +109,8 @@ async function getBoradcastPort() {
 }
 
 async function treeKillProcess(pid: any) {
-    return new Promise(resolve => {
-        treeKill(pid, 'SIGKILL', err => {
+    return new Promise((resolve) => {
+        treeKill(pid, 'SIGKILL', (err) => {
             if (err) {
                 logger.error(err);
             }
@@ -159,7 +159,7 @@ async function checkDelay(props: any) {
             options.port = port;
             options.host = '127.0.0.1';
         }
-        http.get(options, function(res) {
+        http.get(options, function (res) {
             if (res.statusCode === 200) {
                 resolve(Date.now() - startTime);
             } else {

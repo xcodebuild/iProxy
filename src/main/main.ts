@@ -98,7 +98,7 @@ function copyFolderRecursiveSync(source: string, target: string) {
     //copy
     if (fs.lstatSync(source).isDirectory()) {
         files = fs.readdirSync(source);
-        files.forEach(function(file) {
+        files.forEach(function (file) {
             const curSource = path.join(source, file);
             if (fs.lstatSync(curSource).isDirectory()) {
                 copyFolderRecursiveSync(curSource, targetFolder);
@@ -128,7 +128,7 @@ let splashWindow: BrowserWindow | null;
 
 async function initSplashScreen() {
     // start a splash window
-    return new Promise(resolve => {
+    return new Promise((resolve) => {
         const splashContent =
             'data:text/html;charset=UTF-8,' +
             encodeURIComponent(
@@ -262,14 +262,14 @@ function createMainWindow() {
         });
     });
 
-    window.on('close', event => {
+    window.on('close', (event) => {
         if (!forceQuit) {
             hideOrQuit();
             event?.preventDefault();
         }
     });
 
-    window.webContents.on('new-window', function(event, url) {
+    window.webContents.on('new-window', function (event, url) {
         event.preventDefault();
         new BrowserWindow({
             width: 1300,
@@ -293,7 +293,7 @@ function createMainWindow() {
     const REFRESH_KEYS = ['CommandOrControl+R', 'CommandOrControl+Shift+R', 'F5'];
 
     window.on('focus', () => {
-        REFRESH_KEYS.forEach(key => {
+        REFRESH_KEYS.forEach((key) => {
             globalShortcut.register(key, () => {
                 // pass
             });
@@ -301,7 +301,7 @@ function createMainWindow() {
     });
 
     window.on('blur', () => {
-        REFRESH_KEYS.forEach(key => {
+        REFRESH_KEYS.forEach((key) => {
             globalShortcut.unregister(key);
         });
     });
@@ -314,15 +314,15 @@ function setApplicationMenu() {
     const applicationMenu = new Menu();
 
     (defaultMenu?.items ?? [])
-        .filter(menu => {
+        .filter((menu) => {
             // remove the original help menu
             return menu.role !== 'help';
         })
-        .forEach(menu => {
+        .forEach((menu) => {
             // @ts-ignore
             if (menu.role === 'viewmenu') {
                 const subMenu = new Menu();
-                (menu.submenu?.items ?? []).forEach(item => {
+                (menu.submenu?.items ?? []).forEach((item) => {
                     // @ts-ignore
                     if (item.role !== 'reload' && item.role !== 'forcereload') {
                         subMenu.append(item);
@@ -345,13 +345,13 @@ function setApplicationMenu() {
     const helpSubMenuConfig: MenuItemConstructorOptions[] = [
         {
             label: 'Project Homepage',
-            click: function() {
+            click: function () {
                 shell.openExternal(GITHUB_PROJECT_PAGE);
             },
         },
         {
             label: 'Report Issue',
-            click: function() {
+            click: function () {
                 shell.openExternal(NEW_ISSUE_PAGE);
             },
         },
@@ -368,7 +368,7 @@ function setApplicationMenu() {
             },
         },
     ];
-    helpSubMenuConfig.forEach(option => {
+    helpSubMenuConfig.forEach((option) => {
         helpSubMenu.append(new MenuItem(option));
     });
     applicationMenu.append(
@@ -382,7 +382,7 @@ function setApplicationMenu() {
     Menu.setApplicationMenu(applicationMenu);
 }
 
-app.on('before-quit', function() {
+app.on('before-quit', function () {
     forceQuit = true;
 });
 
@@ -438,7 +438,7 @@ app.on('ready', async () => {
 
     const screenview = () => {
         visitor
-            .screenview('App', 'iProxy', version, err => {
+            .screenview('App', 'iProxy', version, (err) => {
                 console.error(err);
             })
             .send();

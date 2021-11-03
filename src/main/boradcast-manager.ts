@@ -23,9 +23,9 @@ export class BoardcastManager {
             port,
         });
 
-        this.mWebSocket.on('connection', ws => {
-            ws.on('message', message => {
-                this.mWebSocket.clients.forEach(client => {
+        this.mWebSocket.on('connection', (ws) => {
+            ws.on('message', (message) => {
+                this.mWebSocket.clients.forEach((client) => {
                     if (client.readyState === WebSocket.OPEN && client !== ws) {
                         client.send(message);
                     }

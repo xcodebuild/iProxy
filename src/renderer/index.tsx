@@ -20,7 +20,7 @@ window.monaco = monaco;
 
 // make links open in external browser, for example monaco
 // @ts-ignore
-window.open = function(url: string) {
+window.open = function (url: string) {
     if (url) {
         remote.shell.openExternal(url);
     } else {

@@ -48,7 +48,7 @@ export class CoreAPIClass {
     }
 
     async checkDarkMode(setDarkMode: (isDarkMode: boolean) => void) {
-        ipcRenderer.answerMain('updateDarkMode', async isDarkMode => {
+        ipcRenderer.answerMain('updateDarkMode', async (isDarkMode) => {
             setDarkMode(isDarkMode as boolean);
         });
         const isDarkMode = (await ipcRenderer.callMain('checkDarkMode')) as boolean;

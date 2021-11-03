@@ -31,16 +31,14 @@ export const PROXY_CONF_HELPER_FILE_PATH = path.join(IPROXY_FILES_DIR, './proxy_
 export const PROXY_CONF_HELPER_PATH = path.join(IPROXY_HOME_PATH, './proxy_conf_helper');
 export const PROXY_REFRESH_WINDOWS_HELPER_PATH = path.join(IPROXY_FILES_DIR, './win_proxy_helper');
 
-let PLATFORM_IPROXY_NODE = "";
+let PLATFORM_IPROXY_NODE = '';
 
 if (SYSTEM_IS_LINUX) {
     PLATFORM_IPROXY_NODE = 'iproxy-node-linux';
-}
-else if (SYSTEM_IS_MACOS) {
-    PLATFORM_IPROXY_NODE = "iproxy-node-macos";
-}
-else {
-    PLATFORM_IPROXY_NODE = "iproxy-node-win.exe";
+} else if (SYSTEM_IS_MACOS) {
+    PLATFORM_IPROXY_NODE = 'iproxy-node-macos';
+} else {
+    PLATFORM_IPROXY_NODE = 'iproxy-node-win.exe';
 }
 
 export const IPROXY_NODEJS_PATH = path.join(IPROXY_FILES_DIR, '/node/' + PLATFORM_IPROXY_NODE);

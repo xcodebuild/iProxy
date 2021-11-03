@@ -67,7 +67,7 @@ export async function checkUpdater() {
 
             const dlPromise = new Promise((resolve, reject) => {
                 // @ts-ignore
-                dl.on('end', async downloadInfo => {
+                dl.on('end', async (downloadInfo) => {
                     const complete = async () => {
                         logger.info('Download complete');
                         const asarPath = downloadInfo.filePath.replace(/\.asar__gzip$/, '.asar');
@@ -102,7 +102,7 @@ export async function checkUpdater() {
                     }
                 });
 
-                dl.on('error', e => {
+                dl.on('error', (e) => {
                     logger.error(e);
                     reject(e);
                 });
