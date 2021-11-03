@@ -42,11 +42,7 @@
 
 ## Download
 
-[macOS Version Download](https://gw.alipayobjects.com/os/iProxy/iProxy.dmg)
-
-[Windows Version Download](https://gw.alipayobjects.com/os/iProxy/iProxy-Setup.exe)
-
-Linux(Deepin) comming soon
+[macOS/Windows/Linux](https://nightly.link/xcodebuild/iProxy/workflows/nightly/master)
 
 ## About Linux Version
 
