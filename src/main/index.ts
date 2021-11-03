@@ -19,7 +19,14 @@ process.on('uncaughtException', (err) => {
 });
 
 logger.info('env', process.env.ELECTRON_RUN_MODULE);
-Sentry.init({ dsn: 'https://07bbb8a5119e487b874eb34f46f71b7e@o915711.ingest.sentry.io/5856256' });
+Sentry.init({
+    dsn: 'https://d97ac1656f4b440db6577e46bbea6ad6@o915711.ingest.sentry.io/6046737',
+
+    // Set tracesSampleRate to 1.0 to capture 100%
+    // of transactions for performance monitoring.
+    // We recommend adjusting this value in production
+    tracesSampleRate: 1.0,
+});
 
 Sentry.configureScope((scope) => {
     scope.setTag('app-version', APP_VERSION);
