@@ -45,6 +45,7 @@ import logoIcon from '../../vendor/files/iconTemplate@2x.png';
 import { nanoid } from 'nanoid';
 
 require('@electron/remote/main').initialize();
+require('electron-store').initRenderer();
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
