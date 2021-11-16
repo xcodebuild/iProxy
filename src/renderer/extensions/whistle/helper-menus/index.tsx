@@ -1,7 +1,7 @@
 import { BugOutlined, FileTextOutlined, GithubOutlined, HomeOutlined } from '@ant-design/icons';
 import { Menu } from 'antd';
 
-import { remote } from 'electron';
+import * as remote from '@electron/remote';
 import React from 'react';
 import logger from 'electron-log';
 import path from 'path';

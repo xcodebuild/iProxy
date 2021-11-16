@@ -4,7 +4,7 @@ import ReactDOM from 'react-dom';
 import { AppContainer } from 'react-hot-loader';
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
-import { remote } from 'electron';
+import * as remote from '@electron/remote';
 import * as monaco from '@timkendrick/monaco-editor/dist/external';
 import '@timkendrick/monaco-editor/dist/external/monaco.css';
 import 'reset-css';

@@ -44,6 +44,8 @@ import fs from 'fs-extra';
 import logoIcon from '../../vendor/files/iconTemplate@2x.png';
 import { nanoid } from 'nanoid';
 
+require('@electron/remote/main').initialize();
+
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
 // disable GPU for #219
@@ -210,7 +212,6 @@ function createMainWindow() {
             nodeIntegration: true,
             webSecurity: false,
             // electron >= 10
-            enableRemoteModule: true,
             contextIsolation: false,
         },
         // disable frameless in Windows
@@ -222,6 +223,7 @@ function createMainWindow() {
     window.hide();
 
     mainWindowState.manage(window);
+    require('@electron/remote/main').enable(window.webContents);
 
     if (isDevelopment) {
         window.webContents.openDevTools();
@@ -419,35 +421,4 @@ app.on('ready', async () => {
     mainWindow = createMainWindow();
     setApplicationMenu();
     initIPC(mainWindow);
-
-    if (!CoreAPI.store.get('userid')) {
-        CoreAPI.store.set('userid', uuidv4());
-    }
-
-    const userid = CoreAPI.store.get('userid');
-
-    const visitor = ua('G-H3TWZC29B2', userid);
-
-    // app-version
-    visitor.set('cd1', version);
-    // os
-    visitor.set('cd2', os.type());
-    visitor.set('os-version', os.release());
-    // electron-version
-    visitor.set('cd3', process.versions.electron);
-
-    const screenview = () => {
-        visitor
-            .screenview('App', 'iProxy', version, (err) => {
-                console.error(err);
-            })
-            .send();
-    };
-
-    screenview();
-
-    setInterval(() => {
-        visitor.pageview('/').send();
-        // 2 hour
-    }, 1000 * 60 * 60 * 2);
 });

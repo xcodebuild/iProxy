@@ -88,6 +88,8 @@ export const i18nResources = {
             'Network disconnected': '网络连接断开',
             'No Network': '没有网络',
             'Proxy Invaild': '代理异常',
+
+            'Select network interface': '选择网络接口',
         },
     },
 };

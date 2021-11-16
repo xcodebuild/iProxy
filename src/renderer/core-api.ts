@@ -28,7 +28,7 @@ export class CoreAPIClass {
     }
 
     get store() {
-        return this.mStore;
+        return this.mStore as Record<string, any>;
     }
 
     async checkInstall() {
@@ -44,7 +44,7 @@ export class CoreAPIClass {
     }
 
     async getIp() {
-        return (await ipcRenderer.callMain('getIp')) as string;
+        return (await ipcRenderer.callMain('getIp')) as { interface: string; address: string }[];
     }
 
     async checkDarkMode(setDarkMode: (isDarkMode: boolean) => void) {

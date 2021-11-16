@@ -14,7 +14,8 @@ import { useTranslation } from 'react-i18next';
 import { syncRuleToWhistle } from '../rule-editor/components/rule-list/remote';
 import { CoreAPI } from '../../core-api';
 
-import { remote, dialog, net } from 'electron';
+import { dialog, net } from 'electron';
+import * as remote from '@electron/remote';
 import { SYSTEM_IS_MACOS } from '../../../renderer/const';
 import { getHelperMenus } from './helper-menus';
 

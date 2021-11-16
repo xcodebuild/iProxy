@@ -2,7 +2,7 @@ import { Rule } from '.';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { remote } from 'electron';
+import * as remote from '@electron/remote';
 import { CoreAPI } from '../../../../core-api';
 import { WHITELIST_DOMAINS } from '../../../../const';
 

@@ -1,7 +1,8 @@
 import { Extension } from '../../extension';
 import React from 'react';
 import { RuleList, Rule } from './components/rule-list';
-import { remote, Tray } from 'electron';
+import { Tray } from 'electron';
+import * as remote from '@electron/remote';
 import { ICON_TEMPLATE_PATH, RULE_STORE_KEY, DOCUMENT_URL, GITHUB_PROJECT_PAGE } from '../../const';
 import { CoreAPI } from '../../core-api';
 import { useTranslation } from 'react-i18next';

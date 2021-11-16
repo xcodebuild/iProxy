@@ -7,7 +7,7 @@ import { Card, Option } from '../card';
 import { useThemeMode } from '../../../../hooks/use-theme-mode';
 import * as monaco from 'monaco-editor';
 import { useKeepAliveEffect } from 'react-keep-alive';
-import { remote } from 'electron';
+import * as remote from '@electron/remote';
 
 interface Props {
     content: string;
@@ -107,9 +107,7 @@ export const Editor = (props: Props) => {
             <div
                 onDoubleClick={() => remote.getCurrentWindow().maximize()}
                 className="iproxy-editor-actionbar drag"
-            >
-            </div>
-
+            ></div>
             <div className="iproxy-code-editor-container no-drag">
                 {!enabled ? (
                     <div className="disabled-tip">{t('This rule is disabled, double click rule name to enable')}</div>

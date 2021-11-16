@@ -13,6 +13,7 @@ import { IPROXY_FILES_DIR, SYSTEM_IS_MACOS, SYSTEM_IS_LINUX } from './const';
 import { app, nativeTheme, BrowserWindow } from 'electron';
 import http from 'http';
 import * as process from 'process';
+import os from 'os';
 
 interface SwpanModuleProp {
     moduleId: string;
@@ -121,7 +122,19 @@ async function treeKillProcess(pid: any) {
 }
 
 async function getIp() {
-    return ip.address();
+    const info = os.networkInterfaces();
+    const address = Object.keys(info)
+        .map((key) => {
+            const item = info[key]!;
+            const address = item.filter((item: any) => item.family === 'IPv4');
+            return {
+                interface: key,
+                address: address && address[0] && address[0].address,
+            };
+        })
+        .filter((item) => item.address && item.address !== '127.0.0.1');
+
+    return address;
 }
 
 async function checkDarkMode(mainWindow: BrowserWindow) {

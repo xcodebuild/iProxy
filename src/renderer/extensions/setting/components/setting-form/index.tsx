@@ -5,7 +5,8 @@ import { Select, Button, Popover, Switch, InputNumber, Alert, Tooltip, Table, Ty
 import React, { useEffect, useState } from 'react';
 import { CoreAPI } from '../../../../core-api';
 import { message } from 'antd';
-import { shell, remote } from 'electron';
+import { shell } from 'electron';
+import * as remote from '@electron/remote';
 import { debounce } from 'lodash';
 import './index.less';
 import { APP_VERSION } from '../../../../const';

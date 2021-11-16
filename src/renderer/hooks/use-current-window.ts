@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { remote } from 'electron';
+import * as remote from '@electron/remote';
 
 function useCurrentWindow() {
     const currentWindow = remote.getCurrentWindow();
