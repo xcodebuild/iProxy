@@ -124,9 +124,11 @@ export const Editor = (props: Props) => {
                     }}
                     onChange={handleChange}
                     editorDidMount={(editor, monaco) => {
+                        // @ts-ignore
                         editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KEY_S, () => {
                             onSaveRef?.current();
                         });
+                        // @ts-ignore
                         editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KEY_F, () => {
                             editor.getAction('actions.find').run();
 
