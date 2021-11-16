@@ -1,6 +1,8 @@
 # 2021-11-16
 - 多网卡支持 @xcodebuild
 - Multiple network interface support
+- electron@12 => electron@16
+- electron-store@4 => electron-store@8.0.1
 
 - Linux 支持 @shouhuanxiaoji
 - Linux Supported @shouhuanxiaoji
