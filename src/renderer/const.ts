@@ -38,4 +38,9 @@ export const WHITELIST_DOMAINS = [
     'txy.live-play.acgvideo.com',
     'ocs-oneagent-server.alibaba.com',
     '*.jetbrains.com',
+    'hubble.netease.com',
+    'app.home.netease.com',
+    'mdoor.netease.com',
+    'mam.netease.com',
+    'api.home.netease.com',
 ];
