@@ -69,7 +69,7 @@ const toggleSystemProxy = async (onlineStatus: string, port: number, coreAPI: an
     coreAPI.store.set('onlineStatus', onlineStatus);
 };
 
-export class WhistleExntension extends Extension {
+export class WhistleExtension extends Extension {
     private mDevtoolPort: null | number = null;
     private mPid: null | number = null;
 
