@@ -8,6 +8,7 @@ yarn-error.log
 whistle.log
 !license_third_party/whistle
 yarn.lock
+package-lock.json
 
 app/dist/
 app/node_modules/

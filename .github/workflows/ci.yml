@@ -25,11 +25,11 @@ jobs:
           with:
             node-version: 14
         
-        - name: Upguard whistle
+        - name: Upgrade whistle
           run: |
             git config --global user.email "you@example.com"
             git config --global user.name "Your Name"
-            npm run upguard:whistle
+            npm run upgrade:whistle
 
         - name: Install deps
           run: |
