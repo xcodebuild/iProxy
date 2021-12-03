@@ -14,7 +14,7 @@ jobs:
   build:
       strategy:
         matrix:
-          os: [windows-latest, macos-latest, ubuntu-latest]
+          os: [windows-2016, macos-10.15, ubuntu-18.04]
       runs-on: ${{ matrix.os }}
       steps:
         - name: Check out Git repository
@@ -24,56 +24,40 @@ jobs:
           uses: actions/setup-node@v1
           with:
             node-version: 14
-        
-        - name: Upguard whistle
+            
+        - name: Upgrade whistle
           run: |
             git config --global user.email "you@example.com"
             git config --global user.name "Your Name"
-            npm run upguard:whistle
+            npm run upgrade:whistle
 
         - name: Install deps
           run: |
             npm run install-deps
             npm run dateversion
 
-        - name: build windows app
-          if: matrix.os == 'windows-latest'
+        - name: build app
+          shell: bash
           run: |
-            npm run dist:win
+            if [[ "$RUNNER_OS" == "Windows" ]]; then
+              npm run dist:win
+            fi
+
+            if [[ "$RUNNER_OS" == "macOS" ]]; then
+              npm run dist:mac
+            fi
+
+            if [[ "$RUNNER_OS" == "Linux" ]]; then
+              npm run dist:linux
+            fi
           env:
             GH_TOKEN: ${{ secrets.github_token }}
 
-        - name: build mac app
-          if: matrix.os == 'macos-latest'
-          run: |
-            npm run dist:mac
-          env:
-            GH_TOKEN: ${{ secrets.github_token }}
-
-        - name: build linux app
-          if: matrix.os == 'ubuntu-latest'
-          run: |
-            npm run dist:linux
-          env:
-            GH_TOKEN: ${{ secrets.github_token }}
-
-        - name: upload windows app
-          if: matrix.os == 'windows-latest'
+        - name: upload app
           uses: actions/upload-artifact@v2
           with:
             name: iProxyTesting-${{ runner.OS }}
-            path: release/*.exe
-
-        - name: upload mac app
-          if: matrix.os == 'macos-latest'
-          uses: actions/upload-artifact@v2
-          with:
-            name: iProxyTesting-${{ runner.OS }}
-            path: release/*.dmg
-
-        - name: upload linux app
-          if: matrix.os == 'ubuntu-latest'
-          uses: actions/upload-artifact@v2
-          with:
-            name: iProxyTesting-${{ runner.OS }}
-            path: release/*.AppImage
+            path: |
+              release/*.exe
+              release/*.dmg
+              release/*.AppImage
