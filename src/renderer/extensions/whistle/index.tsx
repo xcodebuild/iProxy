@@ -1,11 +1,11 @@
 import { Extension } from '../../extension';
 import logger from 'electron-log';
 import React, { useEffect, useRef, useState } from 'react';
-import { DesktopOutlined, KeyOutlined, MenuOutlined, RetweetOutlined } from '@ant-design/icons';
+import { DesktopOutlined, StopOutlined, CheckOutlined, KeyOutlined, MenuOutlined, RetweetOutlined } from '@ant-design/icons';
 import { Icon as LegacyIcon } from '@ant-design/compatible';
-import { Dropdown, Menu, message } from 'antd';
+import { Divider, Dropdown, Menu, message } from 'antd';
 import { lazyParseData, getWhistlePort } from '../../utils';
-import { Modal, Button } from 'antd';
+import { Modal, Switch } from 'antd';
 const confirm = Modal.confirm;
 
 import { throttle, get, debounce } from 'lodash';
@@ -69,7 +69,7 @@ const toggleSystemProxy = async (onlineStatus: string, port: number, coreAPI: an
     coreAPI.store.set('onlineStatus', onlineStatus);
 };
 
-export class WhistleExntension extends Extension {
+export class WhistleExtension extends Extension {
     private mDevtoolPort: null | number = null;
     private mPid: null | number = null;
 
@@ -170,9 +170,10 @@ export class WhistleExntension extends Extension {
             await this.startWhistle();
         })();
 
-        this.coreAPI.eventEmmitter.on('iproxy-restart-proxy-with-lan', () => {
-            this.mVisiableOnLan = true;
-            this.startWhistle(true);
+        this.coreAPI.eventEmmitter.on('iproxy-restart-proxy-switch-lan', (nextEnabled = false) => {
+            this.mVisiableOnLan = nextEnabled;
+            this.startWhistle(nextEnabled);
+            this.coreAPI.store.set('proxyAvailableOnLan', nextEnabled);
         });
     }
 
@@ -224,16 +225,53 @@ export class WhistleExntension extends Extension {
             WHISTLE_ENABLE_GZIP: enableGzip ? '1' : '0',
         };
         logger.info('start whistle with opts', options);
+
+        this.coreAPI.eventEmmitter.emit('iproxy-proxy-on-lan-changed', 'loading');
         this.mPid = await this.coreAPI.spawnModule('whistle-start', true, options);
+        this.coreAPI.eventEmmitter.emit('iproxy-proxy-on-lan-changed', visiableOnLan);
     }
 
     statusbarRightComponent() {
+        const useProxyOnLan = () => {
+            const [proxyAvailableOnLan, setProxyAvailableOnLan] = useState<boolean>(this.coreAPI.store.get('proxyAvailableOnLan') || false);
+            const [loading, setLoading] = useState(false);
+
+            const { t } = useTranslation();
+
+            React.useEffect(() => {
+                const handler = async (nextStatus: boolean | 'loading') => {
+                    if (nextStatus === 'loading') {
+                        setLoading(true)
+                    } else {
+                        setLoading(false)
+                        setProxyAvailableOnLan(nextStatus);
+                        if (nextStatus) {
+                            message.info(t('Proxy on LAN enabled'));
+                        } else {
+                            message.info(t('Proxy on LAN disabled'));
+                        }
+                    }
+                    setLoading(nextStatus === 'loading');
+                };
+
+                this.coreAPI.eventEmmitter.on('iproxy-proxy-on-lan-changed', handler);
+
+                return () => {
+                    this.coreAPI.eventEmmitter.off('iproxy-proxy-on-lan-changed', handler);
+                }
+            }, [ t ]);
+
+            return {
+                loading,
+                proxyAvailableOnLan
+            };
+        }
         // @ts-ignore
         // eslint-disable-next-line react/prop-types
         const WhistleStatusbarItem = ({ setStatusBarMode }) => {
             const [onlineState, setOnlineState] = useState('init');
-
             const [port, setPort] = useState();
+            const {loading, proxyAvailableOnLan} = useProxyOnLan();
 
             useEffect(() => {
                 const modeMap = {
@@ -389,24 +427,44 @@ export class WhistleExntension extends Extension {
                     }
                 });
             }, []);
-            return <Dropdown overlay={menu}>
-                    <div className="whistle-status-bar-item">
-                        {t('Proxy')}
-                        {port ? `: [HTTP ${port}/SOCKS5 ${((port as unknown) as number) + 1}]` : null}{' '}
-                        <LegacyIcon
-                            style={{ marginRight: '10px', marginLeft: '5px' }}
-                            className={info.proxyClassName}
-                            type={info.proxyIcon}
+            return (
+                <>
+                    <div className="switch-whistle-proxy-on-lan">
+                        <span>
+                            {t('Proxy on LAN')}:&nbsp;
+                        </span>
+                        <Switch
+                            checkedChildren={<CheckOutlined />}
+                            unCheckedChildren={<StopOutlined />}
+                            loading={loading}
+                            checked={proxyAvailableOnLan}
+                            onChange={(nextChecked) => {
+                                console.log(`switch proxy ${nextChecked ? 'available' : 'unavailable'} on lan`);
+                                this.coreAPI.eventEmmitter.emit('iproxy-restart-proxy-switch-lan', nextChecked);
+                            }}
                         />
-                        {t('System Proxy')}
-                        <LegacyIcon
-                            style={{ marginLeft: '5px' }}
-                            className={info.systemProxyClassName}
-                            type={info.systemProxyIcon}
-                        />
-                        <MenuOutlined style={{ marginLeft: '10px' }} />
                     </div>
-            </Dropdown>;
+                    <Divider type="vertical" />
+                    <Dropdown overlay={menu}>
+                        <div className="whistle-status-bar-item">
+                            {t('Proxy')}
+                            {port ? `: [HTTP ${port}/SOCKS5 ${((port as unknown) as number) + 1}]` : null}{' '}
+                            <LegacyIcon
+                                style={{ marginRight: '10px', marginLeft: '5px' }}
+                                className={info.proxyClassName}
+                                type={info.proxyIcon}
+                            />
+                            {t('System Proxy')}
+                            <LegacyIcon
+                                style={{ marginLeft: '5px' }}
+                                className={info.systemProxyClassName}
+                                type={info.systemProxyIcon}
+                            />
+                            <MenuOutlined style={{ marginLeft: '10px' }} />
+                        </div>
+                    </Dropdown>
+                </>
+            );
         };
 
         return WhistleStatusbarItem;

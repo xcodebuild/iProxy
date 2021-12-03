@@ -1,4 +1,4 @@
-import { WhistleExntension } from './whistle';
+import { WhistleExtension } from './whistle';
 
 /* eslint-disable-next-line */
 import { Extension } from '../extension'
@@ -17,7 +17,7 @@ export function getAllExtensions() {
         new Weinre(),
         new PhoneProxy(),
         new Setting(),
-        new WhistleExntension(),
+        new WhistleExtension(),
     ] as unknown) as Extension[];
 
     return extensions;

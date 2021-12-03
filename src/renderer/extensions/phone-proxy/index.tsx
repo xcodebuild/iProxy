@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { clipboard } from 'electron';
 import { message, Select } from 'antd';
 import { get } from 'lodash';
+import { LoadingOutlined, StopOutlined } from '@ant-design/icons';
 
 export class PhoneProxy extends Extension {
     constructor() {
@@ -23,6 +24,7 @@ export class PhoneProxy extends Extension {
 
     panelComponent() {
         const PhoneProxy = () => {
+            const [enabled, setEnabled] = useState<boolean | 'loading'>('loading');
             const [port, setPort] = useState(null as null | number);
             const [address, setAddress] = useState(
                 null as
@@ -38,8 +40,16 @@ export class PhoneProxy extends Extension {
             const { t } = useTranslation();
 
             useEffect(() => {
-                this.coreAPI.eventEmmitter.emit('iproxy-restart-proxy-with-lan');
-                message.info(t('Visiable on LAN enabled'));
+                const handler = (nextEnabled: boolean | 'loading') => {
+                    setEnabled(nextEnabled);
+                };
+                this.coreAPI.eventEmmitter.on('iproxy-proxy-on-lan-changed', handler);
+                
+                this.coreAPI.eventEmmitter.emit('iproxy-restart-proxy-switch-lan', true);
+
+                return () => {
+                    this.coreAPI.eventEmmitter.off('iproxy-proxy-on-lan-changed', handler);
+                }
             }, []);
 
             useEffect(() => {
@@ -66,6 +76,26 @@ export class PhoneProxy extends Extension {
             function copyCertAddress() {
                 clipboard.writeText(`http://${selectedAddress}:${port}/cgi-bin/rootca`);
                 message.success(t('Cert address has been copied to the pasteboard'));
+            }
+
+            if (!enabled) {
+                return (
+                    <div className="iproxy-phoneproxy-container">
+                        <div className="iproxy-phoneproxy-status">
+                            <StopOutlined className="status-icon" style={{ color: '#f03030' }} />
+                            {t('Proxy on LAN disabled')}
+                        </div>
+                    </div>
+                )
+            } else if (enabled === 'loading') {
+                return (
+                    <div className="iproxy-phoneproxy-container">
+                        <div className="iproxy-phoneproxy-status">
+                            <LoadingOutlined className="status-icon" />
+                            {t('Switching Proxy on LAN Status...')}
+                        </div>
+                    </div>
+                )
             }
 
             return (
