@@ -26,7 +26,7 @@ function extendRule(index: number, content: string) {
         .split('\n')
         .map(item => {
             if (item.indexOf('.js') !== -1 || item.indexOf('.css') !== -1) {
-                return item + ' resCors://*';
+                return item + ' resCors://enable';
             } else {
                 return item;
             }

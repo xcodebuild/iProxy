@@ -52,7 +52,7 @@ multiple line
         value: 'add-cors',
         title: 'Add CORS Cross-origin header',
         icon: 'flag',
-        content: `\${1:${MOCK_PATH}} resCors://
+        content: `\${1:${MOCK_PATH}} resCors://enable
 `,
     },
     {
