@@ -22,6 +22,12 @@ jobs:
           with:
             node-version: 14
             
+        - name: Upgrade whistle
+          run: |
+            git config --global user.email "you@example.com"
+            git config --global user.name "Your Name"
+            npm run upgrade:whistle
+
         - name: Install deps
           run: |
             npm run install-deps
