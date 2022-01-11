@@ -33,7 +33,7 @@ var H2_RE = /http\/2\.0/i;
 var JSON_RE = /^\s*(?:[\{｛][\w\W]+[\}｝]|\[[\w\W]+\])\s*$/;
 var DEFAULT = 'Default';
 var MAX_PLUGINS_TABS = 7;
-var MAX_FILE_SIZE = 1024 * 1024 * 64;
+var MAX_FILE_SIZE = 1024 * 1024 * 128;
 var MAX_OBJECT_SIZE = 1024 * 1024 * 6;
 var MAX_LOG_SIZE = 1024 * 1024 * 2;
 var MAX_REPLAY_COUNT = 30;
@@ -481,7 +481,10 @@ var Index = React.createClass({
     if (showTreeView || showTreeView === false) {
       networkModal.setTreeView(showTreeView, true);
     }
-
+    var self = this;
+    events.on('importSessionsFromUrl', function(_, url) {
+      self.importSessionsFromUrl(url);
+    });
     return state;
   },
   getListByName: function(name, type) {
@@ -1026,7 +1029,6 @@ var Index = React.createClass({
       }
       self.replay(e, list);
     });
-
     events.on('importSessions', self.importSessions);
     events.on('filterSessions', self.showSettings);
     events.on('exportSessions', function(e, curItem) {
@@ -1201,7 +1203,10 @@ var Index = React.createClass({
           url: location.href,
           importSessions: self.importAnySessions,
           importHarSessions: self.importHarSessions,
-          clearSessions: self.clear
+          clearSessions: self.clear,
+          selectIndex: function(index) {
+            events.trigger('selectedIndex', index);
+          }
         });
       }
     } catch(e) {}
@@ -1505,6 +1510,20 @@ var Index = React.createClass({
     }
     ReactDOM.findDOMNode(self.refs.importSessions).click();
   },
+  importSessionsFromUrl: function(url, byInput) {
+    if (!url) {
+      return;
+    }
+    var self = this;
+    self.setState({ pendingSessions: true });
+    dataCenter.importRemote({ url: url },  getRemoteDataHandler(function(err, data) {
+      self.setState({ pendingSessions: false });
+      if (!err) {
+        byInput && self.refs.importRemoteSessions.hide();
+        self.importAnySessions(data);
+      }
+    }));
+  },
   importRemoteSessions: function(e) {
     if (e && e.type !== 'click' && e.keyCode !== 13) {
       return;
@@ -1512,18 +1531,7 @@ var Index = React.createClass({
     var self = this;
     var input = ReactDOM.findDOMNode(self.refs.sessionsRemoteUrl);
     var url = checkUrl(input.value);
-    if (!url) {
-      return;
-    }
-    self.setState({ pendingSessions: true });
-    dataCenter.importRemote({ url: url },  getRemoteDataHandler(function(err, data) {
-      self.setState({ pendingSessions: false });
-      if (err) {
-        return;
-      }
-      self.refs.importRemoteSessions.hide();
-      self.importAnySessions(data);
-    }));
+    self.importSessionsFromUrl(url, true);
   },
   importRules: function(e, data) {
     var self = this;
@@ -2971,13 +2979,13 @@ var Index = React.createClass({
       return;
     }
     self.loadingCerts = true;
-    dataCenter.getCustomCertsInfo(function(data, xhr) {
+    dataCenter.certs.all(function(data, xhr) {
       self.loadingCerts = false;
       if (!data) {
         util.showSystemError(xhr);
         return;
       }
-      self.refs.certsInfoDialog.show(data);
+      self.refs.certsInfoDialog.show(data.certs, data.dir);
     });
   },
   onContextMenu: function(e) {

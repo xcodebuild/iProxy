@@ -41,6 +41,8 @@ var onlyViewOwnData = storage.get('onlyViewOwnData') == 1;
 var pluginsMap = {};
 var disabledPlugins = {};
 var disabledAllPlugins;
+var reqTabList = [];
+var resTabList = [];
 var DEFAULT_CONF = {
   timeout: TIMEOUT,
   xhrFields: {
@@ -341,9 +343,17 @@ function toLowerCase(str) {
   return String(str == null ? '' : str).trim().toLowerCase();
 }
 
-exports.getCustomCertsInfo = createCgiObj({
-  getCustomCertsInfo: 'cgi-bin/get-custom-certs-files'
-}, GET_CONF).getCustomCertsInfo;
+exports.certs = createCgiObj({
+  remove: 'cgi-bin/certs/remove',
+  upload: {
+    url: 'cgi-bin/certs/upload',
+    contentType : 'application/json'
+  },
+  all: {
+    url: 'cgi-bin/certs/all',
+    type: 'get'
+  }
+}, POST_CONF);
 
 exports.values = createCgiObj({
   recycleList: {
@@ -450,6 +460,21 @@ exports.socket = $.extend(createCgiObj({
   }
 }, POST_CONF));
 
+function updateCertStatus(data) {
+  if (exports.hasInvalidCerts != data.hasInvalidCerts) {
+    exports.hasInvalidCerts = data.hasInvalidCerts;
+    events.trigger('updateUI');
+  }
+}
+
+exports.getReqTabs = function() {
+  return reqTabList;
+};
+
+exports.getResTabs = function() {
+  return resTabList;
+};
+
 exports.getInitialData = function (callback) {
   if (!initialDataPromise) {
     initialDataPromise = $.Deferred();
@@ -460,8 +485,8 @@ exports.getInitialData = function (callback) {
           return setTimeout(load, 1000);
         }
         port = data.server && data.server.port;
+        updateCertStatus(data);
         exports.supportH2 = data.supportH2;
-        exports.hasInvalidCerts = data.hasInvalidCerts;
         exports.custom1 = data.custom1;
         exports.custom2 = data.custom2;
         uploadFiles = data.uploadFiles;
@@ -525,6 +550,38 @@ function emitValuesChanged(data) {
     events.trigger('valuesChanged');
   }
 }
+
+function checkTabList(list1, list2, len) {
+  for (var i = 0; i < len; i++) {
+    var tab1 = list1[i];
+    var tab2 = list2[i];
+    if (tab1.name !== tab2.name || tab1.action !== tab2.action) {
+      return true;
+    }
+  }
+}
+
+function emitCustomTabsChange(curList, oldList, name) {
+  var curLen = curList.length;
+  var oldLen = oldList.length;
+  if (!curLen) {
+    oldLen && events.trigger(name);
+    return;
+  }
+  if (curLen === 1) {
+    if (!oldLen || oldLen > 1 || curList[0].name !== oldList[0].name || curList[0].action !== oldList[0].action) {
+      events.trigger(name);
+    }
+    return;
+  }
+  if (!oldLen || oldLen === 1) {
+    return events.trigger(name);
+  }
+  if (curLen !== oldLen || checkTabList(curList, oldList, curLen)) {
+    events.trigger(name);
+  }
+}
+
 var hiddenTime = Date.now();
 function startLoadData() {
   if (startedLoad) {
@@ -609,8 +666,8 @@ function startLoadData() {
         return;
       }
       port = data.server && data.server.port;
+      updateCertStatus(data);
       exports.supportH2 = data.supportH2;
-      exports.hasInvalidCerts = data.hasInvalidCerts;
       exports.custom1 = data.custom1;
       exports.custom2 = data.custom2;
       if (options.dumpCount > 0) {
@@ -627,6 +684,38 @@ function startLoadData() {
       var len = data.log.length;
       var svrLen = data.svrLog.length;
       pluginsMap = data.plugins || {};
+      var _reqTabList = reqTabList;
+      var _resTabList = resTabList;
+      reqTabList = [];
+      resTabList = [];
+      if (!disabledAllPlugins) {
+        Object.keys(pluginsMap).forEach(function(name) {
+          var pluginName = name.slice(0, -1);
+          if (!disabledPlugins[pluginName]) {
+            var plugin = pluginsMap[name];
+            var reqTab = plugin.reqTab;
+            var resTab = plugin.resTab;
+            if (reqTab) {
+              reqTab.mtime = plugin.mtime;
+              reqTab.priority = plugin.priority;
+              reqTab._key = name;
+              reqTab.plugin = pluginName;
+              reqTabList.push(reqTab);
+            }
+            if (resTab) {
+              resTab.mtime = plugin.mtime;
+              resTab.priority = plugin.priority;
+              resTab._key = name;
+              resTab.plugin = pluginName;
+              resTabList.push(resTab);
+            }
+          }
+        });
+      }
+      reqTabList.sort(util.comparePlugin);
+      resTabList.sort(util.comparePlugin);
+      emitCustomTabsChange(reqTabList, _reqTabList, 'reqTabsChange');
+      emitCustomTabsChange(resTabList, _resTabList, 'resTabsChange');
       disabledPlugins = data.disabledPlugins || {};
       disabledAllPlugins = data.disabledAllPlugins;
       if (len || svrLen) {
@@ -983,6 +1072,8 @@ function overflowCount() {
 
 exports.overflowCount = overflowCount;
 
+exports.networkModal = networkModal;
+
 function getStartTime() {
   if (!inited) {
     return clearNetwork ? -2 : '';
@@ -1028,6 +1119,10 @@ function updateServerInfo(data) {
   });
 
 }
+
+exports.isDiableCustomCerts = function() {
+  return curServerInfo && curServerInfo.dcc;
+};
 
 exports.isMutilEnv = function() {
   return curServerInfo && curServerInfo.multiEnv;
@@ -1120,22 +1215,19 @@ function getMenus(menuName) {
     var plugin = pluginsMap[name];
     var menus = plugin[menuName];
     if (menus) {
-      name = name.slice(0, -1);
-      if (!disabledPlugins[name]) {
+      var simpleName = name.slice(0, -1);
+      if (!disabledPlugins[simpleName]) {
         menus.forEach(function(menu) {
-          menu.title = name + ' extension menu';
+          menu.title = simpleName + ' extension menu';
           menu.mtime = plugin.mtime;
+          menu.priority = plugin.priority;
+          menu._key = name;
           list.push(menu);
         });
       }
     }
   });
-  return list.length > 1 ? list.sort(function(prev, next) {
-    if (prev.mtime === next.mtime) {
-      return 0;
-    }
-    return prev.mtime > next.mtime ? 1 : -1;
-  }) : list;
+  return list.length > 1 ? list.sort(util.comparePlugin) : list;
 }
 
 exports.getNetworkMenus = function() {

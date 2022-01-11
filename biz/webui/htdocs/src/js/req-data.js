@@ -456,6 +456,11 @@ var ReqData = React.createClass({
     events.on('changeRecordState', function(_, type) {
       self.setState({ record: type }, self.updateList);
     });
+    events.on('selectedIndex', function(_, index) {
+      var list = self.props.modal.getList();
+      var item = list && (list[index] || list[list.length - 1]);
+      item && self.triggerActiveItem(item);
+    });
     events.on('replayTreeView', function(_, dataId, count) {
       var item = self.props.modal.getTreeNode(dataId);
       var parent = item && item.parent;
@@ -541,6 +546,26 @@ var ReqData = React.createClass({
       settings.setMinWidth(self.minWidth);
       updateTimer = updateTimer || setTimeout(updateUI, 50);
     });
+    var curRemoteUrl;
+    var importRemoteUrl = function() {
+      var hash = location.hash.substring(1);
+      var index = hash.indexOf('?');
+      if (index === -1) {
+        return;
+      }
+      var sessionsUrl = util.parseQueryString(hash.substring(index + 1), null, null, decodeURIComponent).sessionsUrl;
+      if (!/^https?:\/\/[^/]/i.test(sessionsUrl) || sessionsUrl === curRemoteUrl) {
+        return;
+      }
+      curRemoteUrl = sessionsUrl.replace(/#.*$/, '');
+      var url = curRemoteUrl;
+      if (curRemoteUrl.indexOf('&from_5b6af7b9884e1165') === -1) {
+        url += (url.indexOf('?') === -1 ? '?' : '') + '&from_5b6af7b9884e1165';
+      }
+      events.trigger('importSessionsFromUrl', url);
+    };
+    importRemoteUrl();
+    $(window).on('hashchange', importRemoteUrl);
   },
   onDragStart: function(e) {
     var target = $(e.target).closest('.w-req-data-item');
@@ -583,6 +608,7 @@ var ReqData = React.createClass({
     item.active = item.selected;
     hm && self.scrollToRow(item);
     events.trigger('networkStateChange');
+    events.trigger('selectedSessionChange', item);
   },
   setSelected: function(item, unselect) {
     if (item.selected) {

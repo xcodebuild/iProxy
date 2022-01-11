@@ -1,3 +1,43 @@
+# v2.8.10
+1. fix: 插件的 sniCallback 返回 `false` 请求没有重新走 TUNNEL 代理问题
+2. refactor: 如果插件接收到的请求是 https，则 `req.url` 将为完整的路径
+
+# v2.8.9
+1. feat: 支持自定义 `inspectors tab`，详见：https://github.com/whistle-plugins/examples/tree/master/whistle.view-md5
+2. feat: 支持通过 `disable://abort` 禁用 `enable://abort`
+3. feat: Whistle 默认显示的抓包数据不超过 1.5m，可以通过 `enable://bigData` 扩大到 `2.5m`
+
+# v2.8.8
+1. feat: 支持通过 `enable://useLocalHost` 和 `enable://useSafePort` 修改 log 和 weinre 请求 URL 的域名或端口
+2. style: 界面提供 `api.selectIndex` 选中指定下标的抓包数据
+3. feat: 支持插件获取 `originalReq.remoteAddress` 与 `originalReq.remotePort`
+
+# v2.8.7
+1. feat: `--httpsPort` 启动的 HTTPS Server 支持从插件获取证书
+2. feat: 支持通过 `excludeFilter://from=httpServer`、`includeFilter://from=httpsServer`、`excludeFilter://from=httpServer`、`includeFilter://from=httpsServer` 过滤请求
+
+# v2.8.6
+1. refactor: 禁止通过页面上传根证书 `root.key & root.crt`
+2. refactor: Whistle 自动生成的证书过期时自动续期（有效期一年）
+
+# v2.8.5
+1. feat: 支持通过 `ignore://-*` 过滤 `ignore://*`
+2. feat: 支持 `proxy` 和 `pac` 配置 `lineProps://proxyHostOnly`，当用户配置了 `host` 代理才会生效
+3. feat: 非 SNI 请求也支持通过插件自定义证书，且支持直接上传和删除用户自定义证书
+
+# v2.8.4
+1. fix: 可能无法导入 saz 文件问题
+
+# v2.8.3
+1. fix: https://github.com/avwo/whistle/pull/657
+2. feat: 插件 `server` 钩子支持通过 `req.setReqRules & req.setResRules` 设置动态规则
+3. feat: 支持通过 `enable://forceReqWrite` 和 `enable://forceResWrite` 强制 `reqWrite`、`reqWriteRaw` 和 `resWrite`、`resWriteRaw`
+4. feat: `reqWrite:///path/to/` 和 `reqWrite:///path/to` 加以区别，前者会自动把根路径补成 `index.html`
+5. feat: 插件的 auth hook 默认情况下如果开启了捕获 https，则对这部分请求只会对解析后的 https 请求生效，如果需要对隧道代理生效可以设置 `enable://authCapture`
+6. feat: 默认不启用 `x-forwarded-host` 和 `x-forwarded-proto` 直接放过，可以通过以下方式启用：
+	- 启动参数 `-M x-forwarded-host|x-forwarded-proto`
+	- 请求进入 Whistle 之前设置请求头 `x-whistle-forwarded-props: host,proto,for,clientIp,ip`
+
 # v2.8.2
 1. feat: `resMerge://json1 resMerge://json2` 默认采用 `extend({}, json1, json2)`，新版支持通过 `resMerge://json1 resMerge://json2 resMerge://true` 开启  `extend(true, {}, json1, json2)`
 2. refactor: 插件规则里面的 req 和 res rules 分开执行
