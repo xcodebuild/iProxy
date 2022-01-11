@@ -159,6 +159,8 @@ module.exports = function(req, res, next) {
   var socket = req.socket || {};
   var clientInfo = util.parseClientInfo(req);
   var clientIp = clientInfo[0] || util.getForwardedFor(headers);
+  req._remoteAddr = clientInfo[2] || util.getRemoteAddr(req);
+  req._remotePort = clientInfo[3] || util.getRemotePort(req);
   if (clientIp && util.isLocalAddress(clientIp)) {
     delete headers[config.CLIENT_IP_HEAD];
     clientIp = null;
@@ -178,7 +180,8 @@ module.exports = function(req, res, next) {
     socket[config.CLIENT_PORT_HEAD] = clientPort || socket.remotePort;
   }
   req.clientPort = clientPort = clientPort || socket[config.CLIENT_PORT_HEAD];
-  var isHttps = req.socket.isHttps || headers[config.HTTPS_FIELD] || headers[config.HTTPS_PROTO_HEADER] === 'https';
+  util.handleForwardedProps(req);
+  var isHttps = req.socket.isHttps || req.isHttps || headers[config.HTTPS_FIELD];
   if (isHttps) {
     req.isHttps = true;
     delete headers[config.HTTPS_FIELD];

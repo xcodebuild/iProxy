@@ -17,6 +17,7 @@ var socketMgr = require('../socket-mgr');
 var hparser = require('hparser');
 var properties = require('../rules/util').properties;
 var ca = require('./ca');
+var loadCert = require('./load-cert');
 var h2Consts = config.enableH2 ? require('http2').constants : {};
 
 var STATUS_CODES = http.STATUS_CODES || {};
@@ -28,23 +29,20 @@ var getDomain = ca.getDomain;
 var serverAgent = ca.serverAgent;
 var getSNIServer = ca.getSNIServer;
 var getHttp2Server = ca.getHttp2Server;
-var remoteCerts = ca.remoteCerts;
 var LOCALHOST = '127.0.0.1';
 var tunnelTmplData = new LRU({max: 3000, maxAge: 30000});
-var SNI_CALLBACK_RE = /^sniCallback:\/\/(?:whistle\.|plugin\.)?([a-z\d_\-]+)(?:\(([\s\S]*)\))?$/;
-var TIMEOUT = 5000;
+var TIMEOUT = 6000;
 var CONN_TIMEOUT = 60000;
-var certCallbacks = {};
 var X_RE = /^x/;
 var proxy, server;
 
 function handleWebsocket(socket, clientIp, clientPort) {
   var wss = socket.isHttps;
-  clientIp = util.removeIPV6Prefix(clientIp || socket.remoteAddress);
+  clientIp = util.removeIPV6Prefix(clientIp || socket._remoteAddr || socket.remoteAddress);
   socket.clientIp = clientIp;
   socket.method = 'GET';
   socket.reqId = util.getReqId();
-  socket.clientPort = clientPort || socket.remotePort;
+  socket.clientPort = clientPort || socket._remotePort || socket.remotePort;
   rules.initHeaderRules(socket);
   pluginMgr.resolvePipePlugin(socket, function() {
     socket.rules = rules.initRules(socket);
@@ -164,11 +162,14 @@ function resolveWebsocket(socket, wss) {
       socket.pluginRules = rulesMgr;
       socket.curUrl = fullUrl;
       util.mergeRules(socket, rulesMgr.resolveReqRules(socket));
+      util.filterWeakRule(socket);
       if (util.isIgnored(filter, 'rule')) {
         plugin = null;
       } else {
         plugin = pluginMgr.getPluginByRuleUrl(util.rule.getUrl(_rules.rule));
       }
+    } else {
+      util.filterWeakRule(socket);
     }
 
     var ruleUrlValue = plugin ? null : util.rule.getUrl(_rules.rule);
@@ -198,14 +199,14 @@ function resolveWebsocket(socket, wss) {
       }
     }
     setupSocket(function() {
-      if (socket.enable.abort || filter.abort) {
+      if (!socket.disable.abort && (socket.enable.abort || filter.abort)) {
         return destroy();
       }
       if (handleResponse()) {
         return;
       }
         
-      pluginMgr.loadPlugin(plugin, function(err, ports) {
+      pluginMgr.loadPlugin(socket.isPluginReq ? null : plugin, function(err, ports) {
         if (plugin) {
           data.dnsTime = Date.now();
         }
@@ -536,7 +537,7 @@ function resolveWebsocket(socket, wss) {
         headers[config.CLIENT_IP_HEAD] = forwardedFor;
       } else if (net.isIP(socket._customXFF)) {
         headers[config.CLIENT_IP_HEAD] = socket._customXFF;
-      } else if ((!isInternalProxy && !config.keepXFF && !plugin) || util.isLocalAddress(clientIp)) {
+      } else if ((!isInternalProxy && !plugin && !socket.enableXFF) || util.isLocalAddress(clientIp)) {
         delete headers[config.CLIENT_IP_HEAD];
       } else {
         headers[config.CLIENT_IP_HEAD] = clientIp;
@@ -747,8 +748,8 @@ function addReqInfo(req) {
   if (remoteData) {
     req.isHttpH2 = remoteData.isHttpH2;
     socket._remoteDataInfo = remoteData;
-    headers[config.CLIENT_IP_HEAD] = remoteData.clientIp || LOCALHOST;
-    headers[config.CLIENT_PORT_HEAD] = remoteData.clientPort;
+    headers[config.CLIENT_INFO_HEAD] = (remoteData.clientIp || LOCALHOST) + ',' + remoteData.clientPort +
+      ',' + remoteData.remoteAddr + ',' + remoteData.remotePort;
     var tunnelFirst = remoteData.tunnelFirst;
     if (remoteData.clientId) {
       headers[config.CLIENT_ID_HEADER] = remoteData.clientId;
@@ -908,14 +909,15 @@ var h2Handlers =  config.enableH2 ? {
   upgrade: handlers.upgrade
 } : handlers;
 
-var CONNECT_RE = /^CONNECT\s+(\S+)\s+HTTP\/1.\d$/mi;
-var HTTP_RE = /^\w+\s+\S+\s+HTTP\/1.\d$/mi;
+var HTTP_RE = /^(\w+)\s+(\S+)\s+HTTP\/1.\d$/mi;
 var HTTP2_RE = /^PRI\s\*\s+HTTP\/2.0$/mi;
+var CONNECT_RE = /^CONNECT$/i;
 
 function addClientInfo(socket, chunk, statusLine, clientIp, clientPort) {
   var len = Buffer.byteLength(statusLine);
   chunk = chunk.slice(len);
-  statusLine += '\r\n' + config.CLIENT_INFO_HEAD + ': ' + clientIp + ',' + clientPort;
+  statusLine += '\r\n' + config.CLIENT_INFO_HEAD + ': ' + clientIp + ',' + clientPort +
+  ',' + socket._remoteAddr + ',' + socket._remotePort;
   var clientId = socket.headers[config.CLIENT_ID_HEADER];
   if (clientId) {
     statusLine += '\r\n' + config.TEMP_CLIENT_ID_HEADER + ': ' + clientId;
@@ -929,7 +931,7 @@ function addClientInfo(socket, chunk, statusLine, clientIp, clientPort) {
 
 module.exports = function(socket, next, isWebPort) {
   var reqSocket, reqDestroyed, resDestroyed;
-  var headersStr, statusLine;
+  var headersStr;
   var enable = socket.enable || '';
   var disable = socket.disable || '';
   var destroy = function (err) {
@@ -953,8 +955,9 @@ module.exports = function(socket, next, isWebPort) {
   var clientPort = socket.clientPort;
   util.readOneChunk(socket, function(chunk) {
     headersStr = chunk && chunk.toString();
-    if (chunk && CONNECT_RE.test(headersStr)) {
-      statusLine = RegExp['$&'];
+    var isHttp = chunk && HTTP_RE.test(headersStr);
+    var statusLine = isHttp && RegExp['$&'];
+    if (isHttp && CONNECT_RE.test(RegExp.$1)) {
       chunk = addClientInfo(socket, chunk, statusLine, clientIp, clientPort);
       util.connect({
         port: config.port,
@@ -974,8 +977,7 @@ module.exports = function(socket, next, isWebPort) {
     if (!chunk) {//没有数据
       return isWebPort ? socket.destroy() : next(chunk);
     }
-    if (HTTP_RE.test(headersStr)) {
-      statusLine = RegExp['$&'];
+    if (isHttp) {
       socket.resume();
       server.emit('connection', socket);
       socket.emit('data', addClientInfo(socket, chunk, statusLine, clientIp, clientPort));
@@ -985,26 +987,29 @@ module.exports = function(socket, next, isWebPort) {
         return next(chunk);
       }
       var receiveData, authTimer;
-      var useSNI, key;
+      var useSNI, domain, serverKey;
       var checkTimeout = function() {
         authTimer = setTimeout(function() {
           if (reqSocket) {
             receiveData && reqSocket.removeListener('data', receiveData);
             reqSocket.destroy();
           }
-          if (useSNI) {
-            useSNI = false;
-            try {
-              useNoSNIServer();
-            } catch (e) {
-              next(chunk);
-            }
-          } else {
-            next(chunk);
-          }
+          next(chunk);
         }, TIMEOUT);
       };
       var handleConnect = function(port) {
+        var promise = !isHttpH2 && !useSNI && serverAgent.existsServer(serverKey);
+        var httpsServer = promise && promise.cert && promise.server;
+        if (httpsServer && httpsServer.setSecureContext) {
+          var cert = serverAgent.createCertificate(domain);
+          if (cert.key !== promise.cert.key || cert.cert !== promise.cert.cert) {
+            try {
+              cert._ctx = cert._ctx || ca.createSecureContext(cert);
+              httpsServer.setSecureContext(cert._ctx);
+              promise.cert = cert;
+            } catch (e) {}
+          }
+        }
         util.connect({
           port: port,
           host: LOCALHOST,
@@ -1032,8 +1037,10 @@ module.exports = function(socket, next, isWebPort) {
           tunnelTmplData.set(reqSocket.localPort + ':' + reqSocket.remotePort, {
             clientIp: clientIp,
             clientPort: clientPort,
+            remoteAddr: socket._remoteAddr,
+            remotePort: socket._remotePort,
             clientId: headers[config.CLIENT_ID_HEADER],
-            proxyAuth: headers['proxy-authorization'],
+            proxyAuth: disable.tunnelAuthHeader ? undefined : headers['proxy-authorization'],
             tunnelData: tunnelData,
             headers: tunnelHeaders,
             tunnelFirst: enable.tunnelHeadersFirst && !disable.tunnelHeadersFirst,
@@ -1054,7 +1061,8 @@ module.exports = function(socket, next, isWebPort) {
       };
       var useNoSNIServer = function() {
         checkTimeout();
-        serverAgent.createServer(key, handlers, handleConnect);
+        serverKey = requestCert ? ':' + domain : domain;
+        serverAgent.createServer(serverKey, handlers, handleConnect);
       };
 
       var handleRequest = function() {
@@ -1078,82 +1086,29 @@ module.exports = function(socket, next, isWebPort) {
         return handleRequest();
       }
       useSNI = checkSNI(chunk);
-      var domain = useSNI || socket.tunnelHostname;
-      if (!domain || (useSNI ? disable.captureSNI : disable.captureNoSNI) ||
-        (socket.useProxifier && !ca.existsCustomCert(domain))) {
+      var servername = useSNI || socket.tunnelHostname;
+      if (!servername || (useSNI ? disable.captureSNI : disable.captureNoSNI) ||
+        (socket.useProxifier && !ca.existsCustomCert(servername))) {
         return next(chunk);
       }
-      domain = getDomain(domain);
       var requestCert = (enable.clientCert || enable.requestCert) && !disable.clientCert && !disable.requestCert;
-      key = requestCert ? ':' + domain : domain;
-      var plugin, pluginName;
-      var curCert = useSNI && remoteCerts.get(useSNI);
-      if (useSNI && !socket.isLocalUIUrl) {
-        socket.curUrl = socket.fullUrl = 'https://' + useSNI;
-        plugin = rules.resolveSNICallback(socket);
-        if (plugin) {
-          if (socket.rules) {
-            socket.rules.sniCallback = plugin;
-          }
-          if (SNI_CALLBACK_RE.test(plugin.matcher)) {
-            socket.sniRuleValue = RegExp.$2;
-            pluginName = RegExp.$1;
-            plugin = pluginMgr.getPlugin(pluginName + ':');
-          } else {
-            plugin = null;
-          }
+      domain = getDomain(servername);
+      socket.curUrl = socket.fullUrl = 'https://' + servername;
+      socket.useSNI = useSNI;
+      socket.serverName = socket.servername = servername;
+      socket.commonName = domain;
+      loadCert(socket, function(cert) {
+        if (socket._hasError) {
+          return destroy();
         }
-      }
-      if (plugin) {
-        socket.serverName = socket.servername = useSNI;
-        socket.commonName = domain;
-        if (curCert && curCert.name) {
-          socket.hasCertCache = curCert.name + (curCert.mtime ? '+' + curCert.mtime : '');
+        if (cert === false) {
+          return next(chunk);
         }
-        var cbKey = useSNI + '/' + pluginName;
-        var cbList = certCallbacks[cbKey];
-        var handleCert = function(cert) {
-          if (socket._hasError) {
-            return destroy();
-          }
-          if (cert === false) {
-            return next(chunk);
-          }
-          if (cert && util.isString(cert.key) && util.isString(cert.cert)) {
-            socket.sniPlugin = cert.name;
-            if (!curCert || curCert.key !== cert.key || curCert.cert !== cert.cert) {
-              remoteCerts.set(useSNI, cert);
-            }
-          } else {
-            if (curCert) {
-              if (cert) {
-                socket.sniPlugin = curCert.name;
-              } else {
-                remoteCerts.del(useSNI);
-                curCert = null;
-              }
-            }
-          }
-          handleRequest();
-        };
-        if (cbList) {
-          return cbList.push(handleCert);
-        }
-        certCallbacks[cbKey] = [handleCert];
-        pluginMgr.loadCert(socket, plugin, function(cert) {
-          cbList = certCallbacks[cbKey];
-          delete certCallbacks[cbKey];
-          cbList && cbList.forEach(function(handleCb) {
-            handleCb(cert);
-          });
-        });
-      } else {
-        curCert && remoteCerts.del(useSNI);
-        if (serverAgent.existsServer(key)) {
-          useSNI = false;
+        if (cert) {
+          domain = servername;
         }
         handleRequest();
-      }
+      });
     }
   }, isWebPort ? 0 : TIMEOUT);
 };

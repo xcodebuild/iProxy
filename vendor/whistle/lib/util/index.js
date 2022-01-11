@@ -33,8 +33,8 @@ var parseUrl = require('./parse-url');
 var h2Consts = config.enableH2 ? require('http2').constants : {};
 
 var toBuffer = fileMgr.toBuffer;
+var pendingFiles = {};
 var localIpCache = new LRU({ max: 120 });
-var fileWriterCache = {};
 var CRLF_RE = /\r\n|\r|\n/g;
 var SEARCH_RE = /[?#].*$/;
 var UTF8_OPTIONS = {encoding: 'utf8'};
@@ -59,6 +59,7 @@ var DEFAULT_REGISTRY = 'https://registry.npmjs.org';
 var HTTP_RE = /^(https?:\/\/[^/?]+)/;
 var SEP_RE = /[|&]/;
 var ctxTimer;
+var END_RE = /[/\\]$/;
 var resetContext = function() {
   ctxTimer = null;
   CONTEXT = vm.createContext();
@@ -85,11 +86,13 @@ var INTERNAL_ID = process.pid + '-' + Math.random();
 
 workerIndex = workerIndex >= 0 ? padReqId(config.workerIndex) : '';
 
+exports.workerIndex = workerIndex;
 exports.proc = proc;
 exports.INTERNAL_ID = INTERNAL_ID;
 // 避免属性被 stringify ，减少冗余数据传给前端
 exports.PLUGIN_VALUES = typeof Symbol === 'undefined' ? '_values' : Symbol('_values'); // eslint-disable-line
 exports.PLUGIN_MENU_CONFIG = typeof Symbol === 'undefined' ? '_menuConfig' : Symbol('_menuConfig'); // eslint-disable-line
+exports.PLUGIN_INSPECTOR_CONFIG = typeof Symbol === 'undefined' ? '_inspectorConfig' : Symbol('_inspectorConfig'); // eslint-disable-line
 exports.drain = require('./drain');
 exports.isWin = process.platform === 'win32';
 exports.isUtf8 = isUtf8;
@@ -319,30 +322,51 @@ function execScriptSync(script, context) {
 
 exports.execScriptSync = execScriptSync;
 
-function getFileWriter(file, callback) {
-  if (!file || fileWriterCache[file]) {
-    return callback();
+function stat(file, callback, force) {
+  if (force) {
+    return callback(true);
   }
-
-  var execCallback = function(writer) {
-    delete fileWriterCache[file];
-    callback(writer);
-  };
-
-  fs.stat(file, function(err, stat) {
-    if (!err) {
-      return execCallback();
+  fs.stat(file, function(err) {
+    if (!err || err.code === 'ENOTDIR') {
+      return callback();
     }
-    fse.ensureFile(file, function(err) {
-      execCallback(err ? null : fs.createWriteStream(file).on('error', logger.error));
-      logger.error(err);
-    });
+    if (err.code === 'ENOENT') {
+      return callback(true);
+    }
+    fs.stat(file, callback);
   });
 }
 
-exports.getFileWriter = getFileWriter;
+function getFileWriter(file, callback, force) {
+  if (!file) {
+    return callback();
+  }
+  if (END_RE.test(file)) {
+    file = path.join(file, 'index.html');
+  }
+  if (!force && pendingFiles[file]) {
+    return callback();
+  }
+  var execCb = function(writer) {
+    delete pendingFiles[file];
+    callback(writer);
+  };
+  pendingFiles[file] = 1;
+  stat(file, function(notExists) {
+    if (!notExists) {
+      return execCb();
+    }
+    fse.ensureFile(file, function(err) {
+      if (err) {
+        logger.error(err);
+        return execCb();
+      }
+      execCb(fs.createWriteStream(file).on('error', logger.error));
+    });
+  }, force);
+}
 
-function getFileWriters(files, callback) {
+function getFileWriters(files, callback, force) {
   if (!Array.isArray(files)) {
     files = [files];
   }
@@ -351,7 +375,7 @@ function getFileWriters(files, callback) {
     var defer = Q.defer();
     getFileWriter(file, function(writer) {
       defer.resolve(writer);
-    });
+    }, force);
     return defer.promise;
   })).spread(callback);
 }
@@ -463,6 +487,28 @@ function isEnable(req, name) {
 
 exports.isEnable = isEnable;
 
+exports.getInternalHost = function(req, host) {
+  if (isEnable(req, 'useLocalHost')) {
+    return 'local.wproxy.org';
+  }
+  if (host && isEnable(req, 'useSafePort')) {
+    var index = host.indexOf(':');
+    if (index !== -1) {
+      host = host.substring(0, index);
+    }
+    host += ':8899';
+  }
+  return host;
+};
+
+function isAuthCapture(req) {
+  var e = req.enable || '';
+  var d = req.disable || '';
+  return (e.authCapture || e.authIntercept) && !d.authCapture && !d.authIntercept;
+}
+
+exports.isAuthCapture = isAuthCapture;
+
 exports.toRegExp = function toRegExp(regExp, ignoreCase) {
   regExp = REG_EXP_RE.test(regExp);
   try {
@@ -488,10 +534,10 @@ exports.isString = isString;
 
 function getFullUrl(req) {
   var headers = req.headers;
-  var host = headers[config.REAL_HOST_HEADER] || headers[config.FWD_HOST_HEADER];
+  var host = headers[config.REAL_HOST_HEADER];
   if (hasProtocol(req.url)) {
     var options = parseUrl(req.url);
-    if (options.protocol === 'https:') {
+    if (options.protocol === 'https:' || (req.isWs && options.protocol === 'wss:')) {
       req.isHttps = true;
     }
     req.url = options.path;
@@ -506,7 +552,6 @@ function getFullUrl(req) {
   }
   if (host) {
     delete headers[config.REAL_HOST_HEADER];
-    delete headers[config.FWD_HOST_HEADER];
   }
   if (!isString(host)) {
     host = headers.host;
@@ -1561,9 +1606,22 @@ function isLocalIp(ip) {
 
 function getRemoteAddr(req) {
   try {
-    return removeIPV6Prefix((req.socket || req).remoteAddress);
+    var socket = req.socket || req;
+    if (!socket._remoteAddr) {
+      var ip = req.headers && req.headers[config.REMOTE_ADDR_HEAD];
+      if (ip) {
+        socket._remoteAddr = ip;
+        delete req.headers[config.REMOTE_ADDR_HEAD];
+      } else {
+        socket._remoteAddr = removeIPV6Prefix(socket.remoteAddress) || LOCALHOST;
+      }
+    }
+    return socket._remoteAddr;
   } catch(e) {}
+  return LOCALHOST;
 }
+
+exports.getRemoteAddr = getRemoteAddr;
 
 function getClientIp(req) {
   var ip = getForwardedFor(req.headers || {}) || getRemoteAddr(req);
@@ -1572,16 +1630,32 @@ function getClientIp(req) {
 
 exports.getClientIp = getClientIp;
 
+function getRemotePort(req) {
+  try {
+    var socket = req.socket || req;
+    if (socket._remotePort == null) {
+      var port = req.headers && req.headers[config.REMOTE_PORT_HEAD];
+      if (port) {
+        delete req.headers[config.REMOTE_PORT_HEAD];
+      } else {
+        port = socket.remotePort;
+      }
+      socket._remotePort = port > 0 ? port : '0';
+    }
+    return socket._remotePort;
+  } catch(e) {}
+  return 0;
+}
+
+exports.getRemotePort = getRemotePort;
+
 exports.getClientPort = function(req) {
   var headers = req.headers || {};
   var port = headers[config.CLIENT_PORT_HEAD];
   if (port > 0) {
     return port;
   }
-  try {
-    port = (req.connection || req.socket || req).remotePort;
-  } catch(e) {}
-  return port > 0 ? port : 0;
+  return getRemotePort(req);
 };
 
 function removeIPV6Prefix(ip) {
@@ -1742,7 +1816,7 @@ exports.parseLineProps = function(str) {
 function resolveIgnore(ignore) {
   var keys = Object.keys(ignore);
   var exclude = {};
-  var ignoreAll;
+  var ignoreAll, disableIgnoreAll;
   ignore = {};
   keys.forEach(function(name) {
     if (name.indexOf('ignore.') === 0 || name.indexOf('ignore:') === 0) {
@@ -1750,7 +1824,12 @@ function resolveIgnore(ignore) {
       return;
     }
     if (name.indexOf('-') === 0 || name.indexOf('!') === 0) {
-      exclude[name.substring(1)] = 1;
+      name = name.substring(1);
+      if (name === '*') {
+        disableIgnoreAll = true;
+      } else {
+        exclude[name] = 1;
+      }
       return;
     }
     name = name.replace('ignore|', '');
@@ -1764,7 +1843,7 @@ function resolveIgnore(ignore) {
     }
     ignore[aliasProtocols[name] || name] = 1;
   });
-  if (ignoreAll) {
+  if (ignoreAll && !disableIgnoreAll) {
     protocols.forEach(function(name) {
       ignore[name] = 1;
     });
@@ -2050,11 +2129,9 @@ function handleHeaderReplace(headers, opList) {
 
 exports.handleHeaderReplace = handleHeaderReplace;
 
-function transformReq(req, res, port, host, useProxy) {
+function transformReq(req, res, port, host) {
   var options = parseUrl(getFullUrl(req));
   var headers = req.headers;
-  var reqHost = options.host;
-  var reqPort = options.port;
   options.headers = headers;
   options.method = req.method;
   options.agent = false;
@@ -2069,47 +2146,6 @@ function transformReq(req, res, port, host, useProxy) {
       delete headers[config.CLIENT_IP_HEAD];
     } else {
       headers[config.CLIENT_IP_HEAD] = clientIp;
-    }
-  }
-  if (useProxy) {
-    var disable = req.disable || '';
-    if (req._proxyTunnel) {
-      var proxyHeaders = {
-        host: options.hostname + ':' + (reqPort || 80),
-        'proxy-connection': disable.proxyConnection ? 'close' : 'keep-alive'
-      };
-      var ua = !disable.proxyUA && headers['user-agent'];
-      if (ua) {
-        proxyHeaders['user-agent'] = ua;
-      }
-      if (headers[config.CLIENT_IP_HEAD]) {
-        proxyHeaders[config.CLIENT_IP_HEAD] = req.clientIp;
-      }
-      var opts = {
-        proxyHost: host,
-        proxyPort: port,
-        proxyTunnelPath: getProxyTunnelPath(req),
-        enableIntercept: true,
-        keepStreamResume: true,
-        clientIp: proxyHeaders[config.CLIENT_IP_HEAD],
-        url: options.href,
-        headers: proxyHeaders
-      };
-      var phost = req._phost;
-      if (phost) {
-        options.hostname = options.host = phost.hostname;
-        if (phost.port > 0) {
-          options.port = phost.port;
-        }
-      }
-      proxyHeaders.host = options.hostname + ':' + (options.port || 80);
-      options.agent = config.getHttpsAgent(opts, options);
-    } else if (req._phost) {
-      reqHost = req._phost.host || headers.host || reqHost;
-      if (/:80$/.test(reqHost)) {
-        reqHost = reqHost.replace(':80', '');
-      }
-      options.path = 'http://' + reqHost + (options.path || '/');
     }
   }
   options.hostname = null;
@@ -2176,6 +2212,21 @@ function getCgiUrl(url) {
   return url[0] === '/' ? url.substring(1) : url;
 }
 exports.getCgiUrl = getCgiUrl;
+
+exports.getCustomTab = function(tab, pluginName) {
+  if (!tab || !isString(tab.name)) {
+    return;
+  }
+  var name = tab.name.trim();
+  var page = getPage(tab.page || tab.action);
+  if (!name || !page || page.indexOf('#') !== -1) {
+    return;
+  }
+  return {
+    action: 'plugin.' + pluginName + '/' + page,
+    name: name.substring(0, 32)
+  };
+};
 
 function getString(str) {
   if (!isString(str)) {
@@ -2831,12 +2882,22 @@ exports.parseRange = function(req, size) {
 
 exports.parseClientInfo = function(req) {
   var clientInfo = req.headers[config.CLIENT_INFO_HEAD] || '';
+  if (req.headers[config.REQ_FROM_HEADER] === 'W2COMPOSER') {
+    req.fromComposer = true;
+    delete req.headers[config.REQ_FROM_HEADER];
+  }
+  var socket = req.socket || '';
+  if (socket.fromTunnel) {
+    req.fromTunnel = true;
+  }
   if (clientInfo) {
     delete req.headers[config.CLIENT_INFO_HEAD];
     clientInfo = String(clientInfo).split(',');
     if (!net.isIP(clientInfo[0]) || !(clientInfo[1] > 0)) {
       return '';
     }
+    req.fromTunnel = true;
+    socket.fromTunnel = true;
   }
   return clientInfo;
 };
@@ -2952,15 +3013,22 @@ exports.getBoundIp = function(host, cb) {
   });
 };
 
-exports.getPluginMenuConfig = function (conf) {
-  var menuConfig = conf.menuConfig;
+function getPluginConfig(conf, name) {
   var result;
-  if (menuConfig != null) {
+  if (conf != null) {
     try {
-      result = JSON.stringify(menuConfig);
+      result = JSON.stringify(conf);
     } catch (e) {}
   }
-  return '<script>window.whistleMenuConfig = ' + (result || '{}') + ';</script>';
+  return '<script>window.' + (name || 'whistleMenuConfig') + ' = ' + (result || '{}') + ';</script>';
+}
+
+exports.getPluginMenuConfig = function (conf) {
+  return getPluginConfig(conf.menuConfig);
+};
+
+exports.getPluginInspectorConfig = function (conf) {
+  return getPluginConfig(conf.inspectorConfig, 'whistleInspectorConfig');
 };
 
 exports.isEnableH2 = function(req) {
@@ -3123,5 +3191,56 @@ exports.delay = function(time, callback) {
     setTimeout(callback, time);
   } else {
     callback();
+  }
+};
+
+var F_HOST_RE = /\bhost\b/i;
+var F_PROTO_RE = /\bproto\b/i;
+var F_IP_RE = /\b(?:clientIp|ip|for)\b/i;
+
+exports.handleForwardedProps = function(req) {
+  var headers = req.headers;
+  var props = headers['x-whistle-forwarded-props'];
+  var enableFwdHost = config.enableFwdHost;
+  var enableFwdProto = config.enableFwdProto;
+  var enableFwdFor = config.keepXFF;
+  if (props != null) {
+    enableFwdHost = enableFwdHost || F_HOST_RE.test(props);
+    enableFwdProto = enableFwdProto || F_PROTO_RE.test(props);
+    enableFwdFor = enableFwdFor || F_IP_RE.test(props);
+    if (config.master && enableFwdFor) {
+      headers['x-whistle-forwarded-props'] = 'ip';
+    } else {
+      delete headers['x-whistle-forwarded-props'];
+    }
+  }
+  req.enableXFF = enableFwdFor;
+  if (enableFwdHost) {
+    var host = headers[config.FWD_HOST_HEADER];
+    if (host) {
+      delete headers[config.FWD_HOST_HEADER];
+      headers[config.REAL_HOST_HEADER] = headers[config.REAL_HOST_HEADER] || host;
+    }
+  }
+  if (enableFwdProto) {
+    var proto = headers[config.HTTPS_PROTO_HEADER];
+    if (proto) {
+      delete headers[config.HTTPS_PROTO_HEADER];
+      req.isHttps = proto === 'https';
+    }
+  }
+};
+
+exports.filterWeakRule = function(req) {
+  var rule = req.rules && req.rules.rule;
+  if (!rule) {
+    return;
+  }
+  var proxy = req.rules.proxy;
+  if ((!proxy || proxy.lineProps.proxyHostOnly) && !req.rules.host) {
+    return;
+  }
+  if (rule.lineProps.weakRule || isEnable(req, 'weakRule')) {
+    delete req.rules.rule;
   }
 };

@@ -36,7 +36,8 @@ function getKey(options) {
   var proxyOpts = options._proxyOptions;
   var proxyType = '';
   if (proxyOpts) {
-    proxyType = [proxyOpts.proxyType, proxyOpts.proxyHost, proxyOpts.proxyPort, proxyOpts.headers.host, proxyOpts.proxyTunnelPath || ''].join(':');
+    var auth = proxyOpts.headers && proxyOpts.headers['proxy-authorization'] || '';
+    proxyType = [proxyOpts.proxyType, proxyOpts.proxyHost, proxyOpts.proxyPort, proxyOpts.headers.host, proxyOpts.proxyTunnelPath || '', auth].join(':');
   }
   return [options.servername, options.host, options.port || '', proxyType, options.cacheKey || ''].join('/');
 }
@@ -249,7 +250,7 @@ function requestH2(client, req, res, callback) {
           newHeaders[name] = h2Headers[name];
         }
       });
-      if (req.isPluginReq) {
+      if (req.isPluginReq && !req._isProxyReq) {
         newHeaders[config.PROXY_ID_HEADER] = 'h2';
       }
       res.response(svrRes);
@@ -306,11 +307,7 @@ function checkTlsError(err) {
   return code.indexOf('ERR_TLS_') === 0 || code.indexOf('ERR_SSL_') === 0;
 }
 
-/**
- * TODO(v2.0): 遗留两种需要处理的H2请求
- * 1. 设置代理后的请求
- * 2. 插件转发回来的请求
- */
+
 exports.request = function(req, res, callback) {
   var options = req.useH2 && req.options;
   if (!options || options.isPlugin) {

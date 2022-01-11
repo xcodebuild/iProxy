@@ -23,7 +23,6 @@ var encodeURIComponent = util.encodeURIComponent;
 var REMOTE_RULES_RE = /^\s*@(`?)(whistle\.[a-z\d_\-]+(?:\/[^\s#]*)?|(?:https?:\/\/|[a-z]:[\\/]|~?\/)[^\s#]+)\s*\1(?:#.*)?$/im;
 var PLUGIN_MAIN = path.join(__dirname, './load-plugin');
 var PIPE_PLUGIN_RE = /^pipe:\/\/(?:whistle\.|plugin\.)?([a-z\d_\-]+)(?:\(([\s\S]*)\))?$/;
-var REQ_FROM_HEADER = config.WHISTLE_REQ_FROM_HEADER;
 var RULE_VALUE_HEADER = 'x-whistle-rule-value';
 var SNI_VALUE_HEADER = 'x-whistle-sni-value';
 var GLOBAL_PLUGIN_VARS_HEAD = 'x-whistle-global-plugin-vars' + config.uid;
@@ -45,6 +44,7 @@ var PROXY_VALUE_HEADER = 'x-whistle-proxy-value';
 var PAC_VALUE_HEADER = 'x-whistle-pac-value';
 var METHOD_HEADER = 'x-whistle-method';
 var SHOW_LOGIN_BOX = 'x-whistle2-show-login-box.' + config.uid;
+var FROM_TUNNEL_HEADER = 'x-whistle-from-tunnel-req-' + config.uid;
 var CLIENT_PORT_HEAD = config.CLIENT_PORT_HEAD;
 var HOST_IP_HEADER = 'x-whistle-host-ip';
 var GLOBAL_VALUE_HEAD = 'x-whistle-global-value';
@@ -70,6 +70,16 @@ var PLUGIN_HOOKS = config.PLUGIN_HOOKS;
 var PLUGIN_HOOK_NAME_HEADER = config.PLUGIN_HOOK_NAME_HEADER;
 var HTTP_RE = /^https?:\/\//;
 var conf = {};
+var EXCLUDE_CONF_KEYS = {
+  uid: 1,
+  INTERNAL_ID: 1,
+  SNI_PLUGIN_HEADER: 1,
+  WEBUI_HEAD: 1,
+  CLIENT_INFO_HEAD: 1,
+  COMPOSER_CLIENT_ID_HEADER: 1,
+  TEMP_CLIENT_ID_HEADER: 1,
+  TEMP_TUNNEL_DATA_HEADER: 1
+};
 var EXCLUDE_NAMES = {
   password: 1,
   shadowRules: 1,
@@ -95,7 +105,7 @@ Object.keys(config).forEach(function(name) {
     conf.password = value;
   } if (name === 'globalData') {
     conf.globalData = value;
-  } else {
+  } else if (!EXCLUDE_CONF_KEYS[name]) {
     var type = typeof value;
     if (type == 'string' || type == 'number' || type === 'boolean') {
       conf[name] = value;
@@ -175,6 +185,9 @@ pluginMgr.loadCert = function(req, plugin, callback) {
     options.headers[PLUGIN_HOOK_NAME_HEADER] = PLUGIN_HOOKS.SNI;
     options.headers[SERVER_NAME_HEAD] = encodeURIComponent(req.serverName);
     options.headers[COMMON_NAME_HEAD] = encodeURIComponent(req.commonName);
+    if (!req.useSNI || req.isHttpsServer) {
+      options.headers[config.SNI_TYPE_HEADER] = req.isHttpsServer ? '1' : '0';
+    }
     if (req.sniRuleValue) {
       options.headers[SNI_VALUE_HEADER] = encodeURIComponent(req.sniRuleValue);
     }
@@ -305,6 +318,7 @@ function readPackages(obj, callback) {
       readJson(path.join(newPkg.path, 'package.json'), function(_, result) {
         if (result && result.version) {
           var conf = result.whistleConfig || '';
+          var tabs = conf.inspectorTabs || '';
           var hintList = util.getHintList(conf);
           var simpleName = name.slice(0, -1);
           newPkg.enableAuthUI = !!conf.enableAuthUI;
@@ -318,7 +332,10 @@ function readPackages(obj, callback) {
           newPkg.networkMenus = util.getPluginMenu(conf.networkMenus || conf.networkMenu, simpleName);
           newPkg.rulesMenus = util.getPluginMenu(conf.rulesMenus || conf.rulesMenu, simpleName);
           newPkg.valuesMenus = util.getPluginMenu(conf.valuesMenus || conf.valuesMenu, simpleName);
+          newPkg.reqTab = util.getCustomTab(tabs.req, simpleName);
+          newPkg.resTab = util.getCustomTab(tabs.res, simpleName);
           newPkg[util.PLUGIN_MENU_CONFIG] = util.getPluginMenuConfig(conf);
+          newPkg[util.PLUGIN_INSPECTOR_CONFIG] = util.getPluginInspectorConfig(conf);
           newPkg.hintUrl = hintList ? undefined : util.getCgiUrl(conf.hintUrl);
           newPkg.hintList = hintList;
           newPkg.pluginVars = util.getPluginVarsConf(conf);
@@ -506,6 +523,18 @@ function addRuleHeaders(req, rules, headers, isPipe) {
   if (clientPort) {
     headers[config.CLIENT_PORT_HEAD] = clientPort;
   }
+  if (req.fromTunnel) {
+    headers[FROM_TUNNEL_HEADER] = '1';
+  } else {
+    delete headers[FROM_TUNNEL_HEADER];
+  }
+  headers[config.REMOTE_ADDR_HEAD] = req._remoteAddr || LOCALHOST;
+  headers[config.REMOTE_PORT_HEAD] = req._remotePort || '0';
+  if (req.fromComposer) {
+    headers[config.REQ_FROM_HEADER] = 'W2COMPOSER';
+  } else {
+    delete headers[config.REQ_FROM_HEADER];
+  }
   if (req._isUIRequest) {
     headers[UI_REQUEST_HEADER] = '1';
     return headers;
@@ -560,7 +589,7 @@ pluginMgr.addRuleHeaders = addRuleHeaders;
 
 function loadPlugin(plugin, callback) {
   if (!plugin) {
-    return callback();
+    return callback(null, '');
   }
   var ports = plugin[portsField];
   if (ports) {
@@ -579,7 +608,6 @@ function loadPlugin(plugin, callback) {
       staticDir: plugin.staticDir,
       CUSTOM_CERT_HEADER: CUSTOM_CERT_HEADER,
       ENABLE_CAPTURE_HEADER: ENABLE_CAPTURE_HEADER,
-      REQ_FROM_HEADER: REQ_FROM_HEADER,
       RULE_VALUE_HEADER: RULE_VALUE_HEADER,
       SNI_VALUE_HEADER: SNI_VALUE_HEADER,
       GLOBAL_PLUGIN_VARS_HEAD: GLOBAL_PLUGIN_VARS_HEAD,
@@ -601,6 +629,7 @@ function loadPlugin(plugin, callback) {
       PAC_VALUE_HEADER: PAC_VALUE_HEADER,
       METHOD_HEADER: METHOD_HEADER,
       SHOW_LOGIN_BOX: SHOW_LOGIN_BOX,
+      FROM_TUNNEL_HEADER: FROM_TUNNEL_HEADER,
       CLIENT_IP_HEADER: config.CLIENT_IP_HEAD,
       CLIENT_PORT_HEAD: CLIENT_PORT_HEAD,
       UI_REQUEST_HEADER: UI_REQUEST_HEADER,
@@ -854,7 +883,8 @@ function getRulesFromPlugins(type, req, res, callback) {
     var results = [];
     var options = getOptions(req, res, type);
     var isResRules = type == 'resRules';
-    authReq(!isResRules, ports, req, options, function(forbidden) {
+    var enableAuth = !isResRules && req.justAuth !== false && (!req.isPluginReq || req._isProxyReq) && (!req.fromTunnel || !util.isAuthCapture(req));
+    authReq(enableAuth, ports, req, options, function(forbidden) {
       if (forbidden) {
         var mgr = new RulesMgr({ msg: forbidden });
         if (req._authHtmlUrl) {
@@ -866,6 +896,9 @@ function getRulesFromPlugins(type, req, res, callback) {
           mgr.parse('* ignore://!statusCode|!resBody|!resType|!resCharset status://' + status + ' resBody://{msg} resType://html resCharset://utf8');
         }
         return callback(mgr);
+      }
+      if (req.justAuth) {
+        return callback();
       }
       var hookName = isResRules ? 'RES_RULES' : (type === 'tunnelRules' ? 'TUNNEL_RULES' : 'REQ_RULES');
       options.headers[PLUGIN_HOOK_NAME_HEADER] = PLUGIN_HOOKS[hookName];
@@ -1079,10 +1112,6 @@ function getRulesMgr(type, req, res, callback) {
 function getPluginRulesCallback(req, callback) {
   return function(pluginRules) {
     req.pluginRules = pluginRules;
-    if (req.headers[REQ_FROM_HEADER] === 'W2COMPOSER') {
-      req.fromComposer = true;
-      delete req.headers[REQ_FROM_HEADER];
-    }
     callback(pluginRules);
   };
 }

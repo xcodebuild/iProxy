@@ -22,6 +22,7 @@ var getEncodeTransform = transproto.getEncodeTransform;
 var getDecodeTransform = transproto.getDecodeTransform;
 
 var URL_RE = /^https?:\/\/[^\s]+$/;
+var HTTPS_RE = /^(?:https|wss):\/\//;
 var MAX_BODY_SIZE = 1024 * 256;
 var sessionStorage = new LRU({
   maxAge: 1000 * 60 * 12,
@@ -67,7 +68,14 @@ var index = 1000;
 var noop = function() {};
 var certsCache = new LRU({max: 256});
 var certsCallbacks = {};
-var ctx, PLUGIN_HOOK_NAME_HEADER;
+var ctx;
+var PLUGIN_HOOK_NAME_HEADER;
+var GLOBAL_PLUGIN_VARS_HEAD;
+var PLUGIN_VARS_HEAD;
+var FROM_TUNNEL_HEADER;
+var REMOTE_ADDR_HEAD;
+var REMOTE_PORT_HEAD;
+var SNI_TYPE_HEADER;
 
 var appendTrailers = function(_res, res, newTrailers, req) {
   if (res.disableTrailer || res.disableTrailers) {
@@ -364,6 +372,9 @@ function getPluginVars(req, key) {
 }
 
 var initReq = function(req, res, isServer) {
+  if (req.originalReq && req.originalRes) {
+    return;
+  }
   var destroy = function() {
     if (!req._hasError) {
       req._hasError = true;
@@ -384,8 +395,8 @@ var initReq = function(req, res, isServer) {
   };
 
   var reqId = getValue(req, pluginOpts.REQ_ID_HEADER);
-  var oReq = req.originalReq = req.request = {};
-  var oRes = req.originalRes = req.response = {};
+  var oReq = req.originalReq = {};
+  var oRes = req.originalRes = {};
   setContext(req);
   oReq.clientIp = req.clientIp;
   if (isServer) {
@@ -393,11 +404,10 @@ var initReq = function(req, res, isServer) {
     req.customParser = oReq.customParser = notEmptyStr(parseStatus);
     req.customParser && addParserApi(req, res, parseStatus, reqId);
   }
-  var headers = extractHeaders(req, pluginKeyMap);
+  var conf = pluginOpts.config;
   req[REQ_ID_KEY] = oReq.id = reqId;
   addSessionStorage(req, reqId);
-  oReq.headers = headers;
-  oReq.isHttp2 = oReq.isH2 = !!req.headers[pluginOpts.config.ALPN_PROTOCOL_HEADER];
+  oReq.isHttp2 = oReq.isH2 = !!req.headers[conf.ALPN_PROTOCOL_HEADER];
   oReq.existsCustomCert = req.headers[pluginOpts.CUSTOM_CERT_HEADER] == '1';
   oReq.isUIRequest = req.isUIRequest = req.headers[pluginOpts.UI_REQUEST_HEADER] == '1';
   oReq.enableCapture = req.headers[pluginOpts.ENABLE_CAPTURE_HEADER] == '1';
@@ -407,7 +417,16 @@ var initReq = function(req, res, isServer) {
   oReq.pipeValue = getValue(req, pluginOpts.PIPE_VALUE_HEADER);
   oReq.sniValue = getValue(req, pluginOpts.SNI_VALUE_HEADER);
   oReq.hostValue = getValue(req, pluginOpts.HOST_VALUE_HEADER);
-  oReq.url = oReq.fullUrl = getValue(req, pluginOpts.FULL_URL_HEADER);
+  var fullUrl = getValue(req, pluginOpts.FULL_URL_HEADER);
+  oReq.url = oReq.fullUrl = req.fullUrl = fullUrl;
+  req.isHttps = oReq.isHttps = HTTPS_RE.test(fullUrl);
+  oReq.remoteAddress = req.headers[REMOTE_ADDR_HEAD] || '127.0.0.1';
+  oReq.remotePort = parseInt(req.headers[REMOTE_PORT_HEAD], 10) || 0;
+  req.fromTunnel = oReq.fromTunnel = req.headers[FROM_TUNNEL_HEADER] === '1';
+  delete req.headers[FROM_TUNNEL_HEADER];
+  delete req.headers[REMOTE_ADDR_HEAD];
+  delete req.headers[REMOTE_PORT_HEAD];
+  req.fromComposer = oReq.fromComposer = req.headers[conf.REQ_FROM_HEADER] === 'W2COMPOSER';
   oReq.servername = oReq.serverName = getValue(req, pluginOpts.SERVER_NAME_HEAD);
   var certCacheInfo = getValue(req, pluginOpts.CERT_CACHE_INFO);
   oReq.certCacheName = certCacheInfo;
@@ -419,6 +438,18 @@ var initReq = function(req, res, isServer) {
       oReq.certCacheTime = parseInt(certCacheInfo.substring(sepIndex + 1)) || 0;
     }
   }
+  var sniType = req.headers[SNI_TYPE_HEADER];
+  var isSNI;
+  if (sniType) {
+    delete req.headers[SNI_TYPE_HEADER];
+    if (sniType === '1') {
+      isSNI = true;
+      req.isHttpsServer = true;
+    }
+  } else {
+    isSNI = true;
+  }
+  req.useSNI = oReq.useSNI = req.isSNI = oReq.isSNI = isSNI;
   oReq.commonName = getValue(req, pluginOpts.COMMON_NAME_HEAD);
   oReq.realUrl = getValue(req, pluginOpts.REAL_URL_HEADER) || oReq.url;
   oReq.relativeUrl = getValue(req, pluginOpts.RELATIVE_URL_HEADER);
@@ -427,10 +458,11 @@ var initReq = function(req, res, isServer) {
   oReq.globalValue = getValue(req, pluginOpts.GLOBAL_VALUE_HEAD);
   oReq.proxyValue = getValue(req, pluginOpts.PROXY_VALUE_HEADER);
   oReq.pacValue = getValue(req, pluginOpts.PAC_VALUE_HEADER);
-  oReq.pluginVars = getPluginVars(req, pluginOpts.PLUGIN_VARS_HEAD);
-  oReq.globalPluginVars = getPluginVars(req, pluginOpts.GLOBAL_PLUGIN_VARS_HEAD);
-  oRes.serverIp = getValue(req, pluginOpts.HOST_IP_HEADER) || '127.0.0.1';
+  oReq.pluginVars = getPluginVars(req, PLUGIN_VARS_HEAD);
+  oReq.globalPluginVars = getPluginVars(req, GLOBAL_PLUGIN_VARS_HEAD);
+  oRes.serverIp = getValue(req, pluginOpts.HOST_IP_HEADER) || '';
   oRes.statusCode = getValue(req, pluginOpts.STATUS_CODE_HEADER);
+  oReq.headers = extractHeaders(req, pluginKeyMap);
 };
 var toBuffer = function(base64) {
   if (base64) {
@@ -677,6 +709,9 @@ var initWsReq = function(req, res) {
   initReq(req, res, true);
 };
 var initConnectReq = function(req, res) {
+  if (req.originalReq && req.originalRes) {
+    return;
+  }
   var established;
   initWsReq(req, res);
   req.sendEstablished = function(err, cb) {
@@ -687,6 +722,7 @@ var initConnectReq = function(req, res) {
       cb = err;
       err = null;
     }
+    req.isEstablished = true;
     established = true;
     var msg = err ? 'Bad Gateway' : 'Connection Established';
     var body = String((err && err.stack) || '');
@@ -799,6 +835,30 @@ function wrapTunnelReader(socket) {
   receiver.onData = function(chunk) {
     emit.call(socket, 'data', chunk);
   };
+}
+
+function setReqRules(uri, reqRules) {
+  if (!reqRules) {
+    return;
+  }
+  var rules = reqRules.rules || reqRules;
+  var values = reqRules.values;
+  if (typeof rules !== 'string') {
+    return;
+  }
+  uri.headers = uri.headers || {};
+  uri.headers['x-whistle-rule-value'] = encodeURIComponent(rules);
+  if (!values) {
+    return;
+  }
+  if (typeof values !== 'string') {
+    try {
+      values = JSON.stringify(values);
+    } catch (e) {
+      return;
+    }
+  }
+  uri.headers['x-whistle-key-value'] = encodeURIComponent(values);
 }
 
 function addFrameHandler(req, socket, maxWsPayload, fromClient, toServer) {
@@ -931,7 +991,24 @@ module.exports = async function(options, callback) {
     return encodeURIComponent(obj);
   };
   var SHOW_LOGIN_BOX = options.SHOW_LOGIN_BOX;
+  FROM_TUNNEL_HEADER = options.FROM_TUNNEL_HEADER;
+  SNI_TYPE_HEADER = config.SNI_TYPE_HEADER;
+  REMOTE_ADDR_HEAD = config.REMOTE_ADDR_HEAD;
+  REMOTE_PORT_HEAD = config.REMOTE_PORT_HEAD;
+  options.REQ_FROM_HEADER = config.REQ_FROM_HEADER; // 兼容老逻辑
+
+  GLOBAL_PLUGIN_VARS_HEAD = options.GLOBAL_PLUGIN_VARS_HEAD;
+  PLUGIN_VARS_HEAD = options.PLUGIN_VARS_HEAD;
   delete options.SHOW_LOGIN_BOX;
+  delete config.PLUGIN_HOOKS;
+  delete config.PROXY_ID_HEADER;
+  delete config.REMOTE_ADDR_HEAD;
+  delete config.REMOTE_PORT_HEAD;
+  delete config.RES_RULES_HEAD;
+  delete config.SNI_TYPE_HEADER;
+  delete options.GLOBAL_PLUGIN_VARS_HEAD;
+  delete options.PLUGIN_VARS_HEAD;
+  delete options.FROM_TUNNEL_HEADER;
 
   PLUGIN_HOOK_NAME_HEADER = config.PLUGIN_HOOK_NAME_HEADER;
   options.shortName = name.substring(name.indexOf('/') + 1);
@@ -970,7 +1047,9 @@ module.exports = async function(options, callback) {
     var headers, method;
     if (type !== 'string') {
       if (uri && type === 'object') {
-        headers = uri.headers;
+        if (uri.headers) {
+          headers = extend({}, uri.headers);
+        }
         method = typeof uri.method === 'string' ? uri.method : null;
         uri = uri.uri || uri.url || uri.href || curUrl;
       } else {
@@ -1003,6 +1082,10 @@ module.exports = async function(options, callback) {
       headers[PROXY_ID_HEADER] = 1;
       uri.host = boundIp;
       uri.port = config.port;
+      if (req.originalReq) {
+        headers[REMOTE_ADDR_HEAD] = req.originalReq.remoteAddress;
+        headers[REMOTE_PORT_HEAD] = req.originalReq.remotePort;
+      }
       if (isHttps) {
         headers[config.HTTPS_FIELD] = 1;
         if (alpnProtocol) {
@@ -1358,7 +1441,7 @@ module.exports = async function(options, callback) {
             }
           };
           try {
-            const result = await execAuth(req, options);
+            var result = await execAuth(req, options);
             if (req.showLoginBox) {
               customHeaders[SHOW_LOGIN_BOX] = '1';
             }
@@ -1394,7 +1477,7 @@ module.exports = async function(options, callback) {
           initReq(req, res);
           transferError(req, res);
           try {
-            const result = await sniCallback(req, options);
+            var result = await sniCallback(req, options);
             if (result === false || result === true) {
               res.end(result + '');
             } else if (result && notEmptyStr(result.key) && notEmptyStr(result.cert)) {
@@ -1570,10 +1653,15 @@ module.exports = async function(options, callback) {
             var alpnProtocol = req.headers[config.ALPN_PROTOCOL_HEADER];
             var curUrl = req.originalReq.realUrl;
             var svrRes = '';
-            var resRules;
+            var reqRules, resRules;
             var writeHead = res.writeHead;
+            req.setReqRules = res.setReqRules = function(rules) {
+              reqRules = rules;
+              return true;
+            };
             req.setResRules = res.setResRules = function(rules) {
               resRules = rules;
+              return true;
             };
             req.writeHead = res.writeHead = function(code, msg, headers) {
               code = code > 0 ? code : (svrRes.statusCode || 101);
@@ -1586,6 +1674,8 @@ module.exports = async function(options, callback) {
               if (resRules) {
                 headers = headers || {};
                 headers[RES_RULES_HEAD] = getRulesStr(resRules);
+                req.setResRules = res.setResRules = noop;
+                resRules = null;
               }
               headers = formatRawHeaders(headers, svrRes);
               writeHead.call(res, code, msg, headers);
@@ -1597,6 +1687,9 @@ module.exports = async function(options, callback) {
               cb = args[1];
               opts = args[3];
               uri.agent = false;
+              req.setReqRules = res.setReqRules = noop;
+              setReqRules(uri, reqRules);
+              reqRules = null;
               var client = (args[2] ? httpsRequest : httpRequest)(uri, function(_res) {
                 svrRes = _res;
                 res.once('_wroteHead', function() {
@@ -1673,9 +1766,14 @@ module.exports = async function(options, callback) {
             var curUrl = req.originalReq.realUrl;
             httpServer.setMaxWsPayload = setMaxWsPayload;
             var svrRes = '';
-            var resRules;
+            var reqRules, resRules;
+            req.setReqRules = socket.setReqRules = function(rules) {
+              reqRules = rules;
+              return true;
+            };
             req.setResRules = socket.setResRules = function(rules) {
               resRules = rules;
+              return true;
             };
             req.writeHead = socket.writeHead = function(code, msg, headers) {
               code = code > 0 ? code : (svrRes.statusCode || 101);
@@ -1687,9 +1785,11 @@ module.exports = async function(options, callback) {
               if (resRules) {
                 headers = headers || {};
                 headers[RES_RULES_HEAD] = getRulesStr(resRules);
+                req.setResRules = socket.setResRules = noop;
+                resRules = null;
               }
               headers = [
-                'HTTP/1.1 ' + code + ' ' + (msg || svrRes.statusMessage || STATUS_CODES[code] || ''),
+                'HTTP/1.1 ' + code + ' ' + (msg || svrRes.statusMessage || STATUS_CODES[code] || ''),
                 headers ? getRawHeaders(formatRawHeaders(headers, svrRes)) : '',
                 '\r\n'
               ];
@@ -1701,6 +1801,9 @@ module.exports = async function(options, callback) {
               cb = args[1];
               opts = args[3];
               uri.agent = false;
+              req.setReqRules = socket.setReqRules = noop;
+              setReqRules(uri, reqRules);
+              reqRules = null;
               var client = (args[2] ? httpsRequest : httpRequest)(uri);
               var rawFrame;
               if (opts === true) {
@@ -1840,6 +1943,19 @@ module.exports = async function(options, callback) {
           if (tunnelServer) {
             initConnectReq(req, socket);
             req.sendEstablished(function() {
+              req.writeHead = socket.writeHead = function(code, msg, headers) {
+                if (msg && typeof msg !== 'string') {
+                  headers = headers || msg;
+                  msg = null;
+                }
+                code = code > 0 ? code : 200;
+                msg = msg || STATUS_CODES[code] || 'unknown';
+                socket.write([
+                  'HTTP/1.1 ' + code + ' ' +  msg,
+                  headers ? getRawHeaders(headers) : '',
+                  '\r\n'
+                ].join('\r\n'));
+              };
               req.connect = function(uri, cb, opts) {
                 var headers = extractHeaders(req, pluginKeyMap);
                 var policy = headers['x-whistle-policy'];
@@ -1851,7 +1967,7 @@ module.exports = async function(options, callback) {
                 } else if (uri) {
                   if (TUNNEL_HOST_RE.test(uri.url)) {
                     if (uri.headers) {
-                      headers = uri.headers;
+                      headers = extend({}, uri.headers);
                       if (policy && !headers['x-whistle-policy']) {
                         headers['x-whistle-policy'] = policy;
                       }
@@ -1874,6 +1990,10 @@ module.exports = async function(options, callback) {
                   headers[PROXY_ID_HEADER] = req[REQ_ID_KEY];
                   uri.host = boundIp;
                   uri.port = config.port;
+                  if (req.originalReq) {
+                    headers[REMOTE_ADDR_HEAD] = req.originalReq.remoteAddress;
+                    headers[REMOTE_PORT_HEAD] = req.originalReq.remotePort;
+                  }
                 } else {
                   uri.host = opts.host;
                   uri.port = opts.port > 0 ? opts.port : 80;

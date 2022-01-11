@@ -19,7 +19,7 @@ var clientCerts = new LRU({ max: 60, maxAge: 1000 * 60 * 60 });
 var rules = new Rules();
 var tempRules = new Rules();
 var cachedPacs = {};
-var VALUE_HEADER = 'x-whistle-rule-value';
+var RULES_HEADER = 'x-whistle-rule-value';
 var KV_HEADER = 'x-whistle-key-value';
 var KEY_HEADER = 'x-whistle-rule-key';
 var HOST_HEADER = 'x-whistle-rule-host';
@@ -33,11 +33,14 @@ exports.Rules = Rules;
 if (config.networkMode && !config.shadowRulesMode) {
   exports.parse = util.noop;
 } else {
-  exports.parse = function(text, root, _inlineValues) {
+  exports.parse = function(text, root, _values) {
     if (config.pluginsMode || config.shadowRulesMode) {
       text = config.shadowRules || '';
     }
-    rules.parse(text, root, _inlineValues);
+    if (config.shadowValues) {
+      _values = _values ? extend({}, config.shadowValues, _values) : config.shadowValues;
+    }
+    rules.parse(text, root, _values);
   };
 }
 exports.append = rules.append.bind(rules);
@@ -115,14 +118,16 @@ exports.getProxy = function(url, req, callback) {
     hRules && hRules.resolveFilter(req));
   var ignoreProxy;
   var proxy;
-  if (config.multiEnv) {
+  var pacRule;
+  if (config.multiEnv || req._headerRulesFirst) {
     proxy = (pRules && pRules.resolveProxy(req)) || (hRules && hRules.resolveProxy(req))
     || rules.resolveProxy(req) || (fRules && fRules.resolveProxy(req));
   } else {
     proxy = (pRules && pRules.resolveProxy(req)) || rules.resolveProxy(req) ||
     (fRules && fRules.resolveProxy(req)) || (hRules && hRules.resolveProxy(req));
   }
-  var proxyHost = util.isEnable(req, 'proxyHost') || isProxyEnable(req, 'proxyHost');
+  var proxyHostOnly = isLineProp(proxy, 'proxyHostOnly');
+  var proxyHost = proxyHostOnly || util.isEnable(req, 'proxyHost') || isProxyEnable(req, 'proxyHost');
   if (proxy) {
     var protocol = proxy.matcher.substring(0, proxy.matcher.indexOf(':'));
     ignoreProxy = !filter['ignore:' + protocol] && (util.isIgnored(filter, 'proxy') || util.isIgnored(filter, protocol));
@@ -133,7 +138,9 @@ exports.getProxy = function(url, req, callback) {
     }
   }
   var host = rules.getHost(req, pRules, fRules, hRules);
-  proxyHost = isProxyHost(req, proxy, host) || proxyHost; // 不能调换顺序
+  if (!ignoreProxy) {
+    proxyHost = isProxyHost(req, proxy, host) || proxyHost; // 不能调换顺序
+  }
   var setHost = function() {
     if (!host || req._isProxyReq) {
       return false;
@@ -149,7 +156,34 @@ exports.getProxy = function(url, req, callback) {
     callback(null, hostname, host.port, host);
     return true;
   };
+  var resolvePacRule = function() {
+    if (pacRule != null) {
+      return;
+    }
+    if (util.isIgnored(filter, 'pac')) {
+      pacRule = false;
+      return;
+    }
+    if (config.multiEnv || req._headerRulesFirst) {
+      pacRule = ((pRules && pRules.resolvePac(req)) ||
+      (hRules && hRules.resolvePac(req))) ||
+      rules.resolvePac(req) ||
+      (fRules && fRules.resolvePac(req)) || false;
+    } else {
+      pacRule = ((pRules && pRules.resolvePac(req)) ||
+      rules.resolvePac(req) ||
+      (fRules && fRules.resolvePac(req)) ||
+      (hRules && hRules.resolvePac(req))) || false;
+    }
+    if (pacRule) {
+      proxyHostOnly = isLineProp(pacRule, 'proxyHostOnly');
+      proxyHost = proxyHost || proxyHostOnly || isLineProp(pacRule, 'proxyHost');
+    }
+  };
   if (host) {
+    if (!proxyHost && !ignoreProxy) {
+      resolvePacRule();
+    }
     if (proxyHost) {
       req._phost = parseUrl(util.setProtocol(host.matcher + (host.port ? ':' + host.port : '')));
     } else if (!isLineProp(proxy, 'proxyFirst') && !isLineProp(host, 'proxyFirst') &&
@@ -160,7 +194,7 @@ exports.getProxy = function(url, req, callback) {
     reqRules.host = host;
     req._enableProxyHost = true;
   }
-  if (ignoreProxy) {
+  if (ignoreProxy || (proxyHostOnly && !req._phost)) {
     req.curUrl = url;
     return setHost() || rules.lookupHost(req, callback);
   }
@@ -180,24 +214,7 @@ exports.getProxy = function(url, req, callback) {
     reqRules.proxy = proxy;
     return callback();
   }
-  var ignorePac = util.isIgnored(filter, 'pac');
-  var pacRule;
-  if (!ignorePac) {
-    if (config.multiEnv) {
-      pacRule = ((pRules && pRules.resolvePac(req)) ||
-      (hRules && hRules.resolvePac(req))) ||
-      rules.resolvePac(req) ||
-      (fRules && fRules.resolvePac(req));
-    } else {
-      pacRule = ((pRules && pRules.resolvePac(req)) ||
-      rules.resolvePac(req) ||
-      (fRules && fRules.resolvePac(req)) ||
-      (hRules && hRules.resolvePac(req)));
-    }
-  }
-  if (pacRule) {
-    reqRules.pac = pacRule;
-  }
+  resolvePacRule();
   var pacUrl = util.getMatcherValue(pacRule);
   if (!pacUrl) {
     return setHost() || callback();
@@ -219,12 +236,14 @@ exports.getProxy = function(url, req, callback) {
     }
     cachedPacs[pacUrl] = pac = new Pac(pacUrl, dnsResolve);
   }
+  reqRules.pac = pacRule;
   return pac.findWhistleProxyForURL(url.replace('tunnel:', 'https:'), function(err, rule) {
     if (rule) {
       tempRules.parse(pacRule.rawPattern + ' ' + rule);
       req.curUrl = url;
       if (proxy = tempRules.resolveProxy(req)) {
         proxyHost = isProxyHost(req, proxy) || proxyHost; // 不能调换顺序
+        req._proxyTunnel = req._proxyTunnel || isLineProp(pacRule, 'proxyTunnel');
         var protocol = proxy.matcher.substring(0, proxy.matcher.indexOf(':'));
         if (!util.isIgnored(filter, protocol)) {
           reqRules.proxy = proxy;
@@ -461,13 +480,15 @@ function initHeaderRules(req, needBodyFilters) {
   }
   req._bodyFilters = null;
   req.rulesHeaders = {};
-  var valueHeader = getValue(req, VALUE_HEADER);
+  var isPluginReq = req.isPluginReq && !req._isProxyReq;
+  req._headerRulesFirst = isPluginReq;
+  var rulesHeader = getValue(req, RULES_HEADER, isPluginReq);
   var hostHeader = util.trimStr(getValue(req, HOST_HEADER));
   var keyHeader = util.trimStr(getValue(req, KEY_HEADER));
-  var kvHeader = getValue(req, KV_HEADER);
+  var kvHeader = getValue(req, KV_HEADER, isPluginReq);
   var phHeader = util.trimStr(getValue(req, PROXY_HOST_HEADER, true));
 
-  var ruleValue = util.trimStr(valueHeader);
+  var ruleValue = util.trimStr(rulesHeader);
   if (hostHeader) {
     ruleValue = ruleValue + '\n' + hostHeader;
   }
@@ -525,7 +546,7 @@ function initRules(req) {
   req.curUrl = fullUrl;
   initHeaderRules(req);
   if (req.headerRulesMgr) {
-    if (config.multiEnv) {
+    if (config.multiEnv || req._headerRulesFirst) {
       req.rules = resolveReqRules(req);
       util.mergeRules(req, req.headerRulesMgr.resolveReqRules(req));
     } else {
@@ -570,7 +591,7 @@ exports.getClientCert = function(req, cb) {
   var fRules = req.rulesFileMgr;
   var hRules = req.headerRulesMgr;
   var rule;
-  if (config.multiEnv) {
+  if (config.multiEnv || req._headerRulesFirst) {
     rule = (pRules && pRules.resolveClientCert(req)) || (hRules && hRules.resolveClientCert(req))
     || rules.resolveClientCert(req) || (fRules && fRules.resolveClientCert(req));
   } else {

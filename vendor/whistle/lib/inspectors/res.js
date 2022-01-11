@@ -568,7 +568,7 @@ module.exports = function(req, res, next) {
                   headers[config.CLIENT_IP_HEAD] = forwardedFor;
                 } else if (net.isIP(req._customXFF)) {
                   headers[config.CLIENT_IP_HEAD] = req._customXFF;
-                } else if ((!config.keepXFF && !options.isPlugin && (isHttps || isSocks || !proxyUrl)) || util.isLocalAddress(req.clientIp)) {
+                } else if ((!options.isPlugin && !req.enableXFF && (isHttps || isSocks || !proxyUrl)) || util.isLocalAddress(req.clientIp)) {
                   delete headers[config.CLIENT_IP_HEAD];
                 } else {
                   headers[config.CLIENT_IP_HEAD] = req.clientIp;
@@ -1013,7 +1013,7 @@ module.exports = function(req, res, next) {
                       util.emitError(res, e);
                     }
                   });
-                });
+                }, util.isEnable(req, 'forceReqWrite'));
               }, !hasResBody, charset, isHtml);
             });
           });

@@ -41,8 +41,8 @@ var REG_URL_SYMBOL_RE = /^(\^+)/;
 var PATTERN_FILTER_RE = /^(?:filter|ignore):\/\/(.+)\/(i)?$/;
 var LINE_PROPS_RE = /^lineProps:\/\/(.*)$/;
 var FILTER_RE = /^(?:excludeFilter|includeFilter):\/\/(.*)$/;
-var PROPS_FILTER_RE = /^(?:filter|excludeFilter|includeFilter|ignore):\/\/(m(?:ethod)?|i(?:p)?|h(?:eader)?|s(?:tatusCode)?|b(?:ody)?|clientIp|clientIP|clientPort|serverIp|serverIP|serverPort|re[qs](?:H(?:eaders?)?)?):(.+)$/;
-var PURE_FILTER_RE = /^(?:excludeFilter|includeFilter):\/\/(statusCode|clientIp|clientIP|clientPort|serverIp|serverIP|serverPort|re[qs](?:H(?:eaders?)?)?)\.(.+)$/;
+var PROPS_FILTER_RE = /^(?:filter|excludeFilter|includeFilter|ignore):\/\/(m(?:ethod)?|i(?:p)?|h(?:eader)?|s(?:tatusCode)?|from|b(?:ody)?|clientIp|clientIP|clientPort|remoteAddress|remotePort|serverIp|serverIP|serverPort|re[qs](?:H(?:eaders?)?)?):(.+)$/;
+var PURE_FILTER_RE = /^(?:excludeFilter|includeFilter):\/\/(statusCode|from|clientIp|clientIP|clientPort|remoteAddress|remotePort|serverIp|serverIP|serverPort|re[qs](?:H(?:eaders?)?)?)[.=](.+)$/;
 var PATTERN_WILD_FILTER_RE = /^(?:filter|ignore):\/\/(!)?(\*+\/)/;
 var WILD_FILTER_RE = /^(\*+\/)/;
 var regUrlCache = {};
@@ -58,7 +58,7 @@ var TPL_RE = /^((?:[\w.-]+:)?\/\/)?(`.*`)$/;
 // req|res: ip, method, statusCode, headers?.key, cookies?.key
 var PLUGIN_NAME_RE = /^[a-z\d_\-]+(?:\.g?(?:all)?var(?:\$|\d*))?(?:\.replace\(.+\))?$/i;
 var VAR_INDEX_RE = /^([a-z\d_\-]+)\.(g)?(all)?var(\$|\d*)/i;
-var TPL_VAR_RE = /(\$)?\$\{(\{)?(id|reqId|whistle|now|port|realPort|version|url|hostname|query|search|queryString|searchString|path|pathname|clientId|localClientId|ip|clientIp|clientPort|serverIp|serverPort|method|status(?:Code)|reqCookies?|resCookies?|re[qs]H(?:eaders?)?)(?:\.([^{}]+))?\}(\})?/ig;
+var TPL_VAR_RE = /(\$)?\$\{(\{)?(id|reqId|whistle|now|port|realPort|version|url|hostname|query|search|queryString|searchString|path|pathname|clientId|localClientId|ip|clientIp|clientPort|remoteAddress|remotePort|serverIp|serverPort|method|status(?:Code)|reqCookies?|resCookies?|re[qs]H(?:eaders?)?)(?:\.([^{}]+))?\}(\})?/ig;
 var REPLACE_PATTERN_RE = /(^|\.)replace\((.+)\)$/i;
 var SEP_RE = /^[?/]/;
 var COMMA1_RE = /\\,/g;
@@ -590,6 +590,10 @@ function resolveVarValue(req, escape, name, key) {
     return resolvePropValue(req.headers, key);
   case 'hostname':
     return util.hostname();
+  case 'remoteaddress':
+    return req._remoteAddr || '';
+  case 'remoteport':
+    return req._remotePort || '0';
   default:
     return resolveResHeadersVar(req, key);
   }
@@ -622,6 +626,9 @@ function resolveTplVar(value, req) {
       regPattern = util.toOriginalRegExp(pattern);
     }
     var val = resolveVarValue(req, escape, name, key);
+    if (typeof val !== 'string') {
+      val = val == null ? '' : val + '';
+    }
     if (!val || !pattern) {
       val = pattern ? val : (val || replacement);
     } else if (!regPattern || !SUB_MATCH_RE.test(replacement)) {
@@ -1314,6 +1321,10 @@ function resolveMatchFilter(list) {
         pattern = util.toRegExp(value, true);
         propName = pattern ? 'mPattern' : 'method';
         value = pattern || value.toUpperCase();
+      } else if (propName === 'from') {
+        pattern = null;
+        propName = 'from';
+        value = value.toLowerCase();
       } else if (propName === 's' || propName === 'statusCode') {
         pattern = util.toRegExp(value);
         propName = pattern ? 'sPattern' : 'statusCode';
@@ -1331,6 +1342,18 @@ function resolveMatchFilter(list) {
             value: value.toLowerCase()
           };
         }
+      } else if (propName === 'remoteAddress') {
+        pattern = util.toRegExp(value);
+        if (pattern) {
+          propName = 'addrPattern';
+        }
+        value = pattern || value.toLowerCase();
+      } else if (propName === 'remotePort') {
+        pattern = util.toRegExp(value);
+        if (pattern) {
+          propName = 'portPattern';
+        }
+        value = pattern || value.toLowerCase();
       } else {
         var index = value.indexOf('=');
         var key = (index === -1 ? value : value.substring(0, index)).toLowerCase();
@@ -1489,6 +1512,27 @@ function matchFilter(url, filter, req) {
       return true;
     }
   };
+  if (filter.from) {
+    if (filter.from === 'tunnel') {
+      return filter.not ? !req.fromTunnel : req.fromTunnel;
+    }
+    if (filter.from === 'composer') {
+      return filter.not ? !req.fromComposer : req.fromComposer;
+    }
+    if (filter.from === 'sni') {
+      return filter.not ? !req.useSNI : req.useSNI;
+    }
+    if (filter.from === 'httpserver') {
+      return filter.not ? !req.fromHttpServer : req.fromHttpServer;
+    }
+    if (filter.from === 'httpsserver') {
+      return filter.not ? !req.fromHttpsServer : req.fromHttpsServer;
+    }
+    if (filter.from === 'httpsport') {
+      return filter.not ? !req.isHttpsServer : req.isHttpsServer;
+    }
+    return false;
+  }
   if (filterProp(req.method, filter.method, filter.mPattern)) {
     return getFilterResult(result, filter); 
   }
@@ -1512,6 +1556,14 @@ function matchFilter(url, filter, req) {
   }
   if (filterProp(req.serverPort, filter.serverPort, filter.spPattern)) {
     return getFilterResult(result, filter); 
+  }
+
+  if (filterProp(req._remoteAddr, filter.remoteAddress, filter.addrPattern)) {
+    return getFilterResult(result, filter);
+  }
+
+  if (filterProp(req._remotePort, filter.remotePort, filter.portPattern)) {
+    return getFilterResult(result, filter);
   }
 
   var reqBody = req._reqBody;
@@ -1758,7 +1810,8 @@ proto.resolveFilter = function(req) {
 proto.resolveDisable = function(req) {
   return resolveProperties(req, this._rules.disable, this._values);
 };
-var pluginProtocols = ['enable', 'disable', 'plugin'];
+var pluginProtocols = ['enable', 'disable', 'plugin', 'rule'];
+var proxyProtocols = ['enable', 'disable', 'plugin'];
 
 function resolveRules(req, isReq, isRes) {
   if (req.isInternalUrl) {
@@ -1769,7 +1822,12 @@ function resolveRules(req, isReq, isRes) {
   var _rules = {};
   var vals = this._values;
   var filter = this.resolveFilter(req);
-  var protos = req.isPluginReq ? pluginProtocols : (isRes ? pureResProtocols : (isReq ? reqProtocols : protocols));
+  var protos;
+  if (req.isPluginReq) {
+    protos = req._isProxyReq ? proxyProtocols : pluginProtocols;
+  } else {
+    protos = isRes ? pureResProtocols : (isReq ? reqProtocols : protocols);
+  }
   req._inlineValues = vals;
   protos.forEach(function(name) {
     if (name !== 'pipe' && (name === 'proxy' || name === 'rule' || name === 'plugin'

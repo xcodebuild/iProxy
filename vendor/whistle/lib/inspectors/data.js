@@ -5,9 +5,10 @@ var socketMgr = require('../socket-mgr');
 var config = require('../config');
 
 var MAX_BODY_SIZE = 360 * 1024;
-var MAX_SIZE = (config.strict ? 256 : 512) * 1024;
-var MAX_REQ_BODY_SIZE = (config.strict ? 256 : 2024) * 1024;
+var MAX_SIZE = (config.strict ? 256 : 768) * 1024;
+var MAX_REQ_BODY_SIZE = (config.strict ? 256 : 1536) * 1024;
 var MAX_RES_BODY_SIZE = (config.strict ? 256 : 1536) * 1024;
+var BIG_DATA_SIZE = 2560 * 1024;
 var LOCALHOST = '127.0.0.1';
 
 function getZipType(options) {
@@ -34,8 +35,8 @@ function checkType(res) {
   return type && type !== 'CSS' && type !== 'IMG';
 }
 
-function checkBodySize(data) {
-  if (config.strict && data.body && data.body.length > MAX_BODY_SIZE) {
+function checkBodySize(data, useBigData) {
+  if (config.strict && data.body && data.body.length > (useBigData ? BIG_DATA_SIZE : MAX_BODY_SIZE)) {
     data.body = '';
   }
 }
@@ -107,6 +108,9 @@ function emitDataEvents(req, res, proxy) {
   var updateEvent;
   var useReqStream;
   var useFrames;
+  var enable = req.enable;
+  var disable = req.disable;
+  var useBigData = (enable.bigData || enable.largeData) && !disable.bigData && !disable.largeData;
   var setEndTime = function() {
     if (data.requestTime || !requestTime) {
       data.endTime = endTime || Date.now();
@@ -159,7 +163,7 @@ function emitDataEvents(req, res, proxy) {
     reqData.size = 0;
     var write = stream.write;
     var end = stream.end;
-    var MAX_REQ_BODY = info.headers && info.headers['content-encoding'] ? MAX_SIZE : MAX_REQ_BODY_SIZE;
+    var MAX_REQ_BODY = useBigData ? BIG_DATA_SIZE : (info.headers && info.headers['content-encoding'] ? MAX_SIZE : MAX_REQ_BODY_SIZE);
     stream.write = function(chunk) {
       if (chunk) {
         if (reqBody || reqBody === null) {
@@ -194,7 +198,7 @@ function emitDataEvents(req, res, proxy) {
         reqBody = err ? util.getErrorStack(err) : body;
         reqData.body = reqBody;
         setUnzipSize(body, reqData);
-        checkBodySize(reqData);
+        checkBodySize(reqData, useBigData);
       });
       updateEvent && proxy.emit(updateEvent, req.fullUrl, false, true);
       return end.apply(this, arguments);
@@ -207,7 +211,7 @@ function emitDataEvents(req, res, proxy) {
     resDone = true;
     info = info || (res._needGunzip ? { statusCode: res.statusCode, headers: '' } : res);
     var useStream = isStream && !getZipType(info);
-    var MAX_RES_BODY = isUnzipJs(info) ? MAX_RES_BODY_SIZE : MAX_SIZE;
+    var MAX_RES_BODY = useBigData ? BIG_DATA_SIZE : (isUnzipJs(info) ? MAX_RES_BODY_SIZE : MAX_SIZE);
     if (!cleared && util.hasBody(info, req) && checkType(info)) {
       if (info.headers['content-length'] > MAX_RES_BODY) {
         resBody = false;
@@ -251,7 +255,7 @@ function emitDataEvents(req, res, proxy) {
           resData.body = resBody;
         }
         setUnzipSize(body, resData);
-        checkBodySize(resData);
+        checkBodySize(resData, useBigData);
         setEndTime();
         reqEmitter.emit('end', data);
       });
@@ -363,6 +367,7 @@ function emitDataEvents(req, res, proxy) {
     data.responseTime = Date.now();
     if (!requestTime && !data.requestTime) {
       isStream = true;
+      data.isStream = true;
       updateEvent = eventName;
       useReqStream = !getZipType(req);
     }
@@ -376,7 +381,7 @@ function emitDataEvents(req, res, proxy) {
 module.exports = function(req, res, next) {
   emitDataEvents(req, res, this);
   util.delay(util.getMatcherValue(req.rules.reqDelay), function() {
-    if (req.filter.abort || req.enable.abort) {
+    if (!req.disable.abort && (req.filter.abort || req.enable.abort)) {
       return res.destroy();
     }
     next();

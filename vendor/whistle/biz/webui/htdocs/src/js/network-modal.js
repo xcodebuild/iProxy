@@ -1,5 +1,6 @@
 var util = require('./util');
 var storage = require('./storage');
+var events = require('./events');
 
 var NUM_OPTIONS = [500, 1000, 1500, 2000, 2500, 3000];
 var curLength = parseInt(storage.get('maxNetworkRows'), 10) || 1500;
@@ -48,14 +49,18 @@ function parseKeyword(keyword) {
   if (!keyword) {
     return;
   }
+  var not = keyword[0] === '!';
+  if (not) {
+    keyword = keyword.substring(1);
+  }
   var type = 'url';
   if (KW_RE.test(keyword)) {
     type = RegExp.$1.toLowerCase();
     keyword = RegExp.$2.trim();
-  }
-  var not = keyword[0] === '!';
-  if (not) {
-    keyword = keyword.substring(1);
+    if (keyword[0] === '!') {
+      not = true;
+      keyword = keyword.substring(1);
+    }
   }
   if (!keyword && type !== 'mark') {
     return;
@@ -284,12 +289,16 @@ proto.getDisplayCount = function() {
   return count >= 0 && count <= MAX_FS_COUNT ? count : MAX_FS_COUNT;
 };
 
-proto.clear = function clear() {
+proto.clear = function() {
+  var len = this.list.length;
   this.clearNetwork = true;
-  this.list.splice(0, this.list.length);
+  this.list.splice(0, len);
   this._list = null;
   this.updateTree();
   this.updateDisplayCount();
+  if (len) {
+    events.trigger('selectedSessionChange');
+  }
   return this;
 };
 

@@ -13,6 +13,7 @@ var config = require('../config');
 
 
 var pki = forge.pki;
+var workerIndex = util.workerIndex;
 var CUR_VERSION = process.version;
 var requiredVersion = parseInt(CUR_VERSION.slice(1), 10) >= 6;
 var HTTPS_DIR = mkdir(path.join(config.getDataDir(), 'certs'));
@@ -26,18 +27,33 @@ var customCertDir = config.certDir;
 var customPairs = {};
 var customCertsInfo = {};
 var customCertsFiles = {};
+var allCustomCerts = {};
 var customCertCount = 0;
 var cachePairs = new LRU({max: 5120});
 var certsCache = new LRU({max: 256});
 var remoteCerts = new LRU({max: 1280});
 var ILEGAL_CHAR_RE = /[^a-z\d-]/i;
 var RANDOM_SERIAL = '.' + Date.now() + '.' + Math.floor(Math.random() * 10000);
+var CLEAR_CERTS_INTERVAL = 1000 * 60 * 60 * 24 * 20;
+var MAX_INNTERFAL = 18;
 var PORT_RE = /:\d*$/;
 var customRoot;
 var ROOT_KEY, ROOT_CRT;
 var rootKey, rootCrt;
 
 exports.remoteCerts = remoteCerts;
+exports.createSecureContext = createSecureContext;
+exports.CUSTOM_CERTS_DIR = CUSTOM_CERTS_DIR;
+
+// When delay is larger than 2147483647 or less than 1, the delay will be set to 1. Non-integer delays are truncated to an integer.
+var intervalCount = 0;
+setInterval(function() {
+  if (++intervalCount >= MAX_INNTERFAL) {
+    intervalCount = 0;
+    cachePairs.reset();
+    certsCache.reset();
+  }
+}, CLEAR_CERTS_INTERVAL).unref();
 
 if (!useNewKey && requiredVersion && !checkCertificate()) {
   try {
@@ -76,14 +92,14 @@ function getCommonName(crt) {
 }
 
 function getDomain(hostname) {
-  if (getCertificate(hostname) || net.isIP(hostname)) {
+  if (getCacheCert(hostname) || net.isIP(hostname)) {
     return hostname;
   }
   var list = hostname.split('.');
   var prefix = list[0];
   list[0] = '*';
   var wildDomain = list.join('.');
-  if (getCertificate(wildDomain)) {
+  if (getCacheCert(wildDomain)) {
     return wildDomain;
   }
   var len = list.length;
@@ -117,13 +133,27 @@ exports.hasCustomCerts = function() {
   return customCertCount;
 };
 
-function getCertificate(hostname) {
+function getCacheCert(hostname) {
   return customPairs[hostname] || cachePairs.get(hostname) || certsCache.get(hostname);
 }
 
-function _createCertificate(hostname) {
+var curIndex = 0;
+function getIndex() {
+  ++curIndex;
+  if (curIndex < 10) {
+    return '0' + curIndex;
+  }
+  if (curIndex > 99) {
+    curIndex = 0;
+    return '00';
+  }
+  return curIndex;
+}
+
+
+function createSelfCert(hostname) {
   var serialNumber = crypto.createHash('sha1')
-      .update(hostname + RANDOM_SERIAL, 'binary').digest('hex');
+      .update(hostname + RANDOM_SERIAL, 'binary').digest('hex') + getIndex() + workerIndex;
   var cert = createCert(pki.setRsaPublicKey(ROOT_KEY.n, ROOT_KEY.e), serialNumber, true);
   cert.setSubject([{
     name: 'commonName',
@@ -148,33 +178,66 @@ function _createCertificate(hostname) {
   };
 }
 
-function createCertificate(hostname) {
-  var requestCert = hostname[0] === ':';
-  if (requestCert) {
-    hostname = hostname.substring(1);
-  }
-  var cert = getCertificate(hostname);
-  if (!cert) {
-    cert = _createCertificate(hostname);
-    cachePairs.set(hostname, cert);
-  }
-  return requestCert ? extend({
-    requestCert: true,
-    rejectUnauthorized: false
-  }, cert) : cert;
-}
-
 exports.createCertificate = function(hostname) {
   hostname = getDomain(hostname);
-  var cert = getCertificate(hostname);
+  var cert = cachePairs.get(hostname); // 确保使用自己生成的证书，防止把用户证书下载出去
   if (!cert) {
-    cert = _createCertificate(hostname);
+    cert = createSelfCert(hostname);
     certsCache.set(hostname, cert);
   }
   return  cert;
 };
 
-function loadCustomCerts(certDir) {
+function parseCert(cert) {
+  var pem = pki.certificateFromPem(cert.cert);
+  var altNames = getAltNames(pem.extensions);
+  if (!altNames || !altNames.length) {
+    return;
+  }
+  return { cert: cert, altNames: altNames, validity: pem.validity };
+}
+
+function parseAllCustomCerts() {
+  var pairs = {};
+  var certsInfo = {};
+  var certFiles = {};
+  var keys = Object.keys(allCustomCerts).sort(function(key1, key2) {
+    return util.compare(allCustomCerts[key1].cert.mtime, allCustomCerts[key2].cert.mtime);
+  });
+  keys.forEach(function(filename) {
+    var info = allCustomCerts[filename];
+    var cert = info.cert;
+    var mtime = cert.mtime;
+    var validity = info.validity;
+    var altNames = info.altNames;
+    var dnsName = [];
+    altNames.forEach(function(item) {
+      if ((item.type === 2 || item.type === 7) && !pairs[item.value]) {
+        var preCert = customPairs[item.value];
+        if (preCert && preCert.key === cert.key && preCert.cert === cert.cert) {
+          if (preCert.mtime < mtime) {
+            preCert.mtime = mtime;
+          }
+          pairs[item.value] = preCert;
+        } else {
+          pairs[item.value] = cert;
+        }
+        dnsName.push(item.value);
+        certsInfo[item.value] = extend({ filename: filename, mtime: mtime, domain: item.value }, validity);
+      }
+    });
+    if (dnsName.length) {
+      certFiles[filename] = extend({ mtime: mtime, dir: cert.dir, dnsName: dnsName.join(', ') }, validity);
+    }
+  });
+  customPairs = pairs;
+  customCertsInfo = certsInfo;
+  customCertsFiles = certFiles;
+  customCertCount = Object.keys(customPairs).length;
+  checkExpired();
+}
+
+function loadCustomCerts(certDir, isCustom) {
   if (!certDir) {
     return;
   }
@@ -208,50 +271,33 @@ function loadCustomCerts(certDir) {
     ROOT_KEY_FILE = path.join(certDir, 'root.key');
     ROOT_CRT_FILE = path.join(certDir, 'root.crt');
   }
-  var keys = Object.keys(certs).filter(function(key) {
+  Object.keys(certs).filter(function(key) {
     var cert = certs[key];
-    return cert && cert.mtime != null;
-  }).sort(function(key1, key2) {
-    return util.compare(certs[key1].mtime, certs[key2].mtime);
-  });
-  keys.forEach(function(filename) {
-    var cert = certs[filename];
-    if (!cert || !cert.key || !cert.cert) {
-      return;
-    }
-    try {
-      var pem = pki.certificateFromPem(cert.cert);
-      var altNames = getAltNames(pem.extensions);
-      var mtime = cert.mtime;
-      var validity = pem.validity;
-      var dnsName = [];
-      altNames.forEach(function(item) {
-        if ((item.type === 2 || item.type === 7) && !customPairs[item.value]) {
-          customPairs[item.value] = cert;
-          dnsName.push(item.value);
-          customCertsInfo[item.value] = extend({ filename: filename, mtime: mtime, domain: item.value }, validity);
+    if (cert && cert.mtime != null && cert.key && cert.cert) {
+      try {
+        cert = parseCert(cert);
+        if (cert) {
+          allCustomCerts[isCustom ? 'z/' + key : key] = cert;
         }
-      });
-      if (dnsName.length) {
-        customCertsFiles[filename] = extend({ mtime: mtime, dir: cert.dir, dnsName: dnsName.join(', ') }, validity);
-      }
-    } catch (e) {}
+      } catch (e) {}
+    }
   });
-  customCertCount = Object.keys(customPairs).length;
 }
 
 function getAltNames(exts) {
   for (var i = 0, len = exts.length; i < len; i++) {
     var item = exts[i];
     if (item.name === 'subjectAltName') {
-      return item.altNames;
+      return Array.isArray(item.altNames) && item.altNames.filter(util.noop);
     }
   }
 }
 
 function createRootCA() {
-  loadCustomCerts(customCertDir);
+  allCustomCerts = {};
+  loadCustomCerts(customCertDir, true);
   loadCustomCerts(CUSTOM_CERTS_DIR);
+  parseAllCustomCerts();
   if (ROOT_KEY && ROOT_CRT) {
     return;
   }
@@ -387,19 +433,35 @@ function getRootCAFile() {
 
 createRootCA();// 启动生成ca
 
-hagent.serverAgent.createCertificate = createCertificate;
+function getOrCreateCert(servername) {
+  var requestCert = servername[0] === ':';
+  if (requestCert) {
+    servername = servername.substring(1);
+  }
+  var cert = remoteCerts.get(servername);
+  if (!cert) {
+    servername = getDomain(servername);
+    cert = getCacheCert(servername);
+    if (!cert) {
+      cert = createSelfCert(servername);
+      cachePairs.set(servername, cert);
+    }
+  }
+  return requestCert ? extend({
+    requestCert: true,
+    rejectUnauthorized: false
+  }, cert) : cert;
+}
+
+hagent.serverAgent.createCertificate = getOrCreateCert;
 var getHttp2Server =  hagent.create(h2.getHttpServer, 42900);
 var getHttpsServer = hagent.create(h2.getServer, 43900);
 var cbs = {};
 var ports = {};
 var TIMEOUT = 6000;
 
-var SNICallback = function(serverName, cb) {
-  var options = remoteCerts.get(serverName);
-  if (!options) {
-    serverName = getDomain(serverName);
-    options = createCertificate(serverName);
-  }
+var SNICallback = function(servername, cb) {
+  var options = getOrCreateCert(servername);
   if (!options._ctx) {
     try {
       options._ctx = createSecureContext(options);
@@ -425,8 +487,7 @@ exports.getCustomCertsFiles = function() {
 exports.getRootCAFile = getRootCAFile;
 exports.serverAgent = hagent.serverAgent;
 
-var SNI_OPTIONS = { SNICallback: SNICallback };
-exports.SNI_OPTIONS = SNI_OPTIONS;
+exports.SNICallback = SNICallback;
 
 function addCallback(name, callback) {
   var cbList = cbs[name];
@@ -491,7 +552,7 @@ exports.getSNIServer = function(listener, callback, disableH2, requestCert) {
   if (curPort === false) {
     return;
   }
-  var options = SNI_OPTIONS;
+  var options = { SNICallback: SNICallback };
   options.allowHTTP1 = enableH2; // 是否启用http2
   if (requestCert) {
     options = extend({
@@ -502,12 +563,14 @@ exports.getSNIServer = function(listener, callback, disableH2, requestCert) {
   createServer(name, cbList, listener, options);
 };
 
-var files = Object.keys(customCertsFiles);
-var filesCount = files.length;
+var checkTimer;
 
 function checkExpired() {
+  clearTimeout(checkTimer);
   var now = Date.now();
-  for (var i = 0; i < filesCount; i++) {
+  var files = Object.keys(customCertsFiles);
+  exports.hasInvalidCerts = false;
+  for (var i = 0, len = files.length; i < len; i++) {
     var file = customCertsFiles[files[i]];
     try {
       var startDate = new Date(file.notBefore);
@@ -521,7 +584,96 @@ function checkExpired() {
       }
     } catch (e) {}
   }
-  setTimeout(checkExpired, 600000);
+  checkTimer = setTimeout(checkExpired, 600000);
 }
 
-checkExpired();
+function removeFile(filename) {
+  fs.unlink(filename, function(err) {
+    err && fs.unlink(filename, util.noop);
+  });
+}
+
+function writeFile(filename, ctn, callback) {
+  fs.writeFile(filename, ctn, function(err) {
+    if (!err) {
+      return callback();
+    }
+    fs.writeFile(filename, ctn, callback);
+  });
+}
+// 异步重试，出错重试即可
+function removeCertFile(filename) {
+  removeFile(path.join(CUSTOM_CERTS_DIR, filename + '.key'));
+  removeFile(path.join(CUSTOM_CERTS_DIR, filename + '.crt'));
+}
+// 异步写入，出错重试即可
+function writeCertFile(filename, cert, mtime) {
+  var keyFile = path.join(CUSTOM_CERTS_DIR, filename + '.key');
+  var certFile = path.join(CUSTOM_CERTS_DIR, filename + '.crt');
+  writeFile(keyFile, cert.key, function() {
+    fs.utimes && fs.utimes(keyFile, mtime, mtime, util.noop);
+  });
+  writeFile(certFile, cert.cert, function() {
+    fs.utimes && fs.utimes(certFile, mtime, mtime, util.noop);
+  });
+}
+
+var ILLEGAL_PATH_RE = /[/\\]/;
+
+function checkFilename(name) {
+  return name && !ILLEGAL_PATH_RE.test(name) && name !== 'root';
+}
+
+exports.removeCert = function(filename) {
+  if (!CUSTOM_CERTS_DIR) {
+    return;
+  }
+  if (checkFilename(filename) && allCustomCerts[filename]) {
+    removeCertFile(filename);
+    delete allCustomCerts[filename];
+    parseAllCustomCerts();
+  }
+};
+
+exports.uploadCerts = function(certs) {
+  if (!CUSTOM_CERTS_DIR) {
+    return;
+  }
+  var now = Date.now();
+  var hasChanged;
+  var index = 0;
+  Object.keys(certs).forEach(function(filename) {
+    if (!checkFilename(filename) || filename.length > 128) {
+      return;
+    }
+    var cert = certs[filename];
+    if (!cert) {
+      return;
+    }
+    var keyStr, certStr;
+    if (Array.isArray(cert)) {
+      keyStr = cert[0];
+      certStr = cert[1];
+    } else {
+      keyStr = cert.key;
+      certStr = cert.cert;
+    }
+    if (util.isString(keyStr) && util.isString(certStr)) {
+      var mtime = now + index * 1000;
+      ++index;
+      try {
+        cert = parseCert({
+          key: keyStr,
+          cert: certStr,
+          mtime: mtime
+        });
+        if (cert) {
+          writeCertFile(filename, cert.cert, new Date(mtime));
+          allCustomCerts[filename] = cert;
+          hasChanged = true;
+        }
+      } catch (e) {}
+    }
+  });
+  hasChanged && parseAllCustomCerts();
+};
