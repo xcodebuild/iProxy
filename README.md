@@ -90,3 +90,7 @@ For new contributors you can try to fix a [🏅send-a-PR](https://github.com/xco
     <img src="https://contributors-img.web.app/image?repo=xcodebuild/iproxy"></img>
   </a>
 </p>
+
+## Commit History
+
+[![Commit History Chart](https://commit-history-api.herokuapp.com/svg?repos=xcodebuild/iProxy&type=Date)](https://the-commit-history.vercel.app/#xcodebuild/iProxy&Date)
