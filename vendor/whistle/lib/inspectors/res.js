@@ -7,7 +7,6 @@ var extend = require('extend');
 var util = require('../util');
 var Transform = require('pipestream').Transform;
 var h2 = require('../https/h2');
-var ws = require('ws');
 var rules = require('../rules');
 var pluginMgr = require('../plugins');
 var hparser = require('hparser');
@@ -49,22 +48,6 @@ var BODY_PROTOCOLS = [
   'resMerge'
 ];
 var BODY_PROTOCOLS_LEN = BODY_PROTOCOLS.length;
-
-const boardcastPort = process.env.IPROXY_BOARDCASR_PORT;
-
-console.log('Whistle get boardcast port', boardcastPort);
-
-const wsClient = new ws(`ws://127.0.0.1:${boardcastPort}`);
-const clientReady = new Promise(resolve => {
-  wsClient.onopen = () => {
-        resolve();
-    };
-});
-
-wsClient.onerror = err => {
-    console.error(err);
-};
-
 
 function notAllowCache(resRules) {
   for (var i = 0; i < BODY_PROTOCOLS_LEN; i++) {
@@ -1023,20 +1006,6 @@ module.exports = function (req, res, next) {
                     if (resPrepend) {
                       data.top = resPrepend;
                     }
-                    const ruleRaw = req.rules && req.rules.rule && req.rules.rule.raw;
-                    headers['__iproxy-host-ip__'] = req.hostIp || LOCALHOST;
-  
-                    const strwrap = (str) => str.replace(/[^\x00-\x7F]/g, '_');
-  
-                    headers['__iproxy-rules__'] = strwrap(JSON.stringify(ruleRaw) || 'none');
-                    headers['__iproxy-real-url__'] = strwrap(req.realUrl || 'none');
-  
-                    headers['__iproxy-help__'] = 'See https://github.com/xcodebuild/iproxy';
-                    
-                    util.setResponseFor(resRules, headers, req, req.hostIp);
-                    pluginMgr.postStats(req, res);
-                    if (!hasResBody && headers['content-length'] > 0 && !util.isHead(req)) {
-                      delete headers['content-length'];
                     if (resAppend) {
                       data.bottom = util.toBuffer(resAppend);
                     }
@@ -1048,6 +1017,16 @@ module.exports = function (req, res, next) {
                     delete data.headers;
                     delete data.speed;
                     delete data.delay;
+
+                    const ruleRaw = req.rules && req.rules.rule && req.rules.rule.raw;
+                    headers['__iproxy-host-ip__'] = req.hostIp || LOCALHOST;
+  
+                    const strwrap = (str) => str.replace(/[^\x00-\x7F]/g, '_');
+  
+                    headers['__iproxy-rules__'] = strwrap(JSON.stringify(ruleRaw) || 'none');
+                    headers['__iproxy-real-url__'] = strwrap(req.realUrl || 'none');
+  
+                    headers['__iproxy-help__'] = 'See https://github.com/xcodebuild/iproxy';
 
                     isHtml = isHtml || !headers['content-type'];
                     if (
