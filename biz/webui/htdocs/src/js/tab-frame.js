@@ -12,52 +12,80 @@ function onWhistleInspectorCustomTabReady(init) {
     return;
   }
   var bridge = getBridge();
-  bridge.getActiveSession = function() {
+  bridge.getActiveSession = function () {
     return modal.getActive();
   };
-  bridge.getSelectedSessionList = function() {
+  bridge.getSelectedSessionList = function () {
     return modal.getSelectedList();
   };
   init(bridge);
 }
 
 var TabFrame = React.createClass({
-  getInitialState: function() {
+  getInitialState: function () {
     var url = this.props.src;
-    url += (url.indexOf('?') === -1 ? '?' : '&');
+    url += url.indexOf('?') === -1 ? '?' : '&';
     return {
-      url: url + '???_WHISTLE_PLUGIN_INSPECTOR_TAB_' + dataCenter.getPort() + '???'
+      url:
+        url + '???_WHISTLE_PLUGIN_INSPECTOR_TAB_' + dataCenter.getPort() + '???'
     };
   },
-  componentDidMount: function() {
+  componentDidMount: function () {
     events.on('selectedSessionChange', this.handlePush);
   },
-  componentWillUnmount: function() {
+  componentWillUnmount: function () {
     events.off('selectedSessionChange', this.handlePush);
   },
-  shouldComponentUpdate: function(nextProps) {
+  shouldComponentUpdate: function (nextProps) {
     var hide = util.getBoolean(this.props.hide);
     return hide != util.getBoolean(nextProps.hide) || !hide;
   },
-  handlePush: function(_, item) {
-    if (this.props.hide) {
-      return;
-    }
+  compose: function (item) {
+    this.handlePush(null, null, item);
+  },
+  handlePush: function (_, item, comItem) {
     try {
       var win = ReactDOM.findDOMNode(this.refs.iframe).contentWindow;
-      if (win && typeof win.__pushWhistle5b6af7b9884e1165SessionActive__ === 'function') {
-        win.__pushWhistle5b6af7b9884e1165SessionActive__(item);
+      if (
+        win &&
+        typeof win.__pushWhistle5b6af7b9884e1165SessionActive__ === 'function'
+      ) {
+        if (comItem) {
+          win.__pushWhistle5b6af7b9884e1165SessionActive__(null, null, comItem);
+          comItem = null;
+        } else if (this.props.hide) {
+          win.__pushWhistle5b6af7b9884e1165SessionActive__(null, true);
+        } else {
+          win.__pushWhistle5b6af7b9884e1165SessionActive__(
+            item || modal.getActive()
+          );
+        }
       }
     } catch (e) {}
+    this.composeItem = comItem;
   },
-  componentDidUpdate: function() {
-    this.handlePush(null, modal.getActive());
+  componentDidUpdate: function () {
+    this.handlePush();
   },
-  render: function() {
+  onLoad: function () {
+    if (this.composeItem) {
+      this.handlePush(null, null, this.composeItem);
+      this.composeItem = null;
+    }
+  },
+  render: function () {
     var display = this.props.hide ? 'none' : undefined;
     // 防止被改
     window.onWhistleInspectorCustomTabReady = onWhistleInspectorCustomTabReady;
-    return <iframe ref="iframe" src={this.state.url} style={{display: display}} className="fill w-tab-frame"  />;
+    return (
+      <iframe
+        onLoad={this.onLoad}
+        ref="iframe"
+        src={this.state.url}
+        style={{ display: display }}
+        className="fill w-tab-frame"
+      />
+    );
   }
 });
 
