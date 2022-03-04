@@ -37,13 +37,13 @@ var pendingFiles = {};
 var localIpCache = new LRU({ max: 120 });
 var CRLF_RE = /\r\n|\r|\n/g;
 var SEARCH_RE = /[?#].*$/;
-var UTF8_OPTIONS = {encoding: 'utf8'};
+var UTF8_OPTIONS = { encoding: 'utf8' };
 var LOCALHOST = '127.0.0.1';
 var aliasProtocols = protoMgr.aliasProtocols;
 var CONTEXT = vm.createContext();
 var END_WIDTH_SEP_RE = /[/\\]$/;
 var GEN_URL_RE = /^\s*(?:https?:)?\/\/\w[^\s]*\s*$/i;
-var G_NON_LATIN1_RE = /\s|[^\x00-\xFF]/ug;
+var G_NON_LATIN1_RE = /\s|[^\x00-\xFF]/gu;
 var NON_LATIN1_RE = /[^\x00-\xFF]/;
 var SCRIPT_START = toBuffer('<script>');
 var SCRIPT_END = toBuffer('</script>');
@@ -60,39 +60,90 @@ var HTTP_RE = /^(https?:\/\/[^/?]+)/;
 var SEP_RE = /[|&]/;
 var ctxTimer;
 var END_RE = /[/\\]$/;
-var resetContext = function() {
+var resetContext = function () {
   ctxTimer = null;
   CONTEXT = vm.createContext();
 };
 var SUB_MATCH_RE = /\$[&\d]/;
 var HTTP_URL_RE = /^https?:\/\//;
 var replacePattern = ReplacePatternTransform.replacePattern;
-var CIPHER_OPTIONS = ['NULL-SHA256', 'AES128-SHA256', 'AES256-SHA256', 'AES128-GCM-SHA256', 'AES256-GCM-SHA384',
-  'DH-RSA-AES128-SHA256', 'DH-RSA-AES256-SHA256', 'DH-RSA-AES128-GCM-SHA256', 'DH-RSA-AES256-GCM-SHA384',
-  'DH-DSS-AES128-SHA256', 'DH-DSS-AES256-SHA256', 'DH-DSS-AES128-GCM-SHA256', 'DH-DSS-AES256-GCM-SHA384',
-  'DHE-RSA-AES128-SHA256', 'DHE-RSA-AES256-SHA256', 'DHE-RSA-AES128-GCM-SHA256', 'DHE-RSA-AES256-GCM-SHA384',
-  'DHE-DSS-AES128-SHA256', 'DHE-DSS-AES256-SHA256', 'DHE-DSS-AES128-GCM-SHA256', 'DHE-DSS-AES256-GCM-SHA384',
-  'ECDHE-RSA-AES128-SHA256', 'ECDHE-RSA-AES256-SHA384', 'ECDHE-RSA-AES128-GCM-SHA256', 'ECDHE-RSA-AES256-GCM-SHA384',
-  'ECDHE-ECDSA-AES128-SHA256', 'ECDHE-ECDSA-AES256-SHA384', 'ECDHE-ECDSA-AES128-GCM-SHA256', 'ECDHE-ECDSA-AES256-GCM-SHA384',
-  'ADH-AES128-SHA256', 'ADH-AES256-SHA256', 'ADH-AES128-GCM-SHA256', 'ADH-AES256-GCM-SHA384', 'AES128-CCM', 'AES256-CCM',
-  'DHE-RSA-AES128-CCM', 'DHE-RSA-AES256-CCM', 'AES128-CCM8', 'AES256-CCM8', 'DHE-RSA-AES128-CCM8', 'DHE-RSA-AES256-CCM8',
-  'ECDHE-ECDSA-AES128-CCM', 'ECDHE-ECDSA-AES256-CCM', 'ECDHE-ECDSA-AES128-CCM8', 'ECDHE-ECDSA-AES256-CCM8'];
+var CIPHER_OPTIONS = [
+  'NULL-SHA256',
+  'AES128-SHA256',
+  'AES256-SHA256',
+  'AES128-GCM-SHA256',
+  'AES256-GCM-SHA384',
+  'DH-RSA-AES128-SHA256',
+  'DH-RSA-AES256-SHA256',
+  'DH-RSA-AES128-GCM-SHA256',
+  'DH-RSA-AES256-GCM-SHA384',
+  'DH-DSS-AES128-SHA256',
+  'DH-DSS-AES256-SHA256',
+  'DH-DSS-AES128-GCM-SHA256',
+  'DH-DSS-AES256-GCM-SHA384',
+  'DHE-RSA-AES128-SHA256',
+  'DHE-RSA-AES256-SHA256',
+  'DHE-RSA-AES128-GCM-SHA256',
+  'DHE-RSA-AES256-GCM-SHA384',
+  'DHE-DSS-AES128-SHA256',
+  'DHE-DSS-AES256-SHA256',
+  'DHE-DSS-AES128-GCM-SHA256',
+  'DHE-DSS-AES256-GCM-SHA384',
+  'ECDHE-RSA-AES128-SHA256',
+  'ECDHE-RSA-AES256-SHA384',
+  'ECDHE-RSA-AES128-GCM-SHA256',
+  'ECDHE-RSA-AES256-GCM-SHA384',
+  'ECDHE-ECDSA-AES128-SHA256',
+  'ECDHE-ECDSA-AES256-SHA384',
+  'ECDHE-ECDSA-AES128-GCM-SHA256',
+  'ECDHE-ECDSA-AES256-GCM-SHA384',
+  'ADH-AES128-SHA256',
+  'ADH-AES256-SHA256',
+  'ADH-AES128-GCM-SHA256',
+  'ADH-AES256-GCM-SHA384',
+  'AES128-CCM',
+  'AES256-CCM',
+  'DHE-RSA-AES128-CCM',
+  'DHE-RSA-AES256-CCM',
+  'AES128-CCM8',
+  'AES256-CCM8',
+  'DHE-RSA-AES128-CCM8',
+  'DHE-RSA-AES256-CCM8',
+  'ECDHE-ECDSA-AES128-CCM',
+  'ECDHE-ECDSA-AES256-CCM',
+  'ECDHE-ECDSA-AES128-CCM8',
+  'ECDHE-ECDSA-AES256-CCM8'
+];
 var TLSV2_CIPHERS = 'ECDHE-ECDSA-AES256-GCM-SHA384';
 var EMPTY_BUFFER = toBuffer('');
 var lowerCaseify = common.lowerCaseify;
+var removeIPV6Prefix = common.removeIPV6Prefix;
 var hasBody = common.hasBody;
+var hasProtocol = common.hasProtocol;
+var removeProtocol = common.removeProtocol;
 var workerIndex = process.env && process.env.workerIndex;
 var INTERNAL_ID = process.pid + '-' + Math.random();
+var pluginMgr;
 
 workerIndex = workerIndex >= 0 ? padReqId(config.workerIndex) : '';
 
+exports.hasProtocol = hasProtocol;
+exports.removeProtocol = removeProtocol;
+exports.setProtocol = common.setProtocol;
+exports.getProtocol = common.getProtocol;
+exports.replaceProtocol = common.replaceProtocol;
 exports.workerIndex = workerIndex;
 exports.proc = proc;
 exports.INTERNAL_ID = INTERNAL_ID;
 // 避免属性被 stringify ，减少冗余数据传给前端
-exports.PLUGIN_VALUES = typeof Symbol === 'undefined' ? '_values' : Symbol('_values'); // eslint-disable-line
-exports.PLUGIN_MENU_CONFIG = typeof Symbol === 'undefined' ? '_menuConfig' : Symbol('_menuConfig'); // eslint-disable-line
-exports.PLUGIN_INSPECTOR_CONFIG = typeof Symbol === 'undefined' ? '_inspectorConfig' : Symbol('_inspectorConfig'); // eslint-disable-line
+exports.PLUGIN_VALUES =
+  typeof Symbol === 'undefined' ? '_values' : Symbol('_values'); // eslint-disable-line
+exports.PLUGIN_MENU_CONFIG =
+  typeof Symbol === 'undefined' ? '_menuConfig' : Symbol('_menuConfig'); // eslint-disable-line
+exports.PLUGIN_INSPECTOR_CONFIG =
+  typeof Symbol === 'undefined'
+    ? '_inspectorConfig'
+    : Symbol('_inspectorConfig'); // eslint-disable-line
 exports.drain = require('./drain');
 exports.isWin = process.platform === 'win32';
 exports.isUtf8 = isUtf8;
@@ -123,7 +174,12 @@ function isUrl(str) {
 exports.isUrl = isUrl;
 
 function isCiphersError(e) {
-  return e.code === 'EPROTO' || String(e.message).indexOf('disconnected before secure TLS connection was established') !== -1;
+  return (
+    e.code === 'EPROTO' ||
+    String(e.message).indexOf(
+      'disconnected before secure TLS connection was established'
+    ) !== -1
+  );
 }
 
 exports.isCiphersError = isCiphersError;
@@ -154,10 +210,10 @@ function evalJson(str) {
   } catch (e) {}
 }
 
-exports.parseRawJson = function(str) {
+exports.parseRawJson = function (str) {
   try {
     return JSON.parse(str);
-  } catch(e) {
+  } catch (e) {
     return evalJson(str);
   }
 };
@@ -184,18 +240,21 @@ function getLatestVersion(registry, cb) {
   if (!registry) {
     return cb();
   }
-  httpMgr.request({
-    url: registry,
-    maxLength: MAX_LEN
-  }, function(err, body, res) {
-    if (err || res.statusCode !== 200) {
-      body = null;
-    } else if (body) {
-      body = parseJSON(body);
+  httpMgr.request(
+    {
+      url: registry,
+      maxLength: MAX_LEN
+    },
+    function (err, body, res) {
+      if (err || res.statusCode !== 200) {
+        body = null;
+      } else if (body) {
+        body = parseJSON(body);
+      }
+      body = body && body['dist-tags'];
+      cb(body && body['latest']);
     }
-    body = body && body['dist-tags'];
-    cb(body && body['latest']);
-  });
+  );
 }
 
 exports.getRegistry = getRegistry;
@@ -206,8 +265,11 @@ exports.removeIllegalTrailers = common.removeIllegalTrailers;
 exports.isHead = common.isHead;
 exports.hasBody = hasBody;
 
-var ESTABLISHED_CTN = 'HTTP/1.1 200 Connection Established\r\nProxy-Agent: ' + config.name + '\r\n\r\n';
-exports.setEstablished = function(socket) {
+var ESTABLISHED_CTN =
+  'HTTP/1.1 200 Connection Established\r\nProxy-Agent: ' +
+  config.name +
+  '\r\n\r\n';
+exports.setEstablished = function (socket) {
   socket.write(ESTABLISHED_CTN);
 };
 
@@ -233,13 +295,13 @@ exports.handleStatusCode = handleStatusCode;
 
 function getStatusCode(statusCode) {
   statusCode |= 0;
-  return (statusCode < 100 || statusCode > 999) ? 0 : statusCode;
+  return statusCode < 100 || statusCode > 999 ? 0 : statusCode;
 }
 
 exports.getStatusCode = getStatusCode;
 
 function compare(v1, v2) {
-  return v1 == v2 ? 0 : (v1 > v2 ? -1 : 1);
+  return v1 == v2 ? 0 : v1 > v2 ? -1 : 1;
 }
 
 exports.compare = compare;
@@ -265,16 +327,19 @@ function getScript(content) {
 
   var list = Object.keys(scriptCache);
   if (list.length > MAX_SCRIPT_CACHE_COUNT) {
-    list = list.map(function(content) {
-      var script = scriptCache[content];
-      script.content = content;
-      return script;
-    }).sort(function(a, b) {
-      return compare(a.time, b.time);
-    }).splice(0, MIN_SCRIPT_CACHE_COUNT);
+    list = list
+      .map(function (content) {
+        var script = scriptCache[content];
+        script.content = content;
+        return script;
+      })
+      .sort(function (a, b) {
+        return compare(a.time, b.time);
+      })
+      .splice(0, MIN_SCRIPT_CACHE_COUNT);
 
     scriptCache = {};
-    list.forEach(function(script) {
+    list.forEach(function (script) {
       scriptCache[script.content] = {
         script: script.script,
         time: script.time
@@ -291,7 +356,7 @@ function getScript(content) {
 }
 
 function clearContext() {
-  Object.keys(CONTEXT).forEach(function(key) {
+  Object.keys(CONTEXT).forEach(function (key) {
     delete CONTEXT[key];
   });
   if (!ctxTimer) {
@@ -301,19 +366,20 @@ function clearContext() {
 
 function execScriptSync(script, context) {
   try {
-    if (script = getScript(script)) {
+    if ((script = getScript(script))) {
       CONTEXT.console = {};
-      ['fatal', 'error', 'warn', 'info', 'log', 'debug']
-        .forEach(function(level) {
-          CONTEXT.console[level] = logger[level];
-        });
-      Object.keys(context).forEach(function(key) {
+      ['fatal', 'error', 'warn', 'info', 'log', 'debug'].forEach(function (
+        level
+      ) {
+        CONTEXT.console[level] = logger[level];
+      });
+      Object.keys(context).forEach(function (key) {
         CONTEXT[key] = context[key];
       });
       script.runInContext(CONTEXT, VM_OPTIONS);
     }
     return true;
-  } catch(e) {
+  } catch (e) {
     logger.error(e);
   } finally {
     clearContext();
@@ -326,7 +392,7 @@ function stat(file, callback, force) {
   if (force) {
     return callback(true);
   }
-  fs.stat(file, function(err) {
+  fs.stat(file, function (err) {
     if (!err || err.code === 'ENOTDIR') {
       return callback();
     }
@@ -347,23 +413,27 @@ function getFileWriter(file, callback, force) {
   if (!force && pendingFiles[file]) {
     return callback();
   }
-  var execCb = function(writer) {
+  var execCb = function (writer) {
     delete pendingFiles[file];
     callback(writer);
   };
   pendingFiles[file] = 1;
-  stat(file, function(notExists) {
-    if (!notExists) {
-      return execCb();
-    }
-    fse.ensureFile(file, function(err) {
-      if (err) {
-        logger.error(err);
+  stat(
+    file,
+    function (notExists) {
+      if (!notExists) {
         return execCb();
       }
-      execCb(fs.createWriteStream(file).on('error', logger.error));
-    });
-  }, force);
+      fse.ensureFile(file, function (err) {
+        if (err) {
+          logger.error(err);
+          return execCb();
+        }
+        execCb(fs.createWriteStream(file).on('error', logger.error));
+      });
+    },
+    force
+  );
 }
 
 function getFileWriters(files, callback, force) {
@@ -371,13 +441,19 @@ function getFileWriters(files, callback, force) {
     files = [files];
   }
 
-  Q.all(files.map(function(file) {
-    var defer = Q.defer();
-    getFileWriter(file, function(writer) {
-      defer.resolve(writer);
-    }, force);
-    return defer.promise;
-  })).spread(callback);
+  Q.all(
+    files.map(function (file) {
+      var defer = Q.defer();
+      getFileWriter(
+        file,
+        function (writer) {
+          defer.resolve(writer);
+        },
+        force
+      );
+      return defer.promise;
+    })
+  ).spread(callback);
 }
 
 exports.getFileWriters = getFileWriters;
@@ -391,13 +467,14 @@ function getErrorStack(err) {
   var stack;
   try {
     stack = err.stack;
-  } catch(e) {}
+  } catch (e) {}
   stack = stack || err.message || err;
   var result = [
     'From: ' + config.name + '@' + config.version,
     'Node: ' + process.version,
     'Date: ' + formatDate(),
-    stack];
+    stack
+  ];
   return result.join('\r\n');
 }
 
@@ -431,14 +508,14 @@ function toOriginalRegExp(regExp) {
   regExp = ORIG_REG_EXP.test(regExp);
   try {
     regExp = regExp && new RegExp(RegExp.$1, RegExp.$2);
-  } catch(e) {
+  } catch (e) {
     regExp = null;
   }
   return regExp;
 }
 exports.toOriginalRegExp = toOriginalRegExp;
 
-exports.emitError = function(obj, err) {
+exports.emitError = function (obj, err) {
   if (obj) {
     obj.once('error', noop);
     obj.emit('error', err || new Error('Unknown'));
@@ -447,7 +524,7 @@ exports.emitError = function(obj, err) {
 
 exports.indexOfList = require('./buf-util').indexOf;
 
-exports.startWithList = function(buf, subBuf, start) {
+exports.startWithList = function (buf, subBuf, start) {
   var len = subBuf.length;
   if (!len) {
     return false;
@@ -463,7 +540,7 @@ exports.startWithList = function(buf, subBuf, start) {
   return true;
 };
 
-exports.endWithList = function(buf, subBuf, end) {
+exports.endWithList = function (buf, subBuf, end) {
   var subLen = subBuf.length;
   if (!subLen) {
     return false;
@@ -487,7 +564,7 @@ function isEnable(req, name) {
 
 exports.isEnable = isEnable;
 
-exports.getInternalHost = function(req, host) {
+exports.getInternalHost = function (req, host) {
   if (isEnable(req, 'useLocalHost')) {
     return 'local.wproxy.org';
   }
@@ -504,7 +581,9 @@ exports.getInternalHost = function(req, host) {
 function isAuthCapture(req) {
   var e = req.enable || '';
   var d = req.disable || '';
-  return (e.authCapture || e.authIntercept) && !d.authCapture && !d.authIntercept;
+  return (
+    (e.authCapture || e.authIntercept) && !d.authCapture && !d.authIntercept
+  );
 }
 
 exports.isAuthCapture = isAuthCapture;
@@ -513,7 +592,7 @@ exports.toRegExp = function toRegExp(regExp, ignoreCase) {
   regExp = REG_EXP_RE.test(regExp);
   try {
     regExp = regExp && new RegExp(RegExp.$1, ignoreCase ? 'i' : RegExp.$2);
-  } catch(e) {
+  } catch (e) {
     regExp = null;
   }
   return regExp;
@@ -537,7 +616,10 @@ function getFullUrl(req) {
   var host = headers[config.REAL_HOST_HEADER];
   if (hasProtocol(req.url)) {
     var options = parseUrl(req.url);
-    if (options.protocol === 'https:' || (req.isWs && options.protocol === 'wss:')) {
+    if (
+      options.protocol === 'https:' ||
+      (req.isWs && options.protocol === 'wss:')
+    ) {
       req.isHttps = true;
     }
     req.url = options.path;
@@ -569,40 +651,9 @@ function getFullUrl(req) {
   if (req.isWs) {
     return (req.isHttps ? 'wss://' : 'ws://') + fullUrl;
   }
-  return _getProtocol(req.isHttps) + fullUrl;
+  return (req.isHttps ? 'https://' : 'http://') + fullUrl;
 }
 exports.getFullUrl = getFullUrl;
-
-function setProtocol(url, isHttps) {
-  return hasProtocol(url) ? url : _getProtocol(isHttps) + url;
-}
-
-function _getProtocol(isHttps) {
-  return isHttps ? 'https://' : 'http://';
-}
-
-function hasProtocol(url) {
-  return /^[a-z0-9.-]+:\/\//i.test(url);
-}
-
-function getProtocol(url) {
-  return hasProtocol(url) ? url.substring(0, url.indexOf('://') + 1) : null;
-}
-
-function removeProtocol(url, clear) {
-  return hasProtocol(url) ? url.substring(url.indexOf('://') + (clear ? 3 : 1)) : url;
-}
-
-function replaceProtocol(url, protocol) {
-
-  return (protocol || 'http:') +  removeProtocol(url);
-}
-
-exports.hasProtocol = hasProtocol;
-exports.setProtocol = setProtocol;
-exports.getProtocol = getProtocol;
-exports.removeProtocol = removeProtocol;
-exports.replaceProtocol = replaceProtocol;
 
 function disableCSP(headers) {
   delete headers['content-security-policy'];
@@ -626,7 +677,7 @@ var addressList = [];
   for (var i in interfaces) {
     var list = interfaces[i];
     if (Array.isArray(list)) {
-      list.forEach(function(info) {
+      list.forEach(function (info) {
         addressList.push(info.address.toLowerCase());
       });
     }
@@ -639,13 +690,29 @@ if (isString(hostname)) {
   simpleHostname = simpleHostname ? simpleHostname + '.' : '';
 }
 
-var clientId = [hostname, os.platform(), os.release(),
-  os.arch(), cpus.length, cpus[0] && cpus[0].model, config.clientId];
-clientId = config.clientId = simpleHostname + crypto.createHmac('sha256', config.CLIENT_ID_HEADER)
-  .update(clientId.join('\r\n')).digest('base64');
-config.runtimeId = simpleHostname + crypto.createHmac('sha256', config.CLIENT_ID_HEADER)
-  .update(clientId + '\r\n' + Math.random() + '\r\n' + Date.now())
-  .digest('base64') + '/' + config.port;
+var clientId = [
+  hostname,
+  os.platform(),
+  os.release(),
+  os.arch(),
+  cpus.length,
+  cpus[0] && cpus[0].model,
+  config.clientId
+];
+clientId = config.clientId =
+  simpleHostname +
+  crypto
+    .createHmac('sha256', config.CLIENT_ID_HEADER)
+    .update(clientId.join('\r\n'))
+    .digest('base64');
+config.runtimeId =
+  simpleHostname +
+  crypto
+    .createHmac('sha256', config.CLIENT_ID_HEADER)
+    .update(clientId + '\r\n' + Math.random() + '\r\n' + Date.now())
+    .digest('base64') +
+  '/' +
+  config.port;
 config.runtimeHeaders = { 'x-whistle-runtime-id': config.runtimeId };
 config.pluginHeaders = {
   'x-whistle-runtime-id': config.runtimeId,
@@ -653,14 +720,29 @@ config.pluginHeaders = {
 };
 config.pluginHeaders[config.PLUGIN_HOOK_NAME_HEADER] = config.PLUGIN_HOOKS.UI;
 
-exports.setClientId = function(headers, enable, disable, clientIp, isInternalProxy) {
+exports.setClientId = function (
+  headers,
+  enable,
+  disable,
+  clientIp,
+  isInternalProxy
+) {
   if (disable && (disable.clientId || disable.clientID || disable.clientid)) {
     return;
   }
   enable = enable || '';
-  if (enable.clientId || enable.clientID || enable.clientid || isInternalProxy) {
+  if (
+    enable.clientId ||
+    enable.clientID ||
+    enable.clientid ||
+    isInternalProxy
+  ) {
     var id = getClientId(headers);
-    if ((enable.multiClient || isInternalProxy ) && !enable.singleClient && !disable.multiClient) {
+    if (
+      (enable.multiClient || isInternalProxy) &&
+      !enable.singleClient &&
+      !disable.multiClient
+    ) {
       if (headers[config.CLIENT_ID_HEADER]) {
         return;
       }
@@ -683,7 +765,7 @@ function getClientId(headers) {
 
 exports.getClientId = getClientId;
 
-exports.getTunnelKey = function(conf) {
+exports.getTunnelKey = function (conf) {
   var tunnelKey = conf.tunnelKey || conf.tunnelKeys;
   if (tunnelKey && typeof tunnelKey === 'string') {
     tunnelKey = tunnelKey.toLowerCase().split(/[:,|]/);
@@ -702,7 +784,7 @@ function getComposerClientId(headers) {
 
 exports.getComposerClientId = getComposerClientId;
 
-exports.removeClientId = function(headers) {
+exports.removeClientId = function (headers) {
   delete headers[config.CLIENT_ID_HEADER];
 };
 
@@ -760,20 +842,20 @@ function parseHost(host) {
 exports.parseHost = parseHost;
 
 /**
-* 解析一些字符时，encodeURIComponent可能会抛异常，对这种字符不做任何处理
-* see: http://stackoverflow.com/questions/16868415/encodeuricomponent-throws-an-exception
-* @param ch
-* @returns
-*/
+ * 解析一些字符时，encodeURIComponent可能会抛异常，对这种字符不做任何处理
+ * see: http://stackoverflow.com/questions/16868415/encodeuricomponent-throws-an-exception
+ * @param ch
+ * @returns
+ */
 function safeEncodeURIComponent(ch) {
   try {
     return encodeURIComponent(ch);
-  } catch(e) {}
+  } catch (e) {}
 
   return ch;
 }
 
-exports.encodeNonLatin1Char = function(str) {
+exports.encodeNonLatin1Char = function (str) {
   if (!isString(str)) {
     return '';
   }
@@ -848,7 +930,7 @@ function parsePathReplace(urlPath, params) {
   var root = urlPath.substring(0, index);
   urlPath = urlPath.substring(index);
 
-  Object.keys(params).forEach(function(pattern) {
+  Object.keys(params).forEach(function (pattern) {
     var value = params[pattern];
     value = value == null ? '' : value + '';
     if (isOriginalRegExp(pattern) && (pattern = toOriginalRegExp(pattern))) {
@@ -869,7 +951,8 @@ function wrapResponse(res) {
   passThrough.rawHeaderNames = res.rawHeaderNames;
   passThrough.headers = lowerCaseify(res.headers);
   passThrough.headers['x-server'] = config.name;
-  res.body != null && passThrough.push(Buffer.isBuffer(res.body) ? res.body : String(res.body));
+  res.body != null &&
+    passThrough.push(Buffer.isBuffer(res.body) ? res.body : String(res.body));
   passThrough.push(null);
   passThrough.isCustomRes = true;
   return passThrough;
@@ -883,8 +966,12 @@ function wrapGatewayError(body) {
     headers: {
       'content-type': 'text/html; charset=utf8'
     },
-    body: body ? '<pre>\n' + body + '\n\n\n<a href="javascript:;" onclick="location.reload()"'
-      + '>Reload this page</a>\n</pre>' : ''
+    body: body
+      ? '<pre>\n' +
+        body +
+        '\n\n\n<a href="javascript:;" onclick="location.reload()"' +
+        '>Reload this page</a>\n</pre>'
+      : ''
   });
 }
 
@@ -896,11 +983,11 @@ function sendStatusCodeError(cltRes, svrRes) {
   cltRes.src(wrapGatewayError('Invalid status code: ' + svrRes.statusCode));
 }
 exports.sendStatusCodeError = sendStatusCodeError;
-exports.getQueryValue = function(value) {
+exports.getQueryValue = function (value) {
   if (value && typeof value === 'object') {
     try {
       return JSON.stringify(value);
-    } catch(e) {}
+    } catch (e) {}
   }
   return value || '';
 };
@@ -933,7 +1020,7 @@ function parseLinesJSON(text) {
     return null;
   }
   var result;
-  text.split(/\r\n|\n|\r/g).forEach(function(line) {
+  text.split(/\r\n|\n|\r/g).forEach(function (line) {
     if (!(line = line.trim())) {
       return;
     }
@@ -948,11 +1035,15 @@ function parseLinesJSON(text) {
       if (value) {
         var fv = value[0];
         var lv = value[value.length - 1];
-        if (fv === lv) { 
+        if (fv === lv) {
           if (fv === '"' || fv === '\'' || fv === '`') {
             value = value.slice(1, -1);
           }
-          if (value && fv === '`' && (value.indexOf('\\n') !== -1 || value.indexOf('\\r') !== -1)) {
+          if (
+            value &&
+            fv === '`' &&
+            (value.indexOf('\\n') !== -1 || value.indexOf('\\r') !== -1)
+          ) {
             value = value.replace(RAW_CRLF_RE, replaceCrLf);
           }
         } else if (value === '0') {
@@ -990,7 +1081,7 @@ function parseLinesJSON(text) {
           }
         }
         if (keys.length) {
-          keys.reverse().forEach(function(key) {
+          keys.reverse().forEach(function (key) {
             var obj;
             if (ARR_FILED_RE.test(key)) {
               var idx2 = RegExp.$2;
@@ -1048,7 +1139,7 @@ function parsePureJSON(data, isValue) {
 
   try {
     return JSON.parse(data);
-  } catch(e) {
+  } catch (e) {
     var result = evalJson(data);
     if (result) {
       return result;
@@ -1063,7 +1154,7 @@ exports.parseJSON = parseJSON;
 function readFileSync(file) {
   try {
     return fs.readFileSync(file, UTF8_OPTIONS);
-  } catch(e) {}
+  } catch (e) {}
 }
 
 exports.readFileSync = readFileSync;
@@ -1079,18 +1170,21 @@ function readInjectFiles(data, callback) {
     return callback();
   }
 
-  fileMgr.readFilesText([data.prepend, data.replace, data.append], function(result) {
-    if (result[0]) {
-      data.top = result[0];
+  fileMgr.readFilesText(
+    [data.prepend, data.replace, data.append],
+    function (result) {
+      if (result[0]) {
+        data.top = result[0];
+      }
+      if (result[1]) {
+        data.body = result[1];
+      }
+      if (result[2]) {
+        data.bottom = result[2];
+      }
+      callback(data);
     }
-    if (result[1]) {
-      data.body = result[1];
-    }
-    if (result[2]) {
-      data.bottom = result[2];
-    }
-    callback(data);
-  });
+  );
 }
 
 exports.readInjectFiles = readInjectFiles;
@@ -1101,7 +1195,7 @@ function parseHeaders(headers, rawNames) {
     headers = headers.split(CRLF_RE);
   }
   var _headers = {};
-  headers.forEach(function(line) {
+  headers.forEach(function (line) {
     var index = line.indexOf(':');
     var value;
     if (index != -1) {
@@ -1129,23 +1223,27 @@ function parseHeaders(headers, rawNames) {
 exports.parseHeaders = parseHeaders;
 
 var QUERY_PARAM_RE = /^[^\/&=]+=/;
-function parseRuleJson(rules, callback) {
+
+exports.parseRuleJson = function(rules, callback) {
   if (!Array.isArray(rules)) {
     rules = [rules];
   }
+  Q.all(
+    rules.map(function (rule) {
+      var defer = Q.defer();
+      readRuleList(
+        rule,
+        function (data) {
+          defer.resolve(data);
+        },
+        true
+      );
+      return defer.promise;
+    })
+  ).spread(callback);
+};
 
-  Q.all(rules.map(function(rule) {
-    var defer = Q.defer();
-    readRuleList(rule, function(data) {
-      defer.resolve(data);
-    }, true);
-    return defer.promise;
-  })).spread(callback);
-}
-
-exports.parseRuleJson = parseRuleJson;
-
-function readRuleValue(rule, readFile, callback, checkUrl) {
+function readRuleValue(rule, callback, checkUrl, needRawData) {
   if (!rule) {
     return callback();
   }
@@ -1156,9 +1254,17 @@ function readRuleValue(rule, readFile, callback, checkUrl) {
   if (checkUrl && GEN_URL_RE.test(filePath)) {
     return callback(filePath);
   }
-  filePath = decodePath(filePath);
-  if (rule.root) {
-    filePath = join(rule.root, filePath);
+  var opts = pluginMgr.resolveKey(filePath);
+  var readFile;
+  if (opts) {
+    readFile = pluginMgr[needRawData ? 'requestBin' : 'requestText'];
+    filePath = opts;
+  } else {
+    readFile = fileMgr[needRawData ? 'readFile' : 'readFileText'];
+    filePath = decodePath(filePath);
+    if (rule.root) {
+      filePath = join(rule.root, filePath);
+    }
   }
   readFile(filePath, callback);
 }
@@ -1166,7 +1272,7 @@ function readRuleValue(rule, readFile, callback, checkUrl) {
 function wrapTag(result, isBin, charset, wrap) {
   var list = [];
   var temp;
-  result.forEach(function(data) {
+  result.forEach(function (data) {
     if (!data) {
       return;
     }
@@ -1198,16 +1304,23 @@ function readRuleList(rule, callback, isJson, charset, isHtml) {
   }
   var len = rule.list && rule.list.length;
   var isBin = protoMgr.isBinProtocol(rule.name);
-  var readFile = fileMgr[(isBin && !isJson) ? 'readFile' : 'readFileText'];
+  var needRawData = isBin && !isJson;
   if (!len) {
-    return readRuleValue(rule, readFile, isJson ? function(value) {
-      callback(parseJSON(value));
-    } : callback);
+    return readRuleValue(
+      rule,
+      isJson
+        ? function (value) {
+          callback(parseJSON(value));
+        }
+        : callback,
+        false,
+        needRawData
+    );
   }
   var result = [];
   var isJsHtml = isHtml && isBin === 2;
   var isCssHtml = isHtml && isBin === 3;
-  var execCallback = function() {
+  var execCallback = function () {
     if (--len > 0) {
       return;
     }
@@ -1243,22 +1356,29 @@ function readRuleList(rule, callback, isJson, charset, isHtml) {
     if (isJson) {
       var value = removeProtocol(getMatcher(r), true);
       if (value) {
-        var json = isCors && GEN_URL_RE.test(value) ? { origin: value.trim() }
-          : parsePureJSON(value, QUERY_PARAM_RE.test(value));
+        var json =
+          isCors && GEN_URL_RE.test(value)
+            ? { origin: value.trim() }
+            : parsePureJSON(value, QUERY_PARAM_RE.test(value));
         if (json) {
           result[i] = json;
           return execCallback();
         }
       }
     }
-    readRuleValue(r, readFile, function (value) {
-      result[i] = value;
-      execCallback();
-    }, checkUrl);
+    readRuleValue(
+      r,
+      function (value) {
+        result[i] = value;
+        execCallback();
+      },
+      checkUrl,
+      needRawData
+    );
   });
 }
 
-function getRuleValue(rules, callback, noBody, charset, isHtml) {
+exports.getRuleValue = function(rules, callback, noBody, charset, isHtml) {
   if (noBody || !rules) {
     return callback();
   }
@@ -1266,16 +1386,22 @@ function getRuleValue(rules, callback, noBody, charset, isHtml) {
     rules = [rules];
   }
 
-  Q.all(rules.map(function(rule) {
-    var defer = Q.defer();
-    readRuleList(rule, function(data) {
-      defer.resolve(data);
-    }, false, charset, isHtml);
-    return defer.promise;
-  })).spread(callback);
-}
-
-exports.getRuleValue = getRuleValue;
+  Q.all(
+    rules.map(function (rule) {
+      var defer = Q.defer();
+      readRuleList(
+        rule,
+        function (data) {
+          defer.resolve(data);
+        },
+        false,
+        charset,
+        isHtml
+      );
+      return defer.promise;
+    })
+  ).spread(callback);
+};
 
 function decodePath(path) {
   path = getPath(path, true);
@@ -1287,42 +1413,44 @@ function decodePath(path) {
 
   try {
     return qs.unescape(path);
-  } catch(e) {
+  } catch (e) {
     logger.error(e);
   }
 
   return path;
 }
 
-function getRuleFiles(rule) {
+exports.getRuleFiles = function(rule) {
   var files = rule.files || [getPath(getUrl(rule))];
   var root = rule.root;
   var result = [];
-  files.map(function(file) {
-    file = decodePath(file);
-    file = fileMgr.convertSlash(root ? join(root, file) : file);
-    if (END_WIDTH_SEP_RE.test(file)) {
-      result.push(file.slice(0, -1));
-      result.push(join(file, 'index.html'));
+  files.map(function (file) {
+    var opts = pluginMgr.resolveKey(file);
+    if (opts) {
+      result.push(opts);
     } else {
-      result.push(file);
+      file = decodePath(file);
+      file = fileMgr.convertSlash(root ? join(root, file) : file);
+      if (END_WIDTH_SEP_RE.test(file)) {
+        result.push(file.slice(0, -1));
+        result.push(join(file, 'index.html'));
+      } else {
+        result.push(file);
+      }
     }
   });
   return result;
-}
+};
 
-exports.getRuleFiles = getRuleFiles;
-
-function getRuleFile(rule) {
+exports.getRuleFile = function(rule) {
   var filePath = getPath(getUrl(rule));
   if (!filePath) {
     return filePath;
   }
-
-  return rule.root ? join(rule.root, decodePath(filePath)) : decodePath(filePath);
-}
-
-exports.getRuleFile = getRuleFile;
+  return rule.root
+    ? join(rule.root, decodePath(filePath))
+    : decodePath(filePath);
+};
 
 function getValue(rule) {
   return rule.value || rule.path;
@@ -1417,13 +1545,14 @@ function supportHtmlTransform(res, req) {
   }
 
   var contentEncoding = getContentEncoding(headers);
-//chrome新增了sdch压缩算法，对此类响应无法解码，deflate无法区分deflate还是deflateRaw
+  //chrome新增了sdch压缩算法，对此类响应无法解码，deflate无法区分deflate还是deflateRaw
   return !contentEncoding || contentEncoding == 'gzip';
 }
 
 exports.supportHtmlTransform = supportHtmlTransform;
 
-function removeUnsupportsHeaders(headers, supportsDeflate) {//只保留支持的zip格式：gzip、deflate
+function removeUnsupportsHeaders(headers, supportsDeflate) {
+  //只保留支持的zip格式：gzip、deflate
   if (!headers || !headers['accept-encoding']) {
     return;
   }
@@ -1435,12 +1564,12 @@ function removeUnsupportsHeaders(headers, supportsDeflate) {//只保留支持的
   var acceptEncoding = [];
   for (var i = 0, len = list.length; i < len; i++) {
     var ae = list[i].toLowerCase();
-    if (ae && (supportsDeflate && ae == 'deflate' || ae == 'gzip')) {
+    if (ae && ((supportsDeflate && ae == 'deflate') || ae == 'gzip')) {
       acceptEncoding.push(ae);
     }
   }
 
-  if (acceptEncoding = acceptEncoding.join(', ')) {
+  if ((acceptEncoding = acceptEncoding.join(', '))) {
     headers['accept-encoding'] = acceptEncoding;
   } else {
     delete headers['accept-encoding'];
@@ -1456,14 +1585,20 @@ function hasRequestBody(req) {
   }
 
   req = req.toUpperCase();
-  return !(req === 'GET' || req === 'HEAD' ||
-  req === 'OPTIONS' || req === 'CONNECT');
+  return !(
+    req === 'GET' ||
+    req === 'HEAD' ||
+    req === 'OPTIONS' ||
+    req === 'CONNECT'
+  );
 }
 
 exports.hasRequestBody = hasRequestBody;
 
 function getContentEncoding(headers) {
-  var encoding = toLowerCase(headers && headers['content-encoding'] || headers);
+  var encoding = toLowerCase(
+    (headers && headers['content-encoding']) || headers
+  );
   return encoding === 'gzip' || encoding === 'deflate' ? encoding : null;
 }
 
@@ -1489,7 +1624,7 @@ function getUnzipStream(headers) {
 
 exports.getZipStream = getZipStream;
 exports.getUnzipStream = getUnzipStream;
-exports.isWhistleTransformData = function(obj) {
+exports.isWhistleTransformData = function (obj) {
   if (!obj) {
     return false;
   }
@@ -1507,10 +1642,10 @@ function getPipeIconvStream(headers) {
     pipeStream.addHead(iconv.decodeStream(charset));
     pipeStream.addTail(iconv.encodeStream(charset));
   } else {
-    pipeStream.addHead(function(res, next) {
+    pipeStream.addHead(function (res, next) {
       var buffer, iconvDecoder;
 
-      res.on('data', function(chunk) {
+      res.on('data', function (chunk) {
         buffer = buffer ? Buffer.concat([buffer, chunk]) : chunk;
         resolveCharset(buffer);
       });
@@ -1521,7 +1656,7 @@ function getPipeIconvStream(headers) {
           if (chunk && buffer.length < 25600) {
             return;
           }
-          charset = (!buffer || isUtf8(buffer)) ? 'utf8' : 'GB18030';
+          charset = !buffer || isUtf8(buffer) ? 'utf8' : 'GB18030';
         }
         if (!iconvDecoder) {
           iconvDecoder = iconv.decodeStream(charset);
@@ -1533,10 +1668,9 @@ function getPipeIconvStream(headers) {
         }
         !chunk && iconvDecoder.end();
       }
-
     });
 
-    pipeStream.addTail(function(src, next) {
+    pipeStream.addTail(function (src, next) {
       next(src.pipe(iconv.encodeStream(charset)));
     });
   }
@@ -1547,13 +1681,13 @@ function getPipeIconvStream(headers) {
 exports.getPipeIconvStream = getPipeIconvStream;
 
 function toLowerCase(str) {
-  return typeof str == 'string' ?  str.trim().toLowerCase() : str;
+  return typeof str == 'string' ? str.trim().toLowerCase() : str;
 }
 
 exports.toLowerCase = toLowerCase;
 
 function toUpperCase(str) {
-  return typeof str == 'string' ?  str.trim().toUpperCase() : str;
+  return typeof str == 'string' ? str.trim().toUpperCase() : str;
 }
 
 exports.toUpperCase = toUpperCase;
@@ -1613,11 +1747,12 @@ function getRemoteAddr(req) {
         socket._remoteAddr = ip;
         delete req.headers[config.REMOTE_ADDR_HEAD];
       } else {
-        socket._remoteAddr = removeIPV6Prefix(socket.remoteAddress) || LOCALHOST;
+        socket._remoteAddr =
+          removeIPV6Prefix(socket.remoteAddress) || LOCALHOST;
       }
     }
     return socket._remoteAddr;
-  } catch(e) {}
+  } catch (e) {}
   return LOCALHOST;
 }
 
@@ -1643,13 +1778,13 @@ function getRemotePort(req) {
       socket._remotePort = port > 0 ? port : '0';
     }
     return socket._remotePort;
-  } catch(e) {}
+  } catch (e) {}
   return 0;
 }
 
 exports.getRemotePort = getRemotePort;
 
-exports.getClientPort = function(req) {
+exports.getClientPort = function (req) {
   var headers = req.headers || {};
   var port = headers[config.CLIENT_PORT_HEAD];
   if (port > 0) {
@@ -1658,19 +1793,13 @@ exports.getClientPort = function(req) {
   return getRemotePort(req);
 };
 
-function removeIPV6Prefix(ip) {
-  if (typeof ip != 'string') {
-    return '';
-  }
-
-  return ip.indexOf('::ffff:') === 0 ? ip.substring(7) : ip;
-}
-
 exports.removeIPV6Prefix = removeIPV6Prefix;
 
 function isUrlEncoded(req) {
-
-  return /^post$/i.test(req.method) && /urlencoded/i.test(req.headers && req.headers['content-type']);
+  return (
+    /^post$/i.test(req.method) &&
+    /urlencoded/i.test(req.headers && req.headers['content-type'])
+  );
 }
 
 exports.isUrlEncoded = isUrlEncoded;
@@ -1683,10 +1812,14 @@ function isJSONContent(req) {
 
 exports.isJSONContent = isJSONContent;
 
-exports.isProxyPort = function(proxyPort) {
-  return proxyPort == config.port || proxyPort == config.httpsPort
-    || proxyPort == config.httpPort || proxyPort == config.socksPort
-    || proxyPort == config.realPort;
+exports.isProxyPort = function (proxyPort) {
+  return (
+    proxyPort == config.port ||
+    proxyPort == config.httpsPort ||
+    proxyPort == config.httpPort ||
+    proxyPort == config.socksPort ||
+    proxyPort == config.realPort
+  );
 };
 
 function isMultipart(req) {
@@ -1712,7 +1845,7 @@ function replaceQueryString(query, replaceQuery) {
 
   var queryList = [];
   var params = {};
-  var filterName = function(param) {
+  var filterName = function (param) {
     var index = param.indexOf('=');
     var name, value;
     if (index == -1) {
@@ -1730,7 +1863,7 @@ function replaceQueryString(query, replaceQuery) {
 
   query = query.split('&').map(filterName);
   replaceQuery = replaceQuery.split('&').map(filterName);
-  query.concat(replaceQuery).forEach(function(name) {
+  query.concat(replaceQuery).forEach(function (name) {
     var value = name ? params[name] : null;
     if (value != null) {
       queryList.push(name + '=' + value);
@@ -1755,7 +1888,11 @@ function replaceUrlQueryString(url, queryString) {
   }
   queryString = replaceQueryString(getQueryString(url), queryString);
 
-  return url.replace(/\?.*$/, '') + (queryString ? '?' +  queryString : '') + hashString;
+  return (
+    url.replace(/\?.*$/, '') +
+    (queryString ? '?' + queryString : '') +
+    hashString
+  );
 }
 
 exports.replaceUrlQueryString = replaceUrlQueryString;
@@ -1788,24 +1925,28 @@ exports.join = join;
 function resolveProperties(list) {
   var result = {};
   if (list) {
-    list.map(getMatcherValue).join('|').split(SEP_RE).forEach(function(action) {
-      if (action) {
-        result[action] = true;
-      }
-    });
+    list
+      .map(getMatcherValue)
+      .join('|')
+      .split(SEP_RE)
+      .forEach(function (action) {
+        if (action) {
+          result[action] = true;
+        }
+      });
   }
   return result;
 }
 
 exports.resolveProperties = resolveProperties;
 
-exports.parseLineProps = function(str) {
+exports.parseLineProps = function (str) {
   str = str && removeProtocol(str, true);
   if (!str) {
     return;
   }
   var result = {};
-  str.split(SEP_RE).forEach(function(action) {
+  str.split(SEP_RE).forEach(function (action) {
     if (action) {
       result[action] = true;
     }
@@ -1818,7 +1959,7 @@ function resolveIgnore(ignore) {
   var exclude = {};
   var ignoreAll, disableIgnoreAll;
   ignore = {};
-  keys.forEach(function(name) {
+  keys.forEach(function (name) {
     if (name.indexOf('ignore.') === 0 || name.indexOf('ignore:') === 0) {
       exclude[name.substring(7)] = 1;
       return;
@@ -1836,22 +1977,26 @@ function resolveIgnore(ignore) {
     if (name === 'filter' || name === 'ignore') {
       return;
     }
-    if (name === 'allRules' || name === 'allProtocols'
-      || name === 'All' || name === '*') {
+    if (
+      name === 'allRules' ||
+      name === 'allProtocols' ||
+      name === 'All' ||
+      name === '*'
+    ) {
       ignoreAll = true;
       return;
     }
     ignore[aliasProtocols[name] || name] = 1;
   });
   if (ignoreAll && !disableIgnoreAll) {
-    protocols.forEach(function(name) {
+    protocols.forEach(function (name) {
       ignore[name] = 1;
     });
     keys = protocols;
   } else {
     keys = Object.keys(ignore);
   }
-  keys.forEach(function(name) {
+  keys.forEach(function (name) {
     if (exclude[name]) {
       delete ignore[name];
     }
@@ -1867,14 +2012,14 @@ function resolveFilter(ignore, filter) {
   filter = filter || {};
   var result = resolveIgnore(ignore);
   ignore = result.ignore;
-  Object.keys(ignore).forEach(function(name) {
+  Object.keys(ignore).forEach(function (name) {
     if (protocols.indexOf(name) === -1) {
       filter['ignore|' + name] = true;
     } else {
       filter[name] = true;
     }
   });
-  Object.keys(result.exclude).forEach(function(name) {
+  Object.keys(result.exclude).forEach(function (name) {
     filter['ignore:' + name] = 1;
   });
   if (result.ignoreAll) {
@@ -1885,19 +2030,21 @@ function resolveFilter(ignore, filter) {
 
 exports.resolveFilter = resolveFilter;
 
-exports.isIgnored = function(filter, name) {
-  return !filter['ignore:' + name] && (filter[name] || filter['ignore|' + name]);
+exports.isIgnored = function (filter, name) {
+  return (
+    !filter['ignore:' + name] && (filter[name] || filter['ignore|' + name])
+  );
 };
 
 function resolveRuleProps(rule, result) {
   result = result || {};
   if (rule) {
-    rule.list.forEach(function(rule) {
+    rule.list.forEach(function (rule) {
       getMatcherValue(rule)
         .split(SEP_RE)
-          .forEach(function(action) {
-            result[action] = true;
-          });
+        .forEach(function (action) {
+          result[action] = true;
+        });
     });
   }
   return result;
@@ -1970,14 +2117,16 @@ function ignoreRules(rules, ignore, isResRules) {
   var exclude = result.exclude;
   ignore = result.ignore;
   var keys = Object.keys(ignoreAll ? rules : ignore);
-  keys.forEach(function(name) {
+  keys.forEach(function (name) {
     if (name === 'filter' || name === 'ignore' || exclude[name]) {
       return;
     }
     if (!isResRules || protoMgr.resProtocols.indexOf(name) !== -1) {
-      if (ignorePlugins(rules, name, exclude)
-        || ignoreProxy(rules, name, exclude)
-        || ignoreForwardRule(rules, name, exclude)) {
+      if (
+        ignorePlugins(rules, name, exclude) ||
+        ignoreProxy(rules, name, exclude) ||
+        ignoreForwardRule(rules, name, exclude)
+      ) {
         return;
       }
       delete rules[name];
@@ -1992,8 +2141,11 @@ function filterRepeatPlugin(rule) {
     return;
   }
   var exists = {};
-  rule.list = rule.list.filter(function(p) {
-    var protocol = p.matcher.substring(p.matcher.indexOf('.'), p.matcher.indexOf(':'));
+  rule.list = rule.list.filter(function (p) {
+    var protocol = p.matcher.substring(
+      p.matcher.indexOf('.'),
+      p.matcher.indexOf(':')
+    );
     if (!exists[protocol]) {
       exists[protocol] = 1;
       return true;
@@ -2017,7 +2169,7 @@ function mergeRules(req, add, isResRules) {
   var origin = req.rules;
   var origAdd = add;
   add = add || {};
-  var merge = function(protocol) {
+  var merge = function (protocol) {
     var rule = mergeRule(origin[protocol], add[protocol]);
     if (rule) {
       origin[protocol] = rule;
@@ -2030,16 +2182,16 @@ function mergeRules(req, add, isResRules) {
   }
 
   req['delete'] = resolveRuleProps(origin['delete'], req['delete']);
-  req.filter = resolveRuleProps(origin.filter, req.filter);
+  req._filters = resolveRuleProps(origin.filter, req._filters);
   req.disable = resolveRuleProps(origin.disable, req.disable);
   req.ignore = resolveRuleProps(origin.ignore, req.ignore);
   req.enable = resolveRuleProps(origin.enable, req.enable);
-  enableRules.forEach(function(rule) {
+  enableRules.forEach(function (rule) {
     if (req.enable[rule]) {
-      req.filter[rule] = true;
+      req._filters[rule] = true;
     }
   });
-  ignoreRules(origin, extend(req.ignore, req.filter), isResRules);
+  ignoreRules(origin, extend(req.ignore, req._filters), isResRules);
   return add;
 }
 
@@ -2051,44 +2203,45 @@ function parseHeaderReplace(rule) {
     return '';
   }
   var result = '';
-  list.forEach(function(item) {
+  list.forEach(function (item) {
     var obj = parseJSON(getMatcherValue(item));
     var prop, name;
-    obj && Object.keys(obj).forEach(function(key) {
-      var value = obj[key];
-      if (!key.indexOf('req.')) {
-        prop = 'req';
-        name = null;
-      } else if (!key.indexOf('res.')) {
-        prop = 'res';
-        name = null;
-      } else if (!key.indexOf('trailer.')) {
-        prop = 'trailer';
-        name = null;
-      } else if (!prop) {
-        return;
-      }
-      result = result || {};
-      var index = key.indexOf(':');
-      name = name || key.substring(prop.length + 1, index).trim();
-      if (!name) {
-        return;
-      }
-      key = key.substring(index + 1);
-      var pattern = toOriginalRegExp(key);
-      var opList = result[prop];
-      var op = {
-        regExp: pattern,
-        name: name.toLowerCase(),
-        key: key,
-        value: value
-      };
-      if (opList) {
-        opList.push(op);
-      } else {
-        result[prop] = opList = [op];
-      }
-    });
+    obj &&
+      Object.keys(obj).forEach(function (key) {
+        var value = obj[key];
+        if (!key.indexOf('req.')) {
+          prop = 'req';
+          name = null;
+        } else if (!key.indexOf('res.')) {
+          prop = 'res';
+          name = null;
+        } else if (!key.indexOf('trailer.')) {
+          prop = 'trailer';
+          name = null;
+        } else if (!prop) {
+          return;
+        }
+        result = result || {};
+        var index = key.indexOf(':');
+        name = name || key.substring(prop.length + 1, index).trim();
+        if (!name) {
+          return;
+        }
+        key = key.substring(index + 1);
+        var pattern = toOriginalRegExp(key);
+        var opList = result[prop];
+        var op = {
+          regExp: pattern,
+          name: name.toLowerCase(),
+          key: key,
+          value: value
+        };
+        if (opList) {
+          opList.push(op);
+        } else {
+          result[prop] = opList = [op];
+        }
+      });
   });
   return result;
 }
@@ -2103,28 +2256,29 @@ function replaceHeader(str, regExp, key, value) {
   if (!regExp || !SUB_MATCH_RE.test(value)) {
     return str.replace(regExp || key, value);
   }
-  return str.replace(regExp, function() {
+  return str.replace(regExp, function () {
     return replacePattern(value, arguments);
   });
 }
 
 function handleHeaderReplace(headers, opList) {
-  opList && opList.forEach(function(item) {
-    var header = headers[item.name];
-    if (header == null || header === '') {
-      return;
-    }
-    var regExp = item.regExp;
-    var key = item.key;
-    var value = item.value;
-    if (Array.isArray(header)) {
-      headers[item.name] = header.map(function(str) {
-        return replaceHeader(str, regExp, key, value);
-      });
-    } else {
-      headers[item.name] = replaceHeader(header, regExp, key, value);
-    }
-  });
+  opList &&
+    opList.forEach(function (item) {
+      var header = headers[item.name];
+      if (header == null || header === '') {
+        return;
+      }
+      var regExp = item.regExp;
+      var key = item.key;
+      var value = item.value;
+      if (Array.isArray(header)) {
+        headers[item.name] = header.map(function (str) {
+          return replaceHeader(str, regExp, key, value);
+        });
+      } else {
+        headers[item.name] = replaceHeader(header, regExp, key, value);
+      }
+    });
 }
 
 exports.handleHeaderReplace = handleHeaderReplace;
@@ -2140,7 +2294,7 @@ function transformReq(req, res, port, host) {
   if (port > 0) {
     options.port = port;
   }
-  if(req.clientIp || !net.isIP(headers[config.CLIENT_IP_HEAD])) {
+  if (req.clientIp || !net.isIP(headers[config.CLIENT_IP_HEAD])) {
     var clientIp = req.clientIp || getClientIp(req);
     if (isLocalAddress(clientIp)) {
       delete headers[config.CLIENT_IP_HEAD];
@@ -2149,8 +2303,9 @@ function transformReq(req, res, port, host) {
     }
   }
   options.hostname = null;
-  var client = http.request(options, function(_res) {
-    var origin = !_res.headers['access-control-allow-origin'] && req.headers.origin;
+  var client = http.request(options, function (_res) {
+    var origin =
+      !_res.headers['access-control-allow-origin'] && req.headers.origin;
     if (origin) {
       _res.headers['access-control-allow-origin'] = origin;
       _res.headers['access-control-allow-credentials'] = true;
@@ -2163,7 +2318,7 @@ function transformReq(req, res, port, host) {
     }
   });
   var destroyed;
-  var abort = function() {
+  var abort = function () {
     if (!destroyed) {
       destroyed = true;
       client.destroy();
@@ -2172,7 +2327,7 @@ function transformReq(req, res, port, host) {
   req.on('error', abort);
   res.on('error', abort);
   res.once('close', abort);
-  client.on('error', function(err) {
+  client.on('error', function (err) {
     abort();
     res.emit('error', err);
   });
@@ -2191,9 +2346,11 @@ function trimStr(str) {
 exports.trimStr = trimStr;
 
 function hasHeaderRules(headers) {
-  return headers['x-whistle-rule-key'] ||
-           headers['x-whistle-rule-value'] ||
-           headers['x-whistle-rule-host'];
+  return (
+    headers['x-whistle-rule-key'] ||
+    headers['x-whistle-rule-value'] ||
+    headers['x-whistle-rule-host']
+  );
 }
 
 function checkIfAddInterceptPolicy(proxyHeaders, headers) {
@@ -2213,7 +2370,7 @@ function getCgiUrl(url) {
 }
 exports.getCgiUrl = getCgiUrl;
 
-exports.getCustomTab = function(tab, pluginName) {
+exports.getCustomTab = function (tab, pluginName) {
   if (!tab || !isString(tab.name)) {
     return;
   }
@@ -2242,7 +2399,7 @@ function getPage(page) {
   return !page || page.length > 128 || !/\.html?$/i.test(page) ? null : page;
 }
 
-exports.getPluginMenu = function(menus, pluginName) {
+exports.getPluginMenu = function (menus, pluginName) {
   if (!Array.isArray(menus)) {
     return;
   }
@@ -2251,8 +2408,13 @@ exports.getPluginMenu = function(menus, pluginName) {
   var map = {};
   var result, menu, name, page;
   for (var i = 0; i < len; i++) {
-    if ((menu = menus[i]) && (name = getString(menu.name)) && !map[name]
-      && (page = getPage(menu.page || menu.action)) && page.indexOf('#') === -1) {
+    if (
+      (menu = menus[i]) &&
+      (name = getString(menu.name)) &&
+      !map[name] &&
+      (page = getPage(menu.page || menu.action)) &&
+      page.indexOf('#') === -1
+    ) {
       result = result || [];
       map[name] = 1;
       result.push({
@@ -2278,7 +2440,7 @@ function getHintList(conf, isVar) {
   }
   var result;
   var maxLen = isVar ? MAX_VAR_LEN : MAX_HINT_LEN;
-  hintList.forEach(function(hint) {
+  hintList.forEach(function (hint) {
     if (typeof hint === 'string') {
       if (hint.length <= maxLen) {
         result = result || [];
@@ -2315,7 +2477,7 @@ function getHintList(conf, isVar) {
 
 exports.getHintList = getHintList;
 
-exports.getPluginVarsConf = function(conf) {
+exports.getPluginVarsConf = function (conf) {
   var pluginVars = conf.pluginVars;
   if (!pluginVars) {
     return;
@@ -2331,10 +2493,14 @@ exports.getPluginVarsConf = function(conf) {
   return true;
 };
 
-exports.getStaticDir = function(conf) {
+exports.getStaticDir = function (conf) {
   var staticDir = conf.staticDir;
-  if (!staticDir || typeof staticDir !== 'string' ||
-    !/^[\w./-]+$/.test(staticDir) || staticDir.length > 100) {
+  if (
+    !staticDir ||
+    typeof staticDir !== 'string' ||
+    !/^[\w./-]+$/.test(staticDir) ||
+    staticDir.length > 100
+  ) {
     return;
   }
   return staticDir.replace(/^\/+/, '');
@@ -2365,15 +2531,15 @@ function padReqId(num) {
   return '00' + num;
 }
 
-exports.getReqId = function() {
+exports.getReqId = function () {
   if (index > 999) {
     index = 0;
   }
-  return Date.now() +'-' + padReqId(index++) + workerIndex;
+  return Date.now() + '-' + padReqId(index++) + workerIndex;
 };
 
 function onSocketEnd(socket, callback) {
-  var execCallback = function(err) {
+  var execCallback = function (err) {
     socket._hasError = true;
     if (callback) {
       callback(err);
@@ -2411,7 +2577,7 @@ function parseDeleteProperties(req) {
   var resHeaders = {};
   var trailers = {};
   if (deleteRule) {
-    Object.keys(deleteRule).forEach(function(prop) {
+    Object.keys(deleteRule).forEach(function (prop) {
       if (REQ_HEADER_RE.test(prop)) {
         reqHeaders[RegExp.$1.toLowerCase()] = 1;
       } else if (RES_HEADER_RE.test(prop)) {
@@ -2432,11 +2598,10 @@ function parseDeleteProperties(req) {
   };
 }
 
-
-exports.deleteReqHeaders = function(req) {
+exports.deleteReqHeaders = function (req) {
   var delReqHeaders = parseDeleteProperties(req).reqHeaders;
   var headers = req.headers;
-  Object.keys(delReqHeaders).forEach(function(name) {
+  Object.keys(delReqHeaders).forEach(function (name) {
     delete headers[name];
   });
 };
@@ -2458,7 +2623,7 @@ function parseOrigin(origin) {
   return origin;
 }
 
-exports.setReqCors = function(data, cors) {
+exports.setReqCors = function (data, cors) {
   if (!cors) {
     return;
   }
@@ -2479,14 +2644,18 @@ exports.setReqCors = function(data, cors) {
   }
   if (cors.headers !== undefined) {
     setHeader(data, 'access-control-request-headers', cors.headers);
-  } 
+  }
 };
 
 function isEnableCors(cors) {
-  return cors.enable === '' || cors['use-credentials'] === '' || cors['credentials'] === '';
+  return (
+    cors.enable === '' ||
+    cors['use-credentials'] === '' ||
+    cors['credentials'] === ''
+  );
 }
 
-exports.setResCors = function(data, cors, req) {
+exports.setResCors = function (data, cors, req) {
   if (!cors) {
     return;
   }
@@ -2511,13 +2680,13 @@ exports.setResCors = function(data, cors, req) {
   } else if (isStar) {
     setHeader(data, 'access-control-allow-origin', '*');
   }
-  
+
   if (cors.methods !== undefined) {
     setHeader(data, 'access-control-allow-methods', cors.methods);
   }
   var autoComp = isOptions && (isStar || isEnable);
   if (cors.headers !== undefined) {
-    var operate = (isOptions ? 'allow' : 'expose');
+    var operate = isOptions ? 'allow' : 'expose';
     setHeader(data, 'access-control-' + operate + '-headers', cors.headers);
   } else if (autoComp) {
     var headers = req.headers['access-control-request-headers'];
@@ -2540,7 +2709,7 @@ exports.setResCors = function(data, cors, req) {
   }
 };
 
-exports.disableReqProps = function(req) {
+exports.disableReqProps = function (req) {
   var disable = req.disable;
   var headers = req.headers;
 
@@ -2552,7 +2721,12 @@ exports.disableReqProps = function(req) {
     delete headers['accept-encoding'];
   }
 
-  if (disable.cookie || disable.cookies || disable.reqCookie || disable.reqCookies) {
+  if (
+    disable.cookie ||
+    disable.cookies ||
+    disable.reqCookie ||
+    disable.reqCookies
+  ) {
     delete headers.cookie;
   }
 
@@ -2569,33 +2743,41 @@ exports.disableReqProps = function(req) {
   }
 };
 
-exports.disableResProps = function(req, headers) {
+exports.disableResProps = function (req, headers) {
   var disable = req.disable;
-  if (disable.cookie || disable.cookies || disable.resCookie || disable.resCookies) {
+  if (
+    disable.cookie ||
+    disable.cookies ||
+    disable.resCookie ||
+    disable.resCookies
+  ) {
     delete headers['set-cookie'];
   }
   if (disable.cache) {
     headers['cache-control'] = 'no-cache';
-    headers.expires = new Date(Date.now() -60000000).toGMTString();
+    headers.expires = new Date(Date.now() - 60000000).toGMTString();
     headers.pragma = 'no-cache';
   }
   disable.csp && disableCSP(headers);
 };
 
-var G_INVALID_NAME_CHAR_RE = /[^\x00-\xFF]|[\r\n;=%]/ug;
+var G_INVALID_NAME_CHAR_RE = /[^\x00-\xFF]|[\r\n;=%]/gu;
 var INVALID_NAME_CHAR_RE = /[\r\n;=]/;
 function escapeName(name) {
-  if (!name || (!NON_LATIN1_RE.test(name) && !INVALID_NAME_CHAR_RE.test(name))) {
+  if (
+    !name ||
+    (!NON_LATIN1_RE.test(name) && !INVALID_NAME_CHAR_RE.test(name))
+  ) {
     return name;
   }
   return name.replace(G_INVALID_NAME_CHAR_RE, safeEncodeURIComponent);
 }
 
-var G_INVALID_VALUE_CHAR_RE = /[^\x00-\xFF]|[\r\n;%]/ug;
+var G_INVALID_VALUE_CHAR_RE = /[^\x00-\xFF]|[\r\n;%]/gu;
 var INVALID_VALUE_CHAR_RE = /[\r\n;]/;
 function escapeValue(value) {
   if (!isString(value)) {
-    return value = value == null ? '' : String(value);
+    return (value = value == null ? '' : String(value));
   }
   if (!NON_LATIN1_RE.test(value) && !INVALID_VALUE_CHAR_RE.test(value)) {
     return value;
@@ -2603,14 +2785,14 @@ function escapeValue(value) {
   return value.replace(G_INVALID_VALUE_CHAR_RE, safeEncodeURIComponent);
 }
 
-exports.setReqCookies = function(data, cookies, curCookies) {
+exports.setReqCookies = function (data, cookies, curCookies) {
   var list = cookies && Object.keys(cookies);
   if (!list || !list.length) {
     return;
   }
   var result = {};
   if (isString(curCookies)) {
-    curCookies.split(/;\s*/g).forEach(function(cookie) {
+    curCookies.split(/;\s*/g).forEach(function (cookie) {
       var index = cookie.indexOf('=');
       if (index == -1) {
         result[cookie] = null;
@@ -2620,20 +2802,22 @@ exports.setReqCookies = function(data, cookies, curCookies) {
     });
   }
 
-  list.forEach(function(name) {
+  list.forEach(function (name) {
     var value = cookies[name];
     value = value && typeof value == 'object' ? value.value : value;
     result[escapeName(name)] = value ? escapeValue(value) : value;
   });
 
-  cookies = Object.keys(result).map(function(name) {
-    var value = result[name];
-    return name + (value == null ? '' : '=' + value);
-  }).join('; ');
+  cookies = Object.keys(result)
+    .map(function (name) {
+      var value = result[name];
+      return name + (value == null ? '' : '=' + value);
+    })
+    .join('; ');
   setHeader(data, 'cookie', cookies);
 };
 
-exports.setResCookies = function(data, cookies) {
+exports.setResCookies = function (data, cookies) {
   var list = cookies && Object.keys(cookies);
   if (!list || !list.length) {
     return;
@@ -2644,7 +2828,7 @@ exports.setResCookies = function(data, cookies) {
   }
 
   var result = {};
-  curCookies.forEach(function(cookie) {
+  curCookies.forEach(function (cookie) {
     var index = cookie.indexOf('=');
     if (index == -1) {
       result[cookie] = null;
@@ -2653,7 +2837,7 @@ exports.setResCookies = function(data, cookies) {
     }
   });
 
-  list.forEach(function(name) {
+  list.forEach(function (name) {
     var cookie = cookies[name];
     name = escapeName(name);
     if (!cookie || typeof cookie != 'object') {
@@ -2662,10 +2846,16 @@ exports.setResCookies = function(data, cookies) {
       var attrs = [];
       var value = cookie.value;
       attrs.push(escapeValue(value));
-      var maxAge = cookie.maxAge || cookie.maxage || cookie['Max-Age'] || cookie['max-age'];
+      var maxAge =
+        cookie.maxAge ||
+        cookie.maxage ||
+        cookie['Max-Age'] ||
+        cookie['max-age'];
       maxAge = parseInt(cookie.maxAge, 10);
       if (!Number.isNaN(maxAge)) {
-        attrs.push('Expires=' + new Date(Date.now() + maxAge * 1000).toGMTString());
+        attrs.push(
+          'Expires=' + new Date(Date.now() + maxAge * 1000).toGMTString()
+        );
         attrs.push('Max-Age=' + maxAge);
       }
 
@@ -2679,7 +2869,7 @@ exports.setResCookies = function(data, cookies) {
     }
   });
 
-  cookies = Object.keys(result).map(function(name) {
+  cookies = Object.keys(result).map(function (name) {
     var value = result[name];
     return name + (value == null ? '' : '=' + value);
   });
@@ -2693,7 +2883,7 @@ exports.escapeRegExp = function (str) {
   return str.replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
 };
 
-exports.checkTlsError = function(err) {
+exports.checkTlsError = function (err) {
   if (!err) {
     return false;
   }
@@ -2704,17 +2894,24 @@ exports.checkTlsError = function(err) {
   if (!isString(stack)) {
     return false;
   }
-  if (stack.indexOf('TLSSocket.onHangUp') !== -1 || stack.indexOf('statusCode=502') !== -1) {
+  if (
+    stack.indexOf('TLSSocket.onHangUp') !== -1 ||
+    stack.indexOf('statusCode=502') !== -1
+  ) {
     return true;
   }
   return stack.toLowerCase().indexOf('openssl') !== -1;
 };
-exports.checkAuto2Http = function(req, ip, proxyUrl) {
-  return !req.disable.auto2http && (req.enable.auto2http
-    || req.rules.host || (proxyUrl ? req._phost : isLocalAddress(ip)));
+exports.checkAuto2Http = function (req, ip, proxyUrl) {
+  return (
+    !req.disable.auto2http &&
+    (req.enable.auto2http ||
+      req.rules.host ||
+      (proxyUrl ? req._phost : isLocalAddress(ip)))
+  );
 };
 
-exports.setProxyHost = function(req, options, reserve) {
+exports.setProxyHost = function (req, options, reserve) {
   var phost = req._phost || options;
   var opts = reserve ? options : extend({}, options);
   opts.host = phost.hostname;
@@ -2726,7 +2923,7 @@ exports.setProxyHost = function(req, options, reserve) {
   return opts;
 };
 
-exports.getHostIp = function(ip, port) {
+exports.getHostIp = function (ip, port) {
   if (!port) {
     return ip;
   }
@@ -2753,12 +2950,17 @@ function isRulesContent(ctn) {
 exports.isRulesContent = isRulesContent;
 
 var RESPONSE_FOR_NAME = /^name=(.+)$/;
-exports.setResponseFor = function(rules, headers, req, serverIp) {
+exports.setResponseFor = function (rules, headers, req, serverIp) {
   var responseFor = getMatcherValue(rules.responseFor);
   if (!responseFor) {
-    if ((req.isPluginReq || req._hasProxyHostHeader) && !isLocalAddress(serverIp)) {
+    if (
+      (req.isPluginReq || req._hasProxyHostHeader) &&
+      !isLocalAddress(serverIp)
+    ) {
       responseFor = trimStr(headers['x-whistle-response-for']);
-      responseFor = responseFor ? responseFor.split(',').map(trim).filter(noop) : [];
+      responseFor = responseFor
+        ? responseFor.split(',').map(trim).filter(noop)
+        : [];
       if (responseFor.indexOf(serverIp) === -1) {
         responseFor.push(serverIp);
       }
@@ -2770,36 +2972,42 @@ exports.setResponseFor = function(rules, headers, req, serverIp) {
   if (RESPONSE_FOR_NAME.test(responseFor)) {
     var result = RegExp.$1.toLowerCase().split(',');
     var reqResult = [];
-    result = result.map(function(name) {
-      if (name.indexOf('req.') === 0) {
-        name = reqHeaders[name.substring(4)];
-        name && reqResult.push(name);
-        return;
-      }
-      return headers[name];
-    }).filter(noop);
+    result = result
+      .map(function (name) {
+        if (name.indexOf('req.') === 0) {
+          name = reqHeaders[name.substring(4)];
+          name && reqResult.push(name);
+          return;
+        }
+        return headers[name];
+      })
+      .filter(noop);
     result.push(serverIp || '127.0.0.1');
     responseFor = result.concat(reqResult).join(', ');
   }
   headers['x-whistle-response-for'] = responseFor;
 };
 
-exports.getNoPluginServerMsg = function(rule) {
+exports.getNoPluginServerMsg = function (rule) {
   var msg = 'No implement plugin.server';
   if (rule) {
-    msg += '\n       try to set the following rules:\n       <strong>'
-      + rule.pattern +' whistle.' + rule.matcher + '</strong>';
+    msg +=
+      '\n       try to set the following rules:\n       <strong>' +
+      rule.pattern +
+      ' whistle.' +
+      rule.matcher +
+      '</strong>';
   }
   return msg;
 };
-var CONFIG_VAR_RE = /\${(port|version)}/ig;
+var CONFIG_VAR_RE = /\${(port|version)}/gi;
 var PLUGIN_RULES_URL_RE = /^whistle\.([a-z\d_\-]+)(?:$|\/)/i;
 
 function setConfigVarFn(_, name) {
   return config[name.toLowerCase()];
 }
 
-exports.getRemoteRules = function(apo, rulesUrl) {
+exports.getRemoteRules = function (apo, rulesUrl) {
   var headers = config.runtimeHeaders;
   var pluginName;
   if (PLUGIN_RULES_URL_RE.test(rulesUrl)) {
@@ -2819,7 +3027,7 @@ function isCustomParser(req) {
 }
 exports.isCustomParser = isCustomParser;
 
-exports.getParserStatus = function(req) {
+exports.getParserStatus = function (req) {
   if (!isCustomParser(req)) {
     return;
   }
@@ -2838,14 +3046,19 @@ exports.getParserStatus = function(req) {
   return customParser.join();
 };
 
-exports.isInspect = function(enable) {
-  return enable.inspect || enable.pauseReceive ||
-    enable.pauseSend || enable.ignoreReceive || enable.ignoreSend;
+exports.isInspect = function (enable) {
+  return (
+    enable.inspect ||
+    enable.pauseReceive ||
+    enable.pauseSend ||
+    enable.ignoreReceive ||
+    enable.ignoreSend
+  );
 };
 
 var BYTES_RANGE_RE = /^\s*bytes=/i;
 
-exports.parseRange = function(req, size) {
+exports.parseRange = function (req, size) {
   var range = size && req.headers.range;
   if (!range || !BYTES_RANGE_RE.test(range)) {
     return;
@@ -2856,7 +3069,7 @@ exports.parseRange = function(req, size) {
   }
   var start = size;
   var end = -1;
-  range = range.split(',').forEach(function(item) {
+  range = range.split(',').forEach(function (item) {
     item = item.split('-');
     var s = parseInt(item[0], 10);
     var e = parseInt(item[1], 10);
@@ -2869,7 +3082,7 @@ exports.parseRange = function(req, size) {
       e = size - 1;
     }
     start = Math.min(s, start);
-    end = Math.max(end, e); 
+    end = Math.max(end, e);
   });
   if (start < 0 || end < 0 || start > end || end >= size) {
     return;
@@ -2880,7 +3093,7 @@ exports.parseRange = function(req, size) {
   };
 };
 
-exports.parseClientInfo = function(req) {
+exports.parseClientInfo = function (req) {
   var clientInfo = req.headers[config.CLIENT_INFO_HEAD] || '';
   if (req.headers[config.REQ_FROM_HEADER] === 'W2COMPOSER') {
     req.fromComposer = true;
@@ -2913,9 +3126,9 @@ function getCipher(rules) {
 
 exports.getCipher = getCipher;
 
-exports.connect = function(options, callback) {
+exports.connect = function (options, callback) {
   var socket, timer, done, retry;
-  var execCallback = function(err) {
+  var execCallback = function (err) {
     clearTimeout(timer);
     timer = null;
     if (!done) {
@@ -2923,10 +3136,10 @@ exports.connect = function(options, callback) {
       err ? callback(err) : callback(null, socket);
     }
   };
-  var handleConnect = function() {
+  var handleConnect = function () {
     execCallback();
   };
-  var handleError = function(err) {
+  var handleError = function (err) {
     if (done) {
       return;
     }
@@ -2948,11 +3161,11 @@ exports.connect = function(options, callback) {
       return execCallback(e);
     }
     socket.on('error', handleError);
-    socket.on('close', function(err) {
+    socket.on('close', function (err) {
       !done && execCallback(err || new Error('closed'));
     });
   };
-  var handleTimeout = function() {
+  var handleTimeout = function () {
     handleError(new Error('Timeout'));
   };
   var sockMgr = options.ALPNProtocols ? tls : net;
@@ -2965,15 +3178,15 @@ exports.connect = function(options, callback) {
   socket.on('error', handleError);
 };
 
-exports.checkPluginReqOnce = function(req, raw) {
+exports.checkPluginReqOnce = function (req, raw) {
   var isPluginReq = req.headers[config.PROXY_ID_HEADER];
   if (raw ? isPluginReq : isPluginReq == 1) {
     delete req.headers[config.PROXY_ID_HEADER];
   }
-  return isPluginReq; 
+  return isPluginReq;
 };
 
-exports.checkPort = function(port, host, cb) {
+exports.checkPort = function (port, host, cb) {
   if (typeof host !== 'string') {
     cb = host;
     host = '127.0.0.1';
@@ -2982,13 +3195,13 @@ exports.checkPort = function(port, host, cb) {
     return cb();
   }
   var server = http.createServer();
-  server.listen(port, host, function() {
+  server.listen(port, host, function () {
     server.close(cb);
   });
 };
 
 var boundIpDeferMap = {};
-exports.getBoundIp = function(host, cb) {
+exports.getBoundIp = function (host, cb) {
   if (typeof host === 'function') {
     cb = host;
     host = null;
@@ -3005,7 +3218,7 @@ exports.getBoundIp = function(host, cb) {
   boundIpDefer = defer.promise;
   boundIpDeferMap[host] = boundIpDefer;
   boundIpDefer.done(cb);
-  dns.lookup(host, function(err, ip) {
+  dns.lookup(host, function (err, ip) {
     if (err) {
       throw err;
     }
@@ -3020,7 +3233,13 @@ function getPluginConfig(conf, name) {
       result = JSON.stringify(conf);
     } catch (e) {}
   }
-  return '<script>window.' + (name || 'whistleMenuConfig') + ' = ' + (result || '{}') + ';</script>';
+  return (
+    '<script>window.' +
+    (name || 'whistleMenuConfig') +
+    ' = ' +
+    (result || '{}') +
+    ';</script>'
+  );
 }
 
 exports.getPluginMenuConfig = function (conf) {
@@ -3031,16 +3250,16 @@ exports.getPluginInspectorConfig = function (conf) {
   return getPluginConfig(conf.inspectorConfig, 'whistleInspectorConfig');
 };
 
-exports.isEnableH2 = function(req) {
+exports.isEnableH2 = function (req) {
   var enable = req.enable || '';
   var disable = req.disable || '';
   return enable.h2 && !disable.h2;
 };
 
-exports.isDisableH2 = function(req, strict) {
+exports.isDisableH2 = function (req, strict) {
   var enable = req.enable || '';
   var disable = req.disable || '';
-  return strict ? (disable.http2 && !enable.http2) : (disable.h2 && !enable.h2);
+  return strict ? disable.http2 && !enable.http2 : disable.h2 && !enable.h2;
 };
 
 function isIllegalcHeader(name, value) {
@@ -3060,9 +3279,9 @@ function isIllegalcHeader(name, value) {
   }
 }
 
-exports.formatH2Headers = function(headers) {
+exports.formatH2Headers = function (headers) {
   var newHeaders = {};
-  Object.keys(headers).forEach(function(name) {
+  Object.keys(headers).forEach(function (name) {
     var value = headers[name];
     if (!isIllegalcHeader(name, value)) {
       newHeaders[name] = value;
@@ -3079,15 +3298,19 @@ function getProp(obj, key, def) {
   return obj == null ? def : obj;
 }
 
-var PLUGIN_VAR_RE = /\{\{(?:whistlePluginName|whistlePluginPackage\.([^}\s]+))\}\}/g;
+var PLUGIN_VAR_RE =
+  /\{\{(?:whistlePluginName|whistlePluginPackage\.([^}\s]+))\}\}/g;
 
-exports.renderPluginRules = function(rules, pkg, simpleName) {
-  return rules && rules.replace(PLUGIN_VAR_RE, function(_, key) {
-    return key ? getProp(pkg, key, '') : simpleName;
-  });
+exports.renderPluginRules = function (rules, pkg, simpleName) {
+  return (
+    rules &&
+    rules.replace(PLUGIN_VAR_RE, function (_, key) {
+      return key ? getProp(pkg, key, '') : simpleName;
+    })
+  );
 };
 
-exports.setClientCert = function(options, key, cert, isPfx, cacheKey) {
+exports.setClientCert = function (options, key, cert, isPfx, cacheKey) {
   if (!cert) {
     return;
   }
@@ -3103,14 +3326,29 @@ exports.setClientCert = function(options, key, cert, isPfx, cacheKey) {
   }
 };
 
-exports.getStatusCodeFromRule = function(rules) {
+exports.getStatusCodeFromRule = function (rules) {
   var rule = rules.rule;
-  return rule && rule.statusCode;
+  var isSpec = rule && rule.isSpec;
+  if (!isSpec) {
+    return;
+  }
+  rule = getMatcherValue(rule);
+  if (!rule) {
+    return;
+  }
+  var result = { statusCode: rule, headers: {} };
+  if (isSpec === 2) {
+    result.statusCode = 302;
+    result.headers.location = rule;
+  } else {
+    handleStatusCode(rule, result.headers);
+  }
+  return result;
 };
 
 var GZIP_RE = /\bgzip\b/i;
 
-exports.canGzip = function(req) {
+exports.canGzip = function (req) {
   return GZIP_RE.test(req.headers['accept-encoding']);
 };
 
@@ -3123,11 +3361,11 @@ function removeBody(req, data, isRes) {
   }
 }
 
-exports.removeReqBody = function(req, data) {
+exports.removeReqBody = function (req, data) {
   removeBody(req, data);
 };
 
-exports.removeResBody = function(req, data) {
+exports.removeResBody = function (req, data) {
   removeBody(req, data, true);
 };
 
@@ -3136,7 +3374,7 @@ function readOneChunk(stream, callback, timeout) {
     return callback();
   }
   var timer;
-  var handler = function(chunk) {
+  var handler = function (chunk) {
     timer && clearTimeout(timer);
     stream.pause();
     stream.removeListener('data', handler);
@@ -3152,7 +3390,7 @@ function readOneChunk(stream, callback, timeout) {
 
 exports.readOneChunk = readOneChunk;
 
-exports.getAuthByRules = function(rules) {
+exports.getAuthByRules = function (rules) {
   if (!rules.auth) {
     return;
   }
@@ -3167,8 +3405,8 @@ exports.getAuthByRules = function(rules) {
   };
 };
 
-exports.getAuthBasic = function(auth) {
-  if (!auth ) {
+exports.getAuthBasic = function (auth) {
+  if (!auth) {
     return;
   }
   var basic;
@@ -3186,7 +3424,7 @@ exports.getAuthBasic = function(auth) {
   return basic && 'Basic ' + toBuffer(basic.join(':')).toString('base64');
 };
 
-exports.delay = function(time, callback) {
+exports.delay = function (time, callback) {
   if (time > 0) {
     setTimeout(callback, time);
   } else {
@@ -3198,7 +3436,7 @@ var F_HOST_RE = /\bhost\b/i;
 var F_PROTO_RE = /\bproto\b/i;
 var F_IP_RE = /\b(?:clientIp|ip|for)\b/i;
 
-exports.handleForwardedProps = function(req) {
+exports.handleForwardedProps = function (req) {
   var headers = req.headers;
   var props = headers['x-whistle-forwarded-props'];
   var enableFwdHost = config.enableFwdHost;
@@ -3219,7 +3457,8 @@ exports.handleForwardedProps = function(req) {
     var host = headers[config.FWD_HOST_HEADER];
     if (host) {
       delete headers[config.FWD_HOST_HEADER];
-      headers[config.REAL_HOST_HEADER] = headers[config.REAL_HOST_HEADER] || host;
+      headers[config.REAL_HOST_HEADER] =
+        headers[config.REAL_HOST_HEADER] || host;
     }
   }
   if (enableFwdProto) {
@@ -3231,7 +3470,7 @@ exports.handleForwardedProps = function(req) {
   }
 };
 
-exports.filterWeakRule = function(req) {
+exports.filterWeakRule = function (req) {
   var rule = req.rules && req.rules.rule;
   if (!rule) {
     return;
@@ -3243,4 +3482,8 @@ exports.filterWeakRule = function(req) {
   if (rule.lineProps.weakRule || isEnable(req, 'weakRule')) {
     delete req.rules.rule;
   }
+};
+
+exports.setPluginMgr = function(p) {
+  pluginMgr = p;
 };

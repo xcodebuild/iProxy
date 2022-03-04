@@ -6,15 +6,13 @@ var qs = require('querystring');
 var Buffer = require('safe-buffer').Buffer;
 var PassThrough = require('stream').PassThrough;
 var protoMgr = require('../rules/protocols');
+var pluginMgr = require('../plugins');
+
 var CRLF_RE = /\r\n|\r|\n/g;
 var RAW_FILE_RE = /rawfile/;
 var HEADERS_SEP_RE = /(\r?\n(?:\r\n|\r|\n)|\r\r\n?)/;
 var MAX_HEADERS_SIZE = 256 * 1024;
 var TPL_RE = /(?:dust|tpl|jsonp):$/;
-
-function isTplProtocol(protocol) {
-  return TPL_RE.test(protocol);
-}
 
 function isRawFileProtocol(protocol) {
   return RAW_FILE_RE.test(protocol);
@@ -22,9 +20,14 @@ function isRawFileProtocol(protocol) {
 
 function readFiles(files, callback) {
   var file = files.shift();
-  var execCallback = function(err, stat) {
-    if(!err && stat && stat.isFile()) {
+  var execCallback = function (err, stat) {
+    if (!err && stat && stat.isFile()) {
       callback(null, file, stat.size);
+    } else if (file && file.pluginName) {
+      pluginMgr.requestBin(file, function(buffer, err) {
+        file = file.originalKey;
+        callback(err, file, buffer ? buffer.length : 0, buffer);
+      });
     } else if (files.length) {
       readFiles(files, callback);
     } else {
@@ -32,7 +35,9 @@ function readFiles(files, callback) {
     }
   };
 
-  !file || typeof file != 'string' ? execCallback() : fs.stat(file, execCallback);
+  !file || typeof file != 'string'
+    ? execCallback()
+    : fs.stat(file, execCallback);
 }
 
 function parseRes(str, rawHeaderNames, fromValue) {
@@ -74,14 +79,24 @@ function getRawResByValue(body) {
   return reader;
 }
 
-function getRawResByPath(protocol, path, req, size, callback) {
+function getRawResByPath(protocol, path, req, size, callback, body) {
   var isRawFile = isRawFileProtocol(protocol);
   var range = isRawFile ? undefined : util.parseRange(req, req.localFileSize);
-  var reader = fs.createReadStream(path, range);
-  var rawHeaderNames = reader.rawHeaderNames = rawHeaderNames;
+  var reader;
+  if (body == null) {
+    reader = fs.createReadStream(path, range);
+  } else {
+    reader = new PassThrough();
+    if (!body || !range) {
+      reader.end(body);
+    } else {
+      reader.end(body.slice(range.start, range.end + 1));
+    }
+  }
+  var rawHeaderNames = (reader.rawHeaderNames = rawHeaderNames);
   if (isRawFile) {
     var buffer;
-    var response = function(err, crlf) {
+    var response = function (err, crlf) {
       reader.removeAllListeners();
       reader.on('error', util.noop);
       var stream = reader;
@@ -97,14 +112,17 @@ function getRawResByPath(protocol, path, req, size, callback) {
           crlf = util.toBuffer(crlf);
           var index = util.indexOfList(buffer, crlf);
           if (index != -1) {
-            extend(reader, parseRes(buffer.slice(0, index) + '', rawHeaderNames));
+            extend(
+              reader,
+              parseRes(buffer.slice(0, index) + '', rawHeaderNames)
+            );
             var headerLen = index + crlf.length;
             size -= headerLen;
             buffer = buffer.slice(headerLen);
           }
         }
         buffer && reader.push(buffer);
-        stream.on('error', function(err) {
+        stream.on('error', function (err) {
           reader.emit('error', err);
         });
         stream.pipe(reader);
@@ -112,7 +130,7 @@ function getRawResByPath(protocol, path, req, size, callback) {
       callback(reader, null, size);
     };
 
-    reader.on('data', function(data) {
+    reader.on('data', function (data) {
       buffer = buffer ? Buffer.concat([buffer, data]) : data;
       if (HEADERS_SEP_RE.test(buffer + '')) {
         response(null, RegExp.$1);
@@ -132,20 +150,25 @@ function addRangeHeaders(res, range, size) {
     return;
   }
   var headers = res.headers;
-  headers['content-range'] = 'bytes ' + (range.start + '-' + range.end) + '/' + size;
+  headers['content-range'] =
+    'bytes ' + (range.start + '-' + range.end) + '/' + size;
   headers['accept-ranges'] = 'bytes';
   headers['content-length'] = range.end - range.start + 1;
   res.statusCode = 206;
 }
 
-module.exports = function(req, res, next) {
+module.exports = function (req, res, next) {
   var options = req.options;
   var config = this.config;
   var protocol = options && options.protocol;
   if (!protoMgr.isFileProxy(protocol)) {
     return next();
   }
-  var defaultType = mime.lookup(req.fullUrl.replace(/[?#].*$/, ''), 'text/html');
+  var isTpl = TPL_RE.test(protocol);
+  var defaultType = mime.lookup(
+    req.fullUrl.replace(/[?#].*$/, ''),
+    'text/html'
+  );
   var rules = req.rules;
   var rule = rules.rule;
   delete rules.proxy;
@@ -153,15 +176,19 @@ module.exports = function(req, res, next) {
   if (rule.value) {
     var body = util.removeProtocol(rule.value, true);
     var isRawFile = isRawFileProtocol(protocol);
-    var reader = isRawFile ? getRawResByValue(body) : {
-      statusCode: 200,
-      body: body,
-      headers: {
-        'content-type': (rule.key ? mime.lookup(rule.key, defaultType) : defaultType) + '; charset=utf-8'
-      }
-    };
+    var reader = isRawFile
+      ? getRawResByValue(body)
+      : {
+        statusCode: 200,
+        body: body,
+        headers: {
+          'content-type':
+              (rule.key ? mime.lookup(rule.key, defaultType) : defaultType) +
+              '; charset=utf-8'
+        }
+      };
 
-    if (isTplProtocol(protocol)){
+    if (isTpl) {
       reader.realUrl = rule.matcher;
       render(reader);
     } else {
@@ -183,16 +210,19 @@ module.exports = function(req, res, next) {
     return;
   }
 
-  readFiles(util.getRuleFiles(rule), function(err, path, size) {
-    if (err) {
+  readFiles(util.getRuleFiles(rule), function (err, path, size, buffer) {
+    if (err) { // TODO: 细化错误类型
       if (/^x/.test(protocol)) {
-        var fullUrl = /^xs/.test(protocol) ? req.fullUrl.replace(/^http:/, 'https:') : req.fullUrl;
+        var fullUrl = /^xs/.test(protocol)
+          ? req.fullUrl.replace(/^http:/, 'https:')
+          : req.fullUrl;
         extend(options, util.parseUrl(fullUrl));
         next();
       } else {
+        var is502 = err.code > 0 && err.code != 404;
         var notFound = util.wrapResponse({
-          statusCode: 404,
-          body: 'Not found file <strong>' + path + '</strong>',
+          statusCode: is502 ? 502 : 404,
+          body: is502 ? err.message : 'Not found file <strong>' + path + '</strong>',
           headers: {
             'content-type': 'text/html; charset=utf-8'
           }
@@ -204,33 +234,45 @@ module.exports = function(req, res, next) {
     }
 
     var headers = {
-      'server': config.name,
+      server: config.name,
       'content-type': mime.lookup(path, defaultType) + '; charset=utf-8'
     };
 
-    if (isTplProtocol(protocol)) {
+    if (isTpl) {
       var reader = {
         statusCode: 200,
         realUrl: path,
         headers: headers
       };
-      fs.readFile(path, {encoding: 'utf8'}, function(err, data) {
-        if (err) {
-          return util.emitError(req, err);
-        }
-        reader.body = data;
+      if (buffer != null) {
+        reader.body = buffer + '';
         render(reader);
-      });
+      } else {
+        fs.readFile(path, { encoding: 'utf8' }, function (err, data) {
+          if (err) {
+            return util.emitError(req, err);
+          }
+          reader.body = data;
+          render(reader);
+        });
+      }
     } else {
       req.localFileSize = size;
-      getRawResByPath(protocol, path, req, size, function(reader, range, realSize) {
-        reader.realUrl = path;
-        reader.statusCode = reader.statusCode || 200;
-        reader.headers = reader.headers || headers;
-        addRangeHeaders(reader, range, size);
-        !range && addLength(reader, realSize);
-        res.response(reader);
-      });
+      getRawResByPath(
+        protocol,
+        path,
+        req,
+        size,
+        function (reader, range, realSize) {
+          reader.realUrl = path;
+          reader.statusCode = reader.statusCode || 200;
+          reader.headers = reader.headers || headers;
+          addRangeHeaders(reader, range, size);
+          !range && addLength(reader, realSize);
+          res.response(reader);
+        },
+        buffer
+      );
     }
   });
 
@@ -238,13 +280,16 @@ module.exports = function(req, res, next) {
     if (reader.body) {
       var data = qs.parse(util.getQueryString(req.fullUrl));
       if (Object.keys(data).length) {
-        reader.body = reader.body.replace(/\$?\{([\w\-$]+)\}/g, function(all, matched) {
-          var value = data[matched];
-          if (value === undefined) {
-            return all;
+        reader.body = reader.body.replace(
+          /\$?\{([\w\-$]+)\}/g,
+          function (all, matched) {
+            var value = data[matched];
+            if (value === undefined) {
+              return all;
+            }
+            return util.getQueryValue(value);
           }
-          return util.getQueryValue(value);
-        });
+        );
       }
       addLength(reader, Buffer.byteLength(reader.body));
     } else {
