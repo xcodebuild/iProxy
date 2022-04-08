@@ -25,16 +25,9 @@ module.exports = merge.merge(baseConfig, {
         rules: [
             {
                 test: /\.tsx?$/,
-                loader: 'babel-loader',
+                loader: 'ts-loader',
                 options: {
-                    cacheDirectory: true,
-                    babelrc: false,
-                    presets: [
-                        ['@babel/preset-env', { targets: { browsers: 'last 2 versions ' } }],
-                        '@babel/preset-typescript',
-                        '@babel/preset-react',
-                    ],
-                    plugins: [['@babel/plugin-proposal-class-properties', { loose: true }]],
+                    transpileOnly: true
                 },
             },
             {
