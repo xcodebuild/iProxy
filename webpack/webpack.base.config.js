@@ -15,6 +15,17 @@ module.exports = {
     resolve: {
         extensions: ['.tsx', '.ts', '.js', '.json'],
     },
+    module: {
+        rules: [
+            {
+                test: /\.tsx?$/,
+                loader: 'ts-loader',
+                options: {
+                    transpileOnly: true
+                },
+            },
+        ]
+    },
     devtool: 'source-map',
     plugins: [],
 };

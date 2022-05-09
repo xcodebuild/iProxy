@@ -23,13 +23,7 @@ module.exports = merge.merge(baseConfig, {
     },
     module: {
         rules: [
-            {
-                test: /\.tsx?$/,
-                loader: 'ts-loader',
-                options: {
-                    transpileOnly: true
-                },
-            },
+          
             {
                 test: /\.(le|c)ss$/,
                 exclude: /\.lazy\.(le|c)ss$/i,

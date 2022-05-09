@@ -15,20 +15,6 @@ module.exports = merge.merge(baseConfig, {
     module: {
         rules: [
             {
-                test: /\.tsx?$/,
-                exclude: /node_modules/,
-                loader: 'babel-loader',
-                options: {
-                    cacheDirectory: true,
-                    babelrc: false,
-                    presets: [
-                        ['@babel/preset-env', { targets: 'maintained node versions' }],
-                        '@babel/preset-typescript',
-                    ],
-                    plugins: [['@babel/plugin-proposal-class-properties', { loose: true }]],
-                },
-            },
-            {
                 test: /\.(png|jpg|gif)$/i,
                 use: [
                   {
