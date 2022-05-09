@@ -101,6 +101,7 @@ export class PhoneProxy extends Extension {
             return (
                 <div className="iproxy-phoneproxy-container">
                     <div className="iproxy-phoneproxy-qrcode">
+                        {/* @ts-ignore */}
                         <QrCode size={256} value={`http://${selectedAddress}:${port}/cgi-bin/rootca`}></QrCode>
                     </div>
 

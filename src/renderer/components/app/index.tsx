@@ -27,6 +27,7 @@ export const App = () => {
         }
         if (activePanel.keepAlive) {
             return (
+                // @ts-ignore
                 <KeepAlive name={activePanel.title}>
                     <ActivePanelComponent />
                 </KeepAlive>
