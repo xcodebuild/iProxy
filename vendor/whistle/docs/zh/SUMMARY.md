@@ -2,6 +2,7 @@
 
 * [关于whistle](README.md)
 * [安装启动](install.md)
+* [代理与证书](proxy.md)
 * [命令行参数](options.md)
 * [命令行操作](cli.md)
 * [手动更新](update.md)
@@ -12,6 +13,7 @@
 * [匹配原则](principle.md)
 * [常用功能](frequet.md)
 * [插件开发](plugins.md)
+* [模板规则](template.md)
 * [自定义证书](custom-certs.md)
 * [注意事项](attention.md)
 * [常见问题](questions.md)
@@ -25,7 +27,6 @@
   * [WebSocket](webui/websocket.md)
   * [Filter](webui/filter.md)
   * [Settings](webui/settings.md)
-  * [Files](webui/files.md)
   * [Weinre](webui/weinre.md)
   * [Https](webui/https.md)
   * [Online](webui/online.md)

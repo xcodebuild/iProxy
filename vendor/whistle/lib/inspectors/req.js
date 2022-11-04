@@ -293,6 +293,7 @@ module.exports = function (req, res, next) {
         data.headers = util.lowerCaseify(data.headers, req.rawHeaderNames);
         req._customHost = data.headers.host;
         req._customXFF = data.headers[config.CLIENT_IP_HEAD];
+        req._customClientId = data.headers[config.CLIENT_ID_HEAD];
       }
 
       if (reqRules.method) {
@@ -346,7 +347,7 @@ module.exports = function (req, res, next) {
           cookie = req.headers.cookie;
         }
       }
-      util.setReqCookies(data, cookies, cookie);
+      util.setReqCookies(data, cookies, cookie, req);
       handleAuth(data, auth || authObj);
       util.setReqCors(data, cors);
       req.method = util.getMethod(data.method || req.method);
@@ -416,9 +417,13 @@ module.exports = function (req, res, next) {
               util.isEnable(req, 'forceReqWrite')
             );
           },
-          !util.hasRequestBody(req.method)
+          !util.hasRequestBody(req.method),
+          null,
+          null,
+          req
         );
       });
-    }
+    },
+    req
   );
 };

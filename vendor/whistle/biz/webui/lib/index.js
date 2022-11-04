@@ -15,6 +15,7 @@ var extend = require('extend');
 var htdocs = require('../htdocs');
 var handleWeinreReq = require('../../weinre');
 var setProxy = require('./proxy');
+var rulesUtil = require('../../../lib/rules/util');
 var getRootCAFile = require('../../../lib/https/ca').getRootCAFile;
 var config = require('../../../lib/config');
 var loadAuthPlugins = require('../../../lib/plugins').loadAuthPlugins;
@@ -42,6 +43,8 @@ var INSPECTOR_HTML = fs.readFileSync(path.join(__dirname, '../../../assets/tab.h
 var MENU_URL = '???_WHISTLE_PLUGIN_EXT_CONTEXT_MENU_' + config.port + '???';
 var INSPECTOR_URL = '???_WHISTLE_PLUGIN_INSPECTOR_TAB_' + config.port + '???';
 var UP_PATH_REGEXP = /(?:^|[\\/])\.\.(?:[\\/]|$)/;
+var KEY_RE_G = /\${[^{}\s]+}|{\S+}/g;
+var COMMENT_RE = /#[^\r\n]*$/mg;
 
 function doNotCheckLogin(req) {
   var path = req.path;
@@ -100,6 +103,9 @@ function verifyLogin(req, res, auth) {
   var correctKey = getLoginKey(req, res, auth);
   if (correctKey === lkey) {
     return true;
+  }
+  if (req.query.authorization && !req.headers.authorization) {
+    req.headers.authorization = 'Basic ' + req.query.authorization;
   }
   auth = getAuth(req) || {};
   if (!isGuest && config.encrypted) {
@@ -235,7 +241,13 @@ app.use(function(req, res, next) {
   if (req.headers.host !== 'rootca.pro') {
     return next();
   }
-  res.download(getRootCAFile(), 'rootCA.' + (req.path.indexOf('/cer') ? 'crt' : 'cer'));
+  var type = 'crt';
+  if (!req.path.indexOf('/cer')) {
+    type = 'cer';
+  } else if (!req.path.indexOf('/pem')) {
+    type = 'pem';
+  }
+  res.download(getRootCAFile(), 'rootCA.' + type);
 });
 
 function cgiHandler(req, res) {
@@ -251,7 +263,7 @@ function cgiHandler(req, res) {
     try {
       require(filepath)(req, res);
     } catch(err) {
-      var msg = config.debugMode ? '<pre>' + util.getErrorStack(err) + '</pre>' : 'Internal Server Error';
+      var msg = config.debugMode ? '<pre>' + util.encodeHtml(util.getErrorStack(err)) + '</pre>' : 'Internal Server Error';
       res.status(500).send(msg);
     }
   };
@@ -263,7 +275,7 @@ function cgiHandler(req, res) {
       var notFound = err ? err.code === 'ENOENT' : !stat.isFile();
       var msg;
       if (config.debugMode) {
-        msg =  '<pre>' + (err ? util.getErrorStack(err) : 'Not File') + '</pre>';
+        msg =  '<pre>' + (err ? util.encodeHtml(util.getErrorStack(err)) : 'Not File') + '</pre>';
       } else {
         msg = notFound ? 'Not Found' : 'Internal Server Error';
       }
@@ -326,7 +338,7 @@ app.all(PLUGIN_PATH_RE, function(req, res) {
   pluginMgr.loadPlugin(plugin, function(err, ports) {
     if (err || !ports.uiPort) {
       if (err) {
-        res.status(500).send('<pre>' + err + '</pre>');
+        res.status(500).send('<pre>' + util.encodeHtml(err) + '</pre>');
       } else {
         res.status(404).send('Not Found');
       }
@@ -343,7 +355,8 @@ app.all(PLUGIN_PATH_RE, function(req, res) {
 });
 
 app.use(function(req, res, next) {
-  if (ALLOW_PLUGIN_PATHS.indexOf(req.path) !== -1) {
+  var pathname = req.path;
+  if (ALLOW_PLUGIN_PATHS.indexOf(pathname) !== -1) {
     var name = req.headers[config.PROXY_ID_HEADER];
     if (name) {
       return pluginMgr.getPlugin(name + ':') ? next() : res.sendStatus(403);
@@ -352,7 +365,7 @@ app.use(function(req, res, next) {
   if (doNotCheckLogin(req)) {
     return next();
   }
-  if (config.disableWebUI && !config.debugMode) {
+  if (config.disableWebUI && !config.debugMode && (!config.captureData || pathname !== '/cgi-bin/get-data')) {
     return res.status(404).end('Not Found');
   }
   if (config.authKey && config.authKey === req.headers['x-whistle-auth-key']) {
@@ -361,12 +374,52 @@ app.use(function(req, res, next) {
   var guestAuthKey = config.guestAuthKey;
   if (((guestAuthKey && guestAuthKey === req.headers['x-whistle-guest-auth-key'])
     || verifyLogin(req, res)) && (!req.method || GET_METHOD_RE.test(req.method)
-    || WEINRE_RE.test(req.path) || GUEST_PATHS.indexOf(req.path) !== -1)) {
+    || WEINRE_RE.test(pathname) || GUEST_PATHS.indexOf(pathname) !== -1)) {
     return next();
   }
   if (checkAuth(req, res)) {
     next();
   }
+});
+
+function sendText(res, text) {
+  res.writeHead(200, {
+    'Content-Type': 'text/plain; charset=utf-8'
+  });
+  res.end(typeof text === 'string' ? text : '');
+}
+
+function parseKey(key) {
+  return key[0] === '$' ? key.slice(2, -1) : key.slice(1, -1);
+}
+
+app.get('/rules', function(req, res) {
+  var query = req.query;
+  var name = query.name || query.key;
+  if (name === 'Default') {
+    name = rulesUtil.rules.getDefault();
+  } else if (!name) {
+    name = rulesUtil.rules.getRawRulesText();
+  } else {
+    name = rulesUtil.rules.get(name);
+  }
+  if (name && query.values !== 'false' && !(query.values <= 0)) {
+    var keys = name.replace(COMMENT_RE, '').match(KEY_RE_G);
+    if (keys) {
+      keys = keys.map(parseKey).map(function (key) {
+        return util.wrapRuleValue(key, rulesUtil.values.get(key), query.values, query.policy);
+      }).join('');
+      if (keys) {
+        name += '\n' + keys;
+      }
+    }
+  }
+  sendText(res, name);
+});
+
+app.get('/values', function(req, res) {
+  var name = req.query.name || req.query.key;
+  sendText(res, rulesUtil.values.get(name));
 });
 
 app.all('/cgi-bin/*', function(req, res, next) {

@@ -18,6 +18,8 @@ var MULTI_LINE_VALUE_RE =
 var WEB_PROTOCOL_RE = /^(?:https?|wss?|tunnel):\/\//;
 var PORT_RE = /^(x?hosts?:\/\/)(?:([\w.-]*)|\[([:\da-f.]+)\])(?::(\d+))?$/i;
 var PLUGIN_RE = /^(?:plugin|whistle)\.([a-z\d_\-]+:\/\/[\s\S]*)/;
+var PLUGIN_TPL_RE = /(^|\s)?(%[a-z\d_-]+(?:\.[^\s=]+)?=|(?:whistle\.)?[a-z\d_-]+:\/\/)([^\s]*)/g;
+var TPL_KEY_RE = /\{\{\s*%?ruleValue\s*\}\}/g;
 var protocols = protoMgr.protocols;
 var reqProtocols = protoMgr.reqProtocols;
 var pureResProtocols = protoMgr.pureResProtocols;
@@ -48,7 +50,7 @@ var FILTER_RE = /^(?:excludeFilter|includeFilter):\/\/(.*)$/;
 var PROPS_FILTER_RE =
   /^(?:filter|excludeFilter|includeFilter|ignore):\/\/(m(?:ethod)?|i(?:p)?|h(?:eader)?|s(?:tatusCode)?|from|b(?:ody)?|clientIp|clientIP|clientPort|remoteAddress|remotePort|serverIp|serverIP|serverPort|re[qs](?:H(?:eaders?)?)?):(.+)$/;
 var PURE_FILTER_RE =
-  /^(?:excludeFilter|includeFilter):\/\/(statusCode|from|clientIp|clientIP|clientPort|remoteAddress|remotePort|serverIp|serverIP|serverPort|re[qs](?:H(?:eaders?)?)?)[.=](.+)$/;
+  /^(?:excludeFilter|includeFilter):\/\/(statusCode|from|clientIp|clientIP|clientPort|remoteAddress|remotePort|serverIp|serverIP|serverPort|host|re[qs](?:H(?:eaders?)?)?)[.=](.+)$/;
 var PATTERN_WILD_FILTER_RE = /^(?:filter|ignore):\/\/(!)?(\*+\/)/;
 var WILD_FILTER_RE = /^(\*+\/)/;
 var regUrlCache = {};
@@ -58,7 +60,7 @@ var DOMAIN_STAR_RE = /([*~]+)(\\.)?/g;
 var STAR_RE = /\*+/g;
 var PORT_PATTERN_RE = /^!?:\d{1,5}$/;
 var QUERY_RE = /[?#].*$/;
-var COMMENT_RE = /#.*$/;
+var COMMENT_RE = /#[^\r\n]*$/g;
 var TPL_RE = /^((?:[\w.-]+:)?\/\/)?(`.*`)$/;
 // url:  protocol, host, port, hostname, search, query, pathname, path, href, query.key
 // req|res: ip, method, statusCode, headers?.key, cookies?.key
@@ -66,7 +68,7 @@ var PLUGIN_NAME_RE =
   /^[a-z\d_\-]+(?:\.g?(?:all)?var(?:\$|\d*))?(?:\.replace\(.+\))?$/i;
 var VAR_INDEX_RE = /^([a-z\d_\-]+)\.(g)?(all)?var(\$|\d*)/i;
 var TPL_VAR_RE =
-  /(\$)?\$\{(\{)?(id|reqId|whistle|now|port|realPort|version|url|hostname|query|search|queryString|searchString|path|pathname|clientId|localClientId|ip|clientIp|clientPort|remoteAddress|remotePort|serverIp|serverPort|method|status(?:Code)|reqCookies?|resCookies?|re[qs]H(?:eaders?)?)(?:\.([^{}]+))?\}(\})?/gi;
+  /(\$)?\$\{(\{)?(id|reqId|whistle|now|host|port|realPort|realHost|version|url|hostname|query|search|queryString|searchString|path|pathname|clientId|localClientId|ip|clientIp|clientPort|remoteAddress|remotePort|serverIp|serverPort|method|status(?:Code)|reqCookies?|resCookies?|re[qs]H(?:eaders?)?)(?:\.([^{}]+))?\}(\})?/gi;
 var REPLACE_PATTERN_RE = /(^|\.)replace\((.+)\)$/i;
 var SEP_RE = /^[?/]/;
 var COMMA1_RE = /\\,/g;
@@ -76,11 +78,21 @@ var G_LF_RE = /\n/g;
 var SUFFIX_RE = /^\\\.[\w-]+$/;
 var DOT_PATTERN_RE = /^\.[\w-]+(?:[?$]|$)/;
 var inlineValues;
+var pluginMgr;
 var CONTROL_RE =
   /[\u001e\u001f\u200e\u200f\u200d\u200c\u202a\u202d\u202e\u202c\u206e\u206f\u206b\u206a\u206d\u206c]+/g;
 var ENABLE_PROXY_RE =
   /\bproxy(?:Host|First|Tunnel)|clientId|multiClient|singleClient\b/i;
-var PLUGIN_VAR_RE = /^%([a-z\d_\-]+)=([^\s]*)/;
+var PLUGIN_VAR_RE = /^%([a-z\d_\-]+)([=.])([^\s]*)/;
+var EXACT_IGNORE_RE = /^ignore:\/\/(pattern|matcher|operator)[=:](.+)$/;
+var EXACT_SKIP_RE = /^(pattern|matcher|operator)[=:](.+)$/;
+var NO_PROTO_RE = /[^\w!*|.-]/;
+var SKIP_RE = /^skip:\/\//;
+var SUB_VAR_RE = /\$\{RegExp\.\$([&\d])\}/g;
+
+function removeComment(text) {
+  return text.replace(COMMENT_RE, '').trim();
+}
 
 function domainToRegExp(all, star, dot) {
   var len = star.length;
@@ -347,11 +359,42 @@ function toLine(_, line) {
   return line.replace(SPACE_RE, ' ');
 }
 
+function mergeLines(text) {
+  return removeComment(text).replace(MULTI_TO_ONE_RE, toLine);
+}
+
+function parsePluginTpl(lines) {
+  var ruleTpls = pluginMgr && pluginMgr.ruleTpls;
+  if (!ruleTpls) {
+    return lines;
+  }
+  var result = [];
+  lines.forEach(function(line) {
+    line = removeComment(line);
+    var isPrivate = /\s/.test(line);
+    line = line.replace(PLUGIN_TPL_RE, function(all, sep, key, value) {
+      var isVar = key.indexOf('=') !== -1;
+      if (isVar && isPrivate) {
+        key = '_' + key;
+      }
+      var tpl = ruleTpls[key.slice(0, isVar ? -1 : -3)];
+      if (tpl == null) {
+        return all;
+      }
+      return (sep || '') + mergeLines(tpl).replace(TPL_KEY_RE, function(key) {
+        return key.indexOf('%') === -1 ? value : util.encodeURIComponent(value);
+      });
+    });
+    result.push.apply(result, mergeLines(line).split(LINE_END_RE));
+  });
+  return result;
+}
+
 function getLines(text, root) {
   if (!text || !(text = text.trim())) {
     return [];
   }
-  text = text.replace(MULTI_TO_ONE_RE, toLine);
+  text = mergeLines(text);
   var ruleKeys = {};
   var valueKeys = {};
   var lines = text.split(LINE_END_RE);
@@ -361,6 +404,7 @@ function getLines(text, root) {
     if (!line) {
       return;
     }
+    var ruleList;
     var isRuleKey = RULE_KEY_RE.test(line);
     if (isRuleKey || VALUE_KEY_RE.test(line)) {
       if (root) {
@@ -375,12 +419,14 @@ function getLines(text, root) {
           valueKeys[key] = 1;
           line = values.get(key);
         }
-        if (line) {
-          result.push.apply(result, line.split(LINE_END_RE));
-        }
+        ruleList = line && mergeLines(line).split(LINE_END_RE);
       }
     } else {
-      result.push(line);
+      ruleList = [line];
+    }
+    if (ruleList) {
+      ruleList = parsePluginTpl(ruleList);
+      result.push.apply(result, ruleList);
     }
   });
   return result;
@@ -584,8 +630,12 @@ function resolveVarValue(req, escape, name, key) {
     return resolveUrlVar(req, key, escape);
   case 'port':
     return config.port;
+  case 'host':
+    return config.host || '';
   case 'realport':
     return config.realPort || config.port;
+  case 'realhost':
+    return config.realHost || config.host || '';
   case 'version':
     return config.version;
   case 'reqcookie':
@@ -600,7 +650,7 @@ function resolveVarValue(req, escape, name, key) {
   case 'clientip':
     return resolveClientIpVar(req, key);
   case 'clientid':
-    return util.getClientId(req.headers);
+    return req._origClientId || util.getClientId(req.headers);
   case 'clientport':
     return req.clientPort || '';
   case 'localclientid':
@@ -712,8 +762,8 @@ function getValueFor(key, vals) {
   return values.get(key);
 }
 
-function getRule(req, list, vals, index, isFilter) {
-  var rule = resolveRuleList(req, list, vals, index || 0, isFilter);
+function getRule(req, list, vals, index, isFilter, host) {
+  var rule = resolveRuleList(req, list, vals, index || 0, isFilter, null, host);
   resolveValue(rule, vals, req);
   return rule;
 }
@@ -732,6 +782,8 @@ function resolveValue(rule, vals, req) {
   var matcher = rule.matcher;
   var index = matcher.indexOf('://') + 3;
   var protocol = matcher.substring(0, index);
+  var regExp = rule.regExp;
+  delete rule.regExp;
   matcher = matcher.substring(index);
   var key = getKey(matcher);
   if (key) {
@@ -740,9 +792,16 @@ function resolveValue(rule, vals, req) {
   var value = getValueFor(key, vals);
   if (value == null) {
     value = false;
+    regExp = null;
   }
   if (value !== false || (value = getValue(matcher)) !== false) {
     rule.value = protocol + value;
+    if (rule.isTpl && regExp) {
+      rule.value = rule.value.replace(SUB_VAR_RE, function(_, index) {
+        index = index === '&' ? 0 : index;
+        return regExp[index] || '';
+      });
+    }
     if (rule.isTpl) {
       rule.value = resolveTplVar(rule.value, req);
     }
@@ -782,7 +841,7 @@ function replaceSubMatcher(url, regExp) {
   return util.replacePattern(url, regExp);
 }
 
-function resolveRuleList(req, list, vals, index, isFilter, isEnableProxy) {
+function resolveRuleList(req, list, vals, index, isFilter, isEnableProxy, host) {
   var curUrl = formatUrl(req.curUrl);
   var notHttp = list.isRuleProto && curUrl[0] !== 'h';
   //支持域名匹配
@@ -799,15 +858,17 @@ function resolveRuleList(req, list, vals, index, isFilter, isEnableProxy) {
   var getPathRule = function () {
     result = extend(
       {
-        files:
-          files &&
-          files.map(function (file) {
-            return join(file, filePath);
-          }),
+        files: files,
         url: join(matcher, filePath)
       },
       rule
     );
+    if (files && filePath) {
+      result.files = files.map(function (file) {
+        return join(file, filePath);
+      });
+      result.rawFiles = files;
+    }
     result.matcher = origMatcher;
     removeFilters(result);
     if (isIndex) {
@@ -837,11 +898,12 @@ function resolveRuleList(req, list, vals, index, isFilter, isEnableProxy) {
     if (notHttp && protoMgr.isFileProxy(rule.matcher)) {
       return false;
     }
-    return isFilter || !matchExcludeFilters(curUrl, rule, req);
+    return (isFilter || !matchExcludeFilters(curUrl, rule, req)) && (host == null || util.checkProxyHost(rule, host));
   };
 
   for (var i = 0; (rule = list[i]); i++) {
-    if (isEnableProxy && !ENABLE_PROXY_RE.test(rule.matcher)) {
+    if ((isEnableProxy && !ENABLE_PROXY_RE.test(rule.matcher)) ||
+      (req._skipProps && (util.exactIgnore(req._skipProps, rule) || util.checkSkip(req._skipProps, rule, curUrl)))) {
       continue;
     }
     var pattern = rule.isRegExp
@@ -869,6 +931,7 @@ function resolveRuleList(req, list, vals, index, isFilter, isEnableProxy) {
         files = getFiles(matcher);
         result = extend({ url: matcher, files: files }, rule);
         result.matcher = matcher;
+        result.regExp = regExp;
         removeFilters(result);
         if (isIndex) {
           return result;
@@ -969,8 +1032,41 @@ function resolveRuleList(req, list, vals, index, isFilter, isEnableProxy) {
   return isIndex ? null : results;
 }
 
-function resolveProperties(req, rules, vals) {
-  return util.resolveProperties(getRuleList(req, rules, vals));
+function resolveProps(req, rules, vals, isIgnore) {
+  var list = getRuleList(req, rules, vals);
+  var result = {};
+  if (isIgnore) {
+    list = list.filter(function(rule) {
+      var matcher = rule.matcher;
+      if (SKIP_RE.test(matcher)) {
+        matcher = matcher.slice(7);
+        if (!matcher) {
+          return false;
+        }
+        if (EXACT_SKIP_RE.test(matcher) || NO_PROTO_RE.test(matcher)) {
+          var prop ='ignore|' + (RegExp.$1 === 'pattern' ? 'pattern' : 'matcher') + '=' + (RegExp.$2 || matcher);
+          req._skipProps = req._skipProps || {};
+          result[prop] = true;
+          req._skipProps[prop] = true;
+          return false;
+        }
+        matcher.split('|').forEach(function(name) {
+          if (name) {
+            req._skipProps = req._skipProps || {};
+            req._skipProps[name] = true;
+          }
+        });
+      } else if (EXACT_IGNORE_RE.test(matcher)) {
+        result['ignore|' + (RegExp.$1 === 'pattern' ? 'pattern' : 'matcher') + '=' + RegExp.$2] = true;
+        return false;
+      }
+      return true;
+    });
+    if (!list.length) {
+      return result;
+    }
+  }
+  return util.resolveProperties(list, result);
 }
 
 function parseWildcard(pattern, not) {
@@ -1030,7 +1126,7 @@ function parseWildcard(pattern, not) {
     preMatch = '[a-z]+:' + preMatch;
   }
   preMatch =
-    '^(' + preMatch + ')' + (allowMatchPath ? util.escapeRegExp(path) : '');
+    '^(' + preMatch + ')' + (allowMatchPath ? util.escapeRegExp(path, true) : '');
 
   return {
     preMatch: new RegExp(preMatch),
@@ -1045,6 +1141,7 @@ function parseRule(rulesMgr, pattern, matcher, raw, root, options) {
   }
   var regUrl = regUrlCache[pattern];
   var rawPattern = pattern;
+  var rawMatcher = matcher;
   var noSchema;
   var isRegExp, not, port, protocol, isExact;
   if (regUrl) {
@@ -1165,12 +1262,15 @@ function parseRule(rulesMgr, pattern, matcher, raw, root, options) {
         '/'
       ) == -1,
     rawPattern: rawPattern,
+    rawMatcher: matcher === rawMatcher ? undefined : rawMatcher,
     filters: options.filters,
-    lineProps: options.lineProps
+    lineProps: options.lineProps,
+    hostFilter: options.hostFilter
   };
-  if (protocol === 'proxy' || protocol === 'host') {
+  if (options.rawProps.length) {
     rule.rawProps = options.rawProps;
-  } else if (protocol === 'log' || protocol === 'weinre') {
+  }
+  if (protocol === 'log' || protocol === 'weinre') {
     rule.isTpl = false;
   }
   if (useRealPort) {
@@ -1188,19 +1288,14 @@ function parseRule(rulesMgr, pattern, matcher, raw, root, options) {
     case 'https-proxy':
       rule.isHttps = true;
       break;
+    case 'internal-http-proxy':
+    case 'https2http-proxy':
     case 'internal-proxy':
       rule.isInternal = true;
       break;
-    case 'internal-http-proxy':
-      rule.isInternal = true;
-      rule.isHttpInternal = true;
-      break;
     case 'internal-https-proxy':
       rule.isInternal = true;
-      rule.isHttpsInternal = true;
-      break;
-    case 'https2http-proxy':
-      rule.isHttps2http = true;
+      rule.isHttps = true;
       break;
     case 'http2https-proxy':
       rule.isHttp2https = true;
@@ -1209,6 +1304,13 @@ function parseRule(rulesMgr, pattern, matcher, raw, root, options) {
   }
   if (options.hasBodyFilter) {
     rules._bodyFilters.push(rule);
+  }
+  if (util.isImportant(options)) {
+    for (var i = 0, len = list.length; i < len; i++) {
+      if (!util.isImportant(list[i])) {
+        return list.splice(i, 0, rule);
+      }
+    }
   }
   list.push(rule);
 }
@@ -1371,7 +1473,7 @@ function resolveMatchFilter(list) {
   var matchers = [];
   var lineProps = {};
   var rawProps = [];
-  var filters, hasBodyFilter;
+  var filters, hasBodyFilter, hostFilter;
   list.forEach(function (matcher) {
     if (LINE_PROPS_RE.test(matcher)) {
       rawProps.push(matcher);
@@ -1380,10 +1482,10 @@ function resolveMatchFilter(list) {
     }
     var filter, not, isInclude, orgVal;
     if (PROPS_FILTER_RE.test(matcher) || PURE_FILTER_RE.test(matcher)) {
-      filters = filters || [];
       var raw = RegExp['$&'];
       var propName = RegExp.$1;
       var value = RegExp.$2;
+      var isHostFilter = propName === 'host';
       isInclude = matcher[1] === 'n';
       if (value[0] === '!') {
         not = !not;
@@ -1462,6 +1564,12 @@ function resolveMatchFilter(list) {
           propName = 'portPattern';
         }
         value = pattern || value.toLowerCase();
+      } else if (isHostFilter) {
+        pattern = util.toRegExp(value);
+        if (pattern) {
+          propName = 'hostPattern';
+        }
+        value = pattern || value.toLowerCase();
       } else {
         var index = value.indexOf('=');
         var key = (
@@ -1497,7 +1605,14 @@ function resolveMatchFilter(list) {
       filter = { not: not, isInclude: isInclude };
       filter[propName] = value;
       filter.raw = raw;
-      return filters.push(filter);
+      if (isHostFilter) {
+        hostFilter = hostFilter || [];
+        hostFilter.push(filter);
+      } else {
+        filters = filters || [];
+        filters.push(filter);
+      }
+      return;
     }
     var result = resolveFilterPattern(matcher);
     if (result === false) {
@@ -1526,6 +1641,7 @@ function resolveMatchFilter(list) {
     rawProps: rawProps,
     hasBodyFilter: hasBodyFilter,
     matchers: matchers,
+    hostFilter: hostFilter,
     filters: filters,
     lineProps: lineProps
   };
@@ -1535,18 +1651,18 @@ function parseText(rulesMgr, text, root) {
   var pluginVars = rulesMgr._globalPluginVars;
   getLines(text, root).forEach(function (line) {
     var raw = line;
-    line = line.replace(COMMENT_RE, '').trim();
+    line = removeComment(line);
     line = line && line.split(/\s+/);
     var len = line && line.length;
     if (len === 1 && PLUGIN_VAR_RE.test(line[0])) {
       var name = RegExp.$1;
-      var value = RegExp.$2;
+      var value = RegExp.$3;
       if (value) {
         var vars = pluginVars[name];
         if (!vars) {
           vars = [value];
           pluginVars[name] = vars;
-        } else {
+        } else if (vars.indexOf(value) === -1) {
           vars.push(value);
         }
       }
@@ -1839,14 +1955,14 @@ proto.clearAppend = function () {
   }
 };
 
-proto.append = function (text, root) {
+proto.append = function (text, root, batchUpdate) {
   var item = {
     text: text,
     root: root
   };
   if (this._rawText) {
     this._rawText.push(item);
-    !this.disabled && parse(this, trimInlineValues(text), root, true);
+    !this.disabled && !batchUpdate && parse(this, trimInlineValues(text), root, true);
     if (inlineValues) {
       extend(this._values, inlineValues);
       inlineValues = null;
@@ -1884,9 +2000,6 @@ proto.resolveHost = function (
 proto.lookupHost = function (req, callback) {
   req.curUrl = formatUrl(util.setProtocol(req.curUrl));
   var options = url.parse(req.curUrl);
-  if (options.hostname === '::1') {
-    return callback(null, '127.0.0.1');
-  }
   lookup(
     options.hostname,
     callback,
@@ -1894,11 +2007,12 @@ proto.lookupHost = function (req, callback) {
   );
 };
 
-var ignoreHost = function (req, rulesMgr) {
+var ignoreHost = function (req, rulesMgr, filter) {
   if (!rulesMgr) {
     return false;
   }
   var ignore = rulesMgr.resolveFilter(req);
+  extend(filter, ignore);
   return (
     ignore.host ||
     ignore.hosts ||
@@ -1906,35 +2020,47 @@ var ignoreHost = function (req, rulesMgr) {
     ignore['ignore|hosts']
   );
 };
+
+function getHostFromList(list, req, vals) {
+  var host;
+  for (var i = 0, len = list.length; i < len; i++) {
+    var mgr = list[i];
+    var _host = mgr && getRule(req, mgr._rules.host, vals[i] || mgr._values);
+    if (_host) {
+      if (util.isImportant(_host)) {
+        return _host;
+      }
+      host = host || _host;
+    }
+  }
+  return host;
+}
+
 proto.getHost = function (req, pluginRulesMgr, rulesFileMgr, headerRulesMgr) {
   var curUrl = formatUrl(util.setProtocol(req.curUrl));
   req.curUrl = curUrl;
+  var filter = {};
   var filterHost =
-    ignoreHost(req, this) ||
-    ignoreHost(req, pluginRulesMgr) ||
-    ignoreHost(req, rulesFileMgr) ||
-    ignoreHost(req, headerRulesMgr);
+    ignoreHost(req, this, filter) ||
+    ignoreHost(req, pluginRulesMgr, filter) ||
+    ignoreHost(req, rulesFileMgr, filter) ||
+    ignoreHost(req, headerRulesMgr, filter);
   var vals = this._values;
   if (filterHost) {
     return;
   }
-  var host;
+  var list;
+  var valList;
   if (config.multiEnv) {
-    host =
-      (pluginRulesMgr &&
-        getRule(req, pluginRulesMgr._rules.host, pluginRulesMgr._values)) ||
-      (headerRulesMgr && getRule(req, headerRulesMgr._rules.host, vals)) ||
-      getRule(req, this._rules.host, vals) ||
-      (rulesFileMgr &&
-        getRule(req, rulesFileMgr._rules.host, req._scriptValues));
+    list = [pluginRulesMgr, headerRulesMgr, this, rulesFileMgr];
+    valList = [null, vals, vals, req._scriptValues];
   } else {
-    host =
-      (pluginRulesMgr &&
-        getRule(req, pluginRulesMgr._rules.host, pluginRulesMgr._values)) ||
-      getRule(req, this._rules.host, vals) ||
-      (rulesFileMgr &&
-        getRule(req, rulesFileMgr._rules.host, req._scriptValues)) ||
-      (headerRulesMgr && getRule(req, headerRulesMgr._rules.host, vals));
+    list = [pluginRulesMgr, this, rulesFileMgr, headerRulesMgr];
+    valList = [null, vals, req._scriptValues, vals];
+  }
+  var host = getHostFromList(list, req, valList);
+  if (!host || util.exactIgnore(filter, host)) {
+    return;
   }
   var matcher = util.rule.getMatcher(host);
   if (matcher && PORT_RE.test(matcher)) {
@@ -1945,8 +2071,8 @@ proto.getHost = function (req, pluginRulesMgr, rulesFileMgr, headerRulesMgr) {
 };
 
 proto.resolveFilter = function (req) {
-  var filter = resolveProperties(req, this._rules.filter, this._values);
-  var ignore = resolveProperties(req, this._rules.ignore, this._values);
+  var filter = resolveProps(req, this._rules.filter, this._values);
+  var ignore = resolveProps(req, this._rules.ignore, this._values, true);
   util.resolveFilter(ignore, filter);
   delete filter.filter;
   delete filter.ignore;
@@ -1955,7 +2081,7 @@ proto.resolveFilter = function (req) {
   return filter;
 };
 proto.resolveDisable = function (req) {
-  return resolveProperties(req, this._rules.disable, this._values);
+  return resolveProps(req, this._rules.disable, this._values);
 };
 var pluginProtocols = [
   'enable',
@@ -2005,6 +2131,7 @@ function resolveRules(req, isReq, isRes) {
       _rules[name] = rule;
     }
   });
+
   multiMatchs.forEach(function (name) {
     rule = _rules[name];
     if (rule) {
@@ -2046,7 +2173,7 @@ proto.resolveResRules = function (req) {
 };
 
 proto.resolveEnable = function (req) {
-  return resolveProperties(req, this._rules.enable, this._values);
+  return resolveProps(req, this._rules.enable, this._values);
 };
 
 function mergeRule(rules, list, name) {
@@ -2107,12 +2234,15 @@ function resolveSingleRule(req, protocol, multi) {
   if (util.isIgnored(filter, protocol)) {
     return;
   }
-  var list =
-    protocol === 'sniCallback' ? this._sniCallback : this._rules[protocol];
+  var list = protocol === 'sniCallback' ? this._sniCallback : this._rules[protocol];
   if (multi) {
-    return getRuleList(req, list, this._values);
+    list = getRuleList(req, list, this._values).filter(function(rule) {
+      return !util.exactIgnore(filter, rule);
+    });
+    return list.length ? list : null;
   }
-  return getRule(req, list, this._values);
+  var rule = getRule(req, list, this._values);
+  return rule && !util.exactIgnore(filter, rule) ? rule : null;
 }
 
 proto.resolvePipe = function (req) {
@@ -2147,26 +2277,28 @@ proto.hasReqScript = function (req) {
     : getRule(req, this._rules.rulesFile, this._values);
 };
 
-proto.resolveProxy = function resolveProxy(req) {
-  var proxy = getRule(req, this._rules.proxy, this._values);
+proto.resolveProxy = function resolveProxy(req, host) {
+  var proxy = getRule(req, this._rules.proxy, this._values, null, null, host);
   var matcher = proxy && proxy.matcher;
   var name = matcher && matcher.substring(0, matcher.indexOf(':'));
   var filter = this.resolveFilter(req);
-  if (!proxy || filter['ignore:' + name]) {
+  if (!proxy) {
+    return proxy;
+  }
+  if (util.exactIgnore(filter, proxy)) {
+    return;
+  }
+  if (filter['ignore:' + name]) {
     return proxy;
   }
   if (util.isIgnored(filter, 'proxy')) {
     return;
   }
-  if (util.isIgnored(filter, 'xproxy')) {
-    if (matcher[0] === 'x') {
-      return;
-    }
+  if (matcher[0] === 'x' && util.isIgnored(filter, 'xproxy')) {
+    return;
   }
-  if (util.isIgnored(filter, name)) {
-    if (matcher.indexOf(name + '://') === 0) {
-      return;
-    }
+  if (matcher.indexOf(name + '://') === 0 && util.isIgnored(filter, name)) {
+    return;
   }
   return proxy;
 };
@@ -2198,3 +2330,7 @@ Rules.disableDnsCache = function () {
 };
 
 module.exports = Rules;
+
+Rules.setPluginMgr = function(p) {
+  pluginMgr = p;
+};

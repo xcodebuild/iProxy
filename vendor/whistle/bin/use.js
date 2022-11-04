@@ -10,7 +10,7 @@ var error = util.error;
 var warn = util.warn;
 var info = util.info;
 var readConfig = util.readConfig;
-var MAX_RULES_LEN = 1024 * 16;
+var MAX_RULES_LEN = 1024 * 256;
 var DEFAULT_OPTIONS = { host: '127.0.0.1', port: 8899 };
 var options;
 
@@ -24,10 +24,14 @@ function handleRules(filepath, callback, port) {
   if (typeof getRules !== 'function') {
     return callback(getRules);
   }
-  getRules(callback, {
+  var opts = {
     port: port,
     existsPlugin: existsPlugin
-  });
+  };
+  if (options && options.host) {
+    opts.host = options.host;
+  }
+  getRules(callback, opts);
 }
 
 function getString(str) {
@@ -112,15 +116,16 @@ function checkDefault(running, storage, callback) {
 
 module.exports = function(filepath, storage, force) {
   storage = storage || '';
-  var config = readConfig(storage) || '';
-  options = config.options; 
+  var dir = encodeURIComponent(storage);
+  var config = readConfig(dir) || '';
+  options = config.options || '';
   var pid = options && config.pid;
   var addon = options && options.addon;
   var conf = require('../lib/config');
   conf.addon = addon && typeof addon === 'string' ? addon.split(/[|,]/) : null;
   conf.noGlobalPlugins = options && options.noGlobalPlugins;
   isRunning(pid, function(running) {
-    checkDefault(running, storage, function(err, port) {
+    checkDefault(running, dir, function(err, port) {
       if (err) {
         return showStartWhistleTips(storage);
       }
@@ -142,16 +147,18 @@ module.exports = function(filepath, storage, force) {
         }
         var rules = getString(result.rules);
         if (rules.length > MAX_RULES_LEN) {
-          error('The rules cannot be empty and the size cannot exceed 16k.');
+          error('The rules cannot be empty and the size cannot exceed 256k.');
           return;
         }
+        var groupName = getString(result.groupName) || getString(result.group);
         var setRules = function() {
           var body = [
             'name=' + encodeURIComponent(name),
-            'rules=' + encodeURIComponent(rules)
+            'rules=' + encodeURIComponent(rules),
+            'groupName=' + encodeURIComponent(groupName.trim())
           ].join('&');
           request(body, function() {
-            info('Setting whistle[' + (options.host || '127.0.0.1') + ':' + port + '] rules successful.');
+            info('Setting whistle (' + (options.host || '127.0.0.1') + ':' + port + ') rules successful.');
           });
         };
         if (force) {

@@ -23,10 +23,10 @@ function readFiles(files, callback) {
   var execCallback = function (err, stat) {
     if (!err && stat && stat.isFile()) {
       callback(null, file, stat.size);
-    } else if (file && file.pluginName) {
-      pluginMgr.requestBin(file, function(buffer, err) {
+    } else if (file && file.originalKey) {
+      pluginMgr.requestBin(file, function(buffer, err, res) {
         file = file.originalKey;
-        callback(err, file, buffer ? buffer.length : 0, buffer);
+        callback(err, file, buffer ? buffer.length : 0, buffer, res);
       });
     } else if (files.length) {
       readFiles(files, callback);
@@ -210,8 +210,8 @@ module.exports = function (req, res, next) {
     return;
   }
 
-  readFiles(util.getRuleFiles(rule), function (err, path, size, buffer) {
-    if (err) { // TODO: 细化错误类型
+  readFiles(util.getRuleFiles(rule, req), function (err, path, size, buffer, svrRes) {
+    if (err) {
       if (/^x/.test(protocol)) {
         var fullUrl = /^xs/.test(protocol)
           ? req.fullUrl.replace(/^http:/, 'https:')
@@ -232,10 +232,10 @@ module.exports = function (req, res, next) {
       }
       return;
     }
-
+    var type = buffer != null && svrRes && svrRes.headers && svrRes.headers['x-whistle-response-type'];
     var headers = {
       server: config.name,
-      'content-type': mime.lookup(path, defaultType) + '; charset=utf-8'
+      'content-type': type || mime.lookup(path, defaultType) + '; charset=utf-8'
     };
 
     if (isTpl) {
@@ -281,9 +281,9 @@ module.exports = function (req, res, next) {
       var data = qs.parse(util.getQueryString(req.fullUrl));
       if (Object.keys(data).length) {
         reader.body = reader.body.replace(
-          /\$?\{([\w\-$]+)\}/g,
-          function (all, matched) {
-            var value = data[matched];
+          /\{\{([\w\-$]+)\}\}|\$?\{([\w\-$]+)\}/g,
+          function (all, matched1, matched2) {
+            var value = data[matched1 || matched2];
             if (value === undefined) {
               return all;
             }

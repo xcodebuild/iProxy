@@ -27,5 +27,31 @@ textarea {outline: none; resize: none; display: block; padding: 6px; font-size: 
 <div class="main">
 	<textarea id="editor"></textarea>
 </div>
+<script>
+	var editor = document.getElementById('editor');
+	var getInitCallback = function() {
+		try {
+			var cb = window.parent._initWhistleTextEditor_;
+			if (typeof cb === 'function') {
+				return cb;
+			}
+		} catch (e) {}
+	};
+	var init = getInitCallback();
+	if (!init && window.getValue) {
+	  var value = getValue();
+	  if (value) {
+	    editor.value = window.name = value;
+    } else {
+      editor.value = window.name;
+    }
+	} else {
+	  editor.value = window.name;
+		window.setValue = function(value) {
+			editor.value = value;
+		};
+		init && init(window);
+	}
+</script>
 </body>
 </html>

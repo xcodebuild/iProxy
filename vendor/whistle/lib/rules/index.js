@@ -23,11 +23,10 @@ var RULES_HEADER = 'x-whistle-rule-value';
 var KV_HEADER = 'x-whistle-key-value';
 var KEY_HEADER = 'x-whistle-rule-key';
 var HOST_HEADER = 'x-whistle-rule-host';
-var PROXY_HOST_HEADER = 'x-whistle-internal-proxy-host-rule';
 var LOCALHOST = '127.0.0.1';
-var HOST_RE = /^[\w.-]+$/;
 var resolveReqRules = rules.resolveReqRules.bind(rules);
 var AUTH_RE = /^([^\\/]+)@/;
+var PLUGIN_VAR_RE = /^[a-z\d_\-]+\./;
 
 exports.Rules = Rules;
 if (config.networkMode && !config.shadowRulesMode) {
@@ -99,6 +98,21 @@ function isLineProp(rule, name) {
   return rule && rule.lineProps[name];
 }
 
+function resolveRulesFromList(list, fnName, req, options) {
+  var rule;
+  for (var i = 0, len = list.length; i < len; i++) {
+    var mgr = list[i];
+    var _rule = mgr && mgr[fnName](req, options);
+    if (_rule) {
+      if (util.isImportant(_rule)) {
+        return _rule;
+      }
+      rule = rule || _rule;
+    }
+  }
+  return rule;
+}
+
 exports.getProxy = function (url, req, callback) {
   if (!req) {
     return callback();
@@ -126,18 +140,12 @@ exports.getProxy = function (url, req, callback) {
   var ignoreProxy;
   var proxy;
   var pacRule;
+  var host = rules.getHost(req, pRules, fRules, hRules);
+  var hostValue = util.getMatcherValue(host) || '';
   if (config.multiEnv || req._headerRulesFirst) {
-    proxy =
-      (pRules && pRules.resolveProxy(req)) ||
-      (hRules && hRules.resolveProxy(req)) ||
-      rules.resolveProxy(req) ||
-      (fRules && fRules.resolveProxy(req));
+    proxy = resolveRulesFromList([pRules, hRules, rules, fRules], 'resolveProxy', req, hostValue);
   } else {
-    proxy =
-      (pRules && pRules.resolveProxy(req)) ||
-      rules.resolveProxy(req) ||
-      (fRules && fRules.resolveProxy(req)) ||
-      (hRules && hRules.resolveProxy(req));
+    proxy = resolveRulesFromList([pRules, rules, fRules, hRules], 'resolveProxy', req, hostValue);
   }
   var proxyHostOnly = isLineProp(proxy, 'proxyHostOnly');
   var proxyHost =
@@ -155,7 +163,7 @@ exports.getProxy = function (url, req, callback) {
       proxyHost = proxyHost || PROXY_HOSTS_RE.test(proxy.matcher);
     }
   }
-  var host = rules.getHost(req, pRules, fRules, hRules);
+
   if (!ignoreProxy) {
     proxyHost = isProxyHost(req, proxy, host) || proxyHost; // 不能调换顺序
   }
@@ -167,11 +175,12 @@ exports.getProxy = function (url, req, callback) {
     var hostname = util.removeProtocol(host.matcher, true);
     if (!net.isIP(hostname)) {
       req.curUrl = hostname || url;
-      return rules.lookupHost(req, function (err, ip) {
+      rules.lookupHost(req, function (err, ip) {
         callback(err, ip, host.port, host);
       });
+    } else {
+      callback(null, hostname, host.port, host);
     }
-    callback(null, hostname, host.port, host);
     return true;
   };
   var resolvePacRule = function () {
@@ -208,9 +217,7 @@ exports.getProxy = function (url, req, callback) {
       resolvePacRule();
     }
     if (proxyHost) {
-      req._phost = parseUrl(
-        util.setProtocol(host.matcher + (host.port ? ':' + host.port : ''))
-      );
+      req._phost = parseUrl(util.setProtocol(host.matcher + (host.port ? ':' + host.port : '')));
     } else if (
       !isLineProp(proxy, 'proxyFirst') &&
       !isLineProp(host, 'proxyFirst') &&
@@ -230,15 +237,6 @@ exports.getProxy = function (url, req, callback) {
   if (proxy) {
     if (!req._phost && P_HOST_RE.test(proxy.matcher)) {
       req._phost = parseUrl(util.setProtocol(RegExp.$1));
-    }
-    if (req._phost && proxy.isInternal) {
-      var hostValue = req._phost.host;
-      if (hostValue) {
-        try {
-          req.headers[PROXY_HOST_HEADER] = encodeURIComponent(hostValue);
-        } catch (e) {}
-      }
-      req._phost = null;
     }
     reqRules.proxy = proxy;
     return callback();
@@ -274,7 +272,7 @@ exports.getProxy = function (url, req, callback) {
       if (rule) {
         tempRules.parse(pacRule.rawPattern + ' ' + rule);
         req.curUrl = url;
-        if ((proxy = tempRules.resolveProxy(req))) {
+        if ((proxy = tempRules.resolveProxy(req, hostValue))) {
           proxyHost = isProxyHost(req, proxy) || proxyHost; // 不能调换顺序
           req._proxyTunnel =
             req._proxyTunnel || isLineProp(pacRule, 'proxyTunnel');
@@ -435,7 +433,7 @@ function handleDynamicRules(script, req, res, cb) {
       list[index] = result.rules;
       cb(list.join('\n'), result.values);
     });
-  });
+  }, null, null, null, req);
 }
 
 function resolveRulesFile(req, callback) {
@@ -451,7 +449,7 @@ function resolveRulesFile(req, callback) {
         return;
       }
       var value = util.getMatcherValue(item);
-      var index = value.indexOf('=');
+      var index = value.indexOf(PLUGIN_VAR_RE.test(value) ? '.' : '=');
       if (index !== -1) {
         var name = value.substring(0, index);
         var plugin = exports.getPlugin(name);
@@ -464,7 +462,9 @@ function resolveRulesFile(req, callback) {
           pList.push(item);
           var list = varMap[name] || [];
           varMap[name] = list;
-          list.push(value);
+          if (list.indexOf(value) === -1) {
+            list.push(value);
+          }
         }
       }
     });
@@ -539,16 +539,10 @@ function initHeaderRules(req, needBodyFilters) {
   var hostHeader = util.trimStr(getValue(req, HOST_HEADER));
   var keyHeader = util.trimStr(getValue(req, KEY_HEADER));
   var kvHeader = getValue(req, KV_HEADER, isPluginReq);
-  var phHeader = util.trimStr(getValue(req, PROXY_HOST_HEADER, true));
 
   var ruleValue = util.trimStr(rulesHeader);
   if (hostHeader) {
     ruleValue = ruleValue + '\n' + hostHeader;
-  }
-  phHeader = HOST_RE.test(phHeader) ? phHeader : '';
-  if (phHeader) {
-    ruleValue = ruleValue + '\n' + req.fullUrl + ' host://' + phHeader;
-    req._hasProxyHostHeader = true;
   }
   if (keyHeader) {
     keyHeader = util.trimStr(values.get(keyHeader));
@@ -645,17 +639,9 @@ exports.getClientCert = function (req, cb) {
   var hRules = req.headerRulesMgr;
   var rule;
   if (config.multiEnv || req._headerRulesFirst) {
-    rule =
-      (pRules && pRules.resolveClientCert(req)) ||
-      (hRules && hRules.resolveClientCert(req)) ||
-      rules.resolveClientCert(req) ||
-      (fRules && fRules.resolveClientCert(req));
+    rule = resolveRulesFromList([pRules, hRules, rules, fRules], 'resolveClientCert', req);
   } else {
-    rule =
-      (pRules && pRules.resolveClientCert(req)) ||
-      rules.resolveClientCert(req) ||
-      (fRules && fRules.resolveClientCert(req)) ||
-      (hRules && hRules.resolveClientCert(req));
+    rule = resolveRulesFromList([pRules, rules, fRules, hRules], 'resolveClientCert', req);
   }
   if (!rule) {
     return cb();

@@ -120,64 +120,92 @@ function loadPlugin(options, callback) {
   });
 }
 
+function sendReq(options, callback) {
+  var httpModule = options.protocol === 'https:' ? https : http;
+  var timer, client;
+  var handleCallback = function (err, res) {
+    clearTimeout(timer);
+    if (httpModule) {
+      httpModule = null;
+      callback(err, res);
+    }
+    err && client && client.destroy();
+  };
+  timer = setTimeout(function () {
+    handleCallback(new Error('Timeout'));
+  }, TIMEOUT);
+  try {
+    client = httpModule.request(options, function (res) {
+      res.on('error', handleCallback);
+      handleCallback(null, res);
+    });
+    client.on('error', handleCallback);
+    client.end(toString(options.body));
+    return client;
+  } catch (e) {
+    handleCallback(e);
+  }
+}
+
+function gunzip(err, res, body, callback) {
+  if (!err && body && res && GZIP_RE.test(res.headers['content-encoding'])) {
+    zlib.gunzip(body, callback);
+  } else {
+    callback(err, body);
+  }
+}
+
 function request(options, callback) {
   loadPlugin(options, function (err) {
     if (err) {
       return callback(err, '', '');
     }
     options = parseOptions(options);
-    var isHttps = options.protocol === 'https:';
-    var httpModule = isHttps ? https : http;
-    var done, timer, res;
-    var body = '';
-    var callbackHandler = function (err) {
-      clearTimeout(timer);
-      err && client && client.abort();
+    var done, client, timer;
+    var handleCallback = function (err, res, body) {
       if (!done) {
         done = true;
-        var handleCallback = function(e, data) {
+        gunzip(err, res, body, function(e, data) {
           data = e ? '' : (options.needRawData ? data : data + '');
           callback(e, data, res || '');
-        };
-        if (res && body && GZIP_RE.test(res.headers['content-encoding'])) {
-          zlib.gunzip(body, handleCallback);
-        } else {
-          handleCallback(err, body);
-        }
+        });
       }
+      clearTimeout(timer);
+      err && client && client.destroy();
     };
     var addTimeout = function () {
       clearTimeout(timer);
       timer = setTimeout(function () {
-        callbackHandler(new Error('Timeout'));
+        handleCallback(new Error('Timeout'));
       }, TIMEOUT);
     };
-    addTimeout();
     var maxLength = options.maxLength;
-    try {
-      var client = httpModule.request(options, function (r) {
-        res = r;
-        res.on('error', callbackHandler);
-        res.on('data', function (data) {
-          body = body ? Buffer.concat([body, data]) : data;
-          addTimeout();
-          if (maxLength && body.length > maxLength) {
-            var err;
-            if (!options.ignoreExceedError) {
-              err = new Error('The response body exceeded length limit');
-              err.code = EXCEED;
-            }
-            callbackHandler(err);
+    var handleResponse = function(res) {
+      addTimeout();
+      var body = '';
+      res.on('data', function (data) {
+        body = body ? Buffer.concat([body, data]) : data;
+        addTimeout();
+        if (maxLength && body.length > maxLength) {
+          var err;
+          if (!options.ignoreExceedError) {
+            err = new Error('The response body exceeded length limit');
+            err.code = EXCEED;
           }
-        });
-        res.on('end', callbackHandler);
+          handleCallback(err, res, body);
+        }
       });
-      client.on('error', callbackHandler);
-      client.end(toString(options.body));
-      return client;
-    } catch (e) {
-      callbackHandler(e);
-    }
+      res.on('end', function() {
+        handleCallback(null, res, body);
+      });
+    };
+    client = sendReq(options, function (err, res) {
+      if (err) {
+        handleCallback(err);
+      } else {
+        handleResponse(res);
+      }
+    });
   });
 }
 
@@ -291,14 +319,22 @@ function updateBody(url, callback, init) {
       return;
     }
     var code = res.statusCode;
+    var isRedirect = code == 301 || code == 302 || code == 303 || code == 307 || code == 308;
     var notFound = err
       ? err.code === 'ENOTFOUND' || err.code === 'ECONNREFUSED'
       : code != 200 && code != 204;
     err && logger.error('[Load Rules]', url, err.message || err);
     if (notFound) {
       data._retry = data._retry || 0;
-      if (data._retry > 2) {
-        !err && logger.warn('[Load Rules]', url, 'status', code);
+      if (isRedirect || data._retry > 2) {
+        if (!err) {
+          var msg = code;
+          if (isRedirect) {
+            var loc = res.headers.location;
+            msg += loc ? ' redirect to ' + loc : '';
+          }
+          logger.warn('[Load Rules]', url, 'status', msg);
+        }
         data._retry = -6;
         err = body = '';
         notFound = false;
@@ -360,11 +396,7 @@ exports.forceUpdate = function (root) {
   });
 };
 
-exports.clean = function () {
-  if (!newUrls && Object.keys(cache).length) {
-    triggerChange();
-  }
-};
+exports.triggerChange = triggerChange;
 
 exports.setPluginMgr = function (mgr) {
   pluginMgr = mgr;

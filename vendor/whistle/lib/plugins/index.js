@@ -1,6 +1,5 @@
 var path = require('path');
 var p = require('pfork');
-var fs = require('fs');
 var fse = require('fs-extra2');
 var http = require('http');
 var LRU = require('lru-cache');
@@ -18,10 +17,12 @@ var rulesMgr = require('../rules');
 var RulesMgr = require('../rules/rules');
 var properties = require('../rules/util').properties;
 var httpMgr = require('../util/http-mgr');
+var protocols = require('../rules/protocols');
 
 var encodeURIComponent = util.encodeURIComponent;
+var RULES_TPL_RE = /^[^\n\r\S]*(``)[^\n\r\S]*((?:_?var(\.[^\s=]+)?|whistle|rule)\.tpl)[^\n\r\S]*[\r\n]([\s\S]+?)[\r\n][^\n\r\S]*\1\s*$/gm;
 var REMOTE_RULES_RE =
-  /^\s*@(`?)(whistle\.[a-z\d_\-]+(?:\/[^\s#]*)?|(?:https?:\/\/|[a-z]:[\\/]|~?\/)[^\s#]+)\s*\1(?:#.*)?$/im;
+  /^\s*@(`?)(whistle\.[a-z\d_\-]+(?:\/[^\s#]*)?|(?:https?:\/\/|[a-z]:[\\/]|~?\/)[^\s#]+|\$(?:whistle\.)?[a-z\d_-]+[/:][^\s#]+)\s*?\1(?:#.*)?$/im;
 var PLUGIN_MAIN = path.join(__dirname, './load-plugin');
 var PIPE_PLUGIN_RE =
   /^pipe:\/\/(?:whistle\.|plugin\.)?([a-z\d_\-]+)(?:\(([\s\S]*)\))?$/;
@@ -35,6 +36,7 @@ var MAX_AGE_HEADER = 'x-whistle-max-age';
 var FULL_URL_HEADER = 'x-whistle-full-url';
 var REAL_URL_HEADER = 'x-whistle-real-url';
 var RELATIVE_URL_HEADER = 'x-whistle-relative-url';
+var EXTRA_URL_HEADER = 'x-whistle-extra-url';
 var UI_REQUEST_HEADER = 'x-whistle-auth-ui-request';
 var REQ_ID_HEADER = 'x-whistle-req-id';
 var PIPE_VALUE_HEADER = 'x-whistle-pipe-value';
@@ -58,7 +60,6 @@ var INTERVAL = 6000;
 var CHECK_INTERVAL = 1000 * 60 * 60;
 var MAX_CERT_SIZE = 72 * 1024;
 var portsField = typeof Symbol === 'undefined' ? '_ports' : Symbol('_ports'); // eslint-disable-line
-var UTF8_OPTIONS = { encoding: 'utf8' };
 var notLoadPlugins = config.networkMode || config.rulesOnlyMode;
 var allPlugins = notLoadPlugins ? {} : getPluginsSync();
 var authPlugins = [];
@@ -70,7 +71,8 @@ var CUSTOM_CERT_HEADER = config.CUSTOM_CERT_HEADER;
 var ENABLE_CAPTURE_HEADER = config.ENABLE_CAPTURE_HEADER;
 var PLUGIN_HOOKS = config.PLUGIN_HOOKS;
 var PLUGIN_HOOK_NAME_HEADER = config.PLUGIN_HOOK_NAME_HEADER;
-var HTTP_RE = /^https?:\/\//;
+var UPGRADE_HEADER = config.UPGRADE_HEADER;
+var HTTP_RE = /^https?:\/\/./;
 var conf = {};
 var EXCLUDE_CONF_KEYS = {
   uid: 1,
@@ -79,7 +81,6 @@ var EXCLUDE_CONF_KEYS = {
   WEBUI_HEAD: 1,
   CLIENT_INFO_HEAD: 1,
   COMPOSER_CLIENT_ID_HEADER: 1,
-  TEMP_CLIENT_ID_HEADER: 1,
   TEMP_TUNNEL_DATA_HEADER: 1
 };
 var EXCLUDE_NAMES = {
@@ -131,11 +132,11 @@ pluginMgr.getTunnelKeys = function () {
   return tunnelKeys;
 };
 
-pluginMgr.on('updateRules', function () {
+pluginMgr.on('updateRules', function (byParse) {
   rulesMgr.clearAppend();
-  var hasRulesUrl;
   authPlugins = [];
   tunnelKeys = [];
+  var ruleTpls;
   Object.keys(allPlugins)
     .sort(function (a, b) {
       var p1 = allPlugins[a];
@@ -164,25 +165,36 @@ pluginMgr.on('updateRules', function () {
       }
       if (rules) {
         rules = rules.replace(REMOTE_RULES_RE, function (_, apo, rulesUrl) {
-          hasRulesUrl = true;
           return util.getRemoteRules(apo, rulesUrl);
         });
-        rulesMgr.append(rules, plugin.path);
+        rules = rules.replace(RULES_TPL_RE, function (_, __, key, subVar, value) {
+          ruleTpls = ruleTpls || {};
+          var simpleName = name.slice(0, -1);
+          var isPrivate = key[0] === '_';
+          if (isPrivate || key[0] === 'v') {
+            key = (isPrivate ? '_' : '') + '%' + simpleName + (subVar || '');
+          } else if (key === 'whistle.tpl') {
+            key = 'whistle.' + simpleName;
+          } else {
+            key = simpleName;
+          }
+          if (!ruleTpls[key]) {
+            ruleTpls[key] = value;
+          }
+          return '';
+        });
+        rulesMgr.append(rules, plugin.path, true);
       }
     });
-  if (!hasRulesUrl) {
-    httpMgr.clean();
+  pluginMgr.ruleTpls = ruleTpls;
+  if (byParse !== true) {
+    httpMgr.triggerChange();
   }
 });
-pluginMgr.emit('updateRules');
 
-function updateRules() {
+pluginMgr.updateRules = function() {
   pluginMgr.emit('updateRules');
-}
-
-httpMgr.addChangeListener(updateRules);
-
-pluginMgr.updateRules = updateRules;
+};
 
 pluginMgr.loadCert = function (req, plugin, callback) {
   loadPlugin(plugin, function (err, ports) {
@@ -307,19 +319,10 @@ function showVerbose(oldData, newData) {
     });
 }
 
-function readFile(filepath, callback) {
-  fs.readFile(filepath, UTF8_OPTIONS, function (err, text) {
-    if (!err) {
-      return callback(err, text);
-    }
-    fs.readFile(filepath, UTF8_OPTIONS, callback);
-  });
-}
-
 function readReqRules(dir, callback) {
-  readFile(path.join(path.join(dir, '_rules.txt')), function (err, rulesText) {
+  pluginUtil.readFile(path.join(path.join(dir, '_rules.txt')), function (err, rulesText) {
     if (err) {
-      readFile(
+      pluginUtil.readFile(
         path.join(path.join(dir, 'reqRules.txt')),
         function (_, rulesText) {
           callback(util.trim(rulesText));
@@ -354,12 +357,14 @@ function readPackages(obj, callback) {
     if (!pkg || pkg.path != newPkg.path || pkg.mtime != newPkg.mtime) {
       ++count;
       readJson(path.join(newPkg.path, 'package.json'), function (_, result) {
-        if (result && result.version) {
+        if (result && result.version && pluginUtil.isPluginName(result.name)) {
           var conf = result.whistleConfig || '';
-          var tabs = conf.inspectorTabs || conf.inspectorTab || '';
+          var tabs = util.getInspectorTabs(conf);
           var hintList = util.getHintList(conf);
           var simpleName = name.slice(0, -1);
           newPkg.enableAuthUI = !!conf.enableAuthUI;
+          newPkg.noOpt = !!(conf.noOption || conf.notOption);
+          newPkg.updateUrl = util.getUpdateUrl(conf);
           newPkg.inheritAuth = !!conf.inheritAuth;
           newPkg.tunnelKey = util.getTunnelKey(conf);
           newPkg.version = result.version;
@@ -385,6 +390,7 @@ function readPackages(obj, callback) {
           newPkg.reqTab = util.getCustomTab(tabs.req, simpleName);
           newPkg.resTab = util.getCustomTab(tabs.res, simpleName);
           newPkg.tab = util.getCustomTab(tabs, simpleName);
+          newPkg.toolTab = util.getCustomTab(conf.toolsTab || conf.toolTab, simpleName);
           newPkg.comTab = util.getCustomTab(conf.composerTab, simpleName);
           newPkg[util.PLUGIN_MENU_CONFIG] = util.getPluginMenuConfig(conf);
           newPkg[util.PLUGIN_INSPECTOR_CONFIG] =
@@ -392,9 +398,9 @@ function readPackages(obj, callback) {
           newPkg.hintUrl = hintList ? undefined : util.getCgiUrl(conf.hintUrl);
           newPkg.hintList = hintList;
           newPkg.pluginVars = util.getPluginVarsConf(conf);
-          (newPkg.hideShortProtocol = !!conf.hideShortProtocol),
-            (newPkg.hideLongProtocol = !!conf.hideLongProtocol),
-            (newPkg.homepage = pluginUtil.getHomePageFromPackage(result));
+          newPkg.hideShortProtocol = !!conf.hideShortProtocol;
+          newPkg.hideLongProtocol = !!conf.hideLongProtocol;
+          newPkg.homepage = pluginUtil.getHomePageFromPackage(result);
           newPkg.description = result.description;
           newPkg.moduleName = result.name;
           newPkg.pluginHomepage = pluginUtil.getPluginHomepage(result);
@@ -402,7 +408,7 @@ function readPackages(obj, callback) {
           newPkg.registry = util.getRegistry(result);
           newPkg.latest = pkg && pkg.latest;
           _plugins[name] = newPkg;
-          readFile(
+          pluginUtil.readFile(
             path.join(path.join(newPkg.path, 'rules.txt')),
             function (err, rulesText) {
               newPkg.rules = util.renderPluginRules(
@@ -416,13 +422,13 @@ function readPackages(obj, callback) {
                   result,
                   simpleName
                 );
-                readFile(
+                pluginUtil.readFile(
                   path.join(path.join(newPkg.path, '_values.txt')),
                   function (err, rulesText) {
                     newPkg[util.PLUGIN_VALUES] = pluginUtil.parseValues(
                       util.renderPluginRules(rulesText, result, simpleName)
                     );
-                    readFile(
+                    pluginUtil.readFile(
                       path.join(path.join(newPkg.path, 'resRules.txt')),
                       function (err, rulesText) {
                         newPkg.resRules = util.renderPluginRules(
@@ -576,9 +582,16 @@ function addPluginVars(req, headers, rule) {
     delete headers[RULE_VALUE_HEADER];
   }
   if (rule.rawPattern) {
-    headers['x-whistle-raw-pattern_'] = encodeURIComponent(
-      (rule.isRegExp ? 1 : 0) + ',' + rule.rawPattern
-    );
+    headers['x-whistle-raw-pattern_'] = encodeURIComponent((rule.isRegExp ? 1 : 0) + ',' + rule.rawPattern);
+  }
+  if (rule.url) {
+    var extraUrl = rule.url;
+    if (value) {
+      extraUrl = rule.url.substring(value.length);
+    }
+    if (extraUrl) {
+      headers[EXTRA_URL_HEADER] = encodeURIComponent(extraUrl);
+    }
   }
   value = getPluginVars(req._globalPluginVars && req._globalPluginVars[name]);
   if (value) {
@@ -594,8 +607,7 @@ function addPluginVars(req, headers, rule) {
   }
 }
 
-function addRuleHeaders(req, rules, headers, isPipe) {
-  headers = headers || req.headers;
+function addPluginHeaders(req, headers, isKey) {
   if (req.reqId) {
     headers[REQ_ID_HEADER] = req.reqId;
   }
@@ -615,13 +627,19 @@ function addRuleHeaders(req, rules, headers, isPipe) {
   } else {
     delete headers[FROM_TUNNEL_HEADER];
   }
-  headers[config.REMOTE_ADDR_HEAD] = req._remoteAddr || LOCALHOST;
-  headers[config.REMOTE_PORT_HEAD] = req._remotePort || '0';
+  headers[isKey ? 'x-whistle-remote-address' : config.REMOTE_ADDR_HEAD] = req._remoteAddr || LOCALHOST;
+  headers[isKey ? 'x-whistle-remote-port' : config.REMOTE_PORT_HEAD] = req._remotePort || '0';
   if (req.fromComposer) {
     headers[config.REQ_FROM_HEADER] = 'W2COMPOSER';
   } else {
     delete headers[config.REQ_FROM_HEADER];
   }
+  return headers;
+}
+
+function addRuleHeaders(req, rules, headers, isPipe) {
+  headers = headers || req.headers;
+  addPluginHeaders(req, headers);
   if (req._isUIRequest) {
     headers[UI_REQUEST_HEADER] = '1';
     return headers;
@@ -684,6 +702,7 @@ function loadPlugin(plugin, callback) {
     conf.host = host || LOCALHOST;
     var moduleName = plugin.moduleName;
     var name = moduleName.substring(moduleName.indexOf('/') + 1);
+    var isInline = config.inspectMode || process.env.PFORK_MODE === 'inline';
     p.fork(
       {
         data: config.getPluginData(moduleName),
@@ -691,6 +710,7 @@ function loadPlugin(plugin, callback) {
         name: moduleName,
         script: PLUGIN_MAIN,
         value: plugin.path,
+        isDev: plugin.isDev,
         version: plugin.version,
         staticDir: plugin.staticDir,
         CUSTOM_CERT_HEADER: CUSTOM_CERT_HEADER,
@@ -705,6 +725,7 @@ function loadPlugin(plugin, callback) {
         FULL_URL_HEADER: FULL_URL_HEADER,
         REAL_URL_HEADER: REAL_URL_HEADER,
         RELATIVE_URL_HEADER: RELATIVE_URL_HEADER,
+        EXTRA_URL_HEADER: EXTRA_URL_HEADER,
         REQ_ID_HEADER: REQ_ID_HEADER,
         PIPE_VALUE_HEADER: PIPE_VALUE_HEADER,
         CUSTOM_PARSER_HEADER: CUSTOM_PARSER_HEADER,
@@ -726,7 +747,7 @@ function loadPlugin(plugin, callback) {
         CERT_CACHE_INFO: CERT_CACHE_INFO,
         HOST_IP_HEADER: HOST_IP_HEADER,
         debugMode: debugMode,
-        config: conf
+        config: isInline ? extend(true, {}, conf) : conf // 防止 inline 时，子进程删除 conf
       },
       function (err, ports, child, first) {
         callback(err, ports);
@@ -856,7 +877,7 @@ pluginMgr.loadAuthPlugins = function (req, callback) {
     }
     var options = getOptions(req);
     authReq(true, ports, req, options, function (forbidden) {
-      if (forbidden) {
+      if (!config.disableAuthUI && forbidden) {
         if (req._redirectUrl || req._authHtmlUrl) {
           return callback(req._redirectUrl, null, req._authHtmlUrl);
         }
@@ -944,11 +965,11 @@ function authReq(isReq, ports, req, options, callback) {
             key === 'proxy-authorization'
           ) {
             var value = headers[key];
-            if (
-              key === config.WHISTLE_POLICY_HEADER &&
-              value === 'enableCaptureByAuth'
-            ) {
+            if (key === config.WHISTLE_POLICY_HEADER &&
+              value === 'enableCaptureByAuth') {
               req._forceCapture = true;
+            } else if (key === config.CLIENT_ID_HEAD) {
+              req._customClientId = value;
             }
             req.headers[key] = value;
             options.headers[key] = value;
@@ -991,16 +1012,18 @@ function getRulesFromPlugins(type, req, res, callback) {
       (!req.fromTunnel || !util.isAuthCapture(req));
     authReq(enableAuth, ports, req, options, function (forbidden) {
       if (forbidden) {
+        var noTunnel = !req.isTunnel;
+        req._authForbidden = true;
         var mgr = new RulesMgr({ msg: forbidden });
-        if (req._authHtmlUrl) {
+        if (noTunnel && req._authHtmlUrl) {
           mgr.parse(
             '* ignore://!method|!file|!http|!https method://get ' +
               req._authHtmlUrl
           );
-        } else if (req._redirectUrl) {
+        } else if (noTunnel && req._redirectUrl) {
           mgr.parse('* ignore://!redirect redirect://' + req._redirectUrl);
         } else {
-          var status = req._authStatus ? (req._showLoginBox ? 401 : 403) : 502;
+          var status = req._authStatus ? (req._showLoginBox ? (noTunnel ? 401 : 407) : 403) : 502;
           mgr.parse(
             '* ignore://!statusCode|!resBody|!resType|!resCharset status://' +
               status +
@@ -1275,6 +1298,9 @@ function getPipe(type, hookName) {
       var options = getOptions(req, res, isRes && 'resRules', true);
       options.headers[PLUGIN_HOOK_NAME_HEADER] = hookName;
       options.headers['x-whistle-request-tunnel-ack'] = 1;
+      if (req._isUpgrade) {
+        options.headers[UPGRADE_HEADER] = 1;
+      }
       options.proxyHost = LOCALHOST;
       options.proxyPort = port;
       delete options.headers[CUSTOM_PARSER_HEADER];
@@ -1286,11 +1312,22 @@ function getPipe(type, hookName) {
         }
       }
       var client;
+      var done;
+      var handleConnect = function (socket, _res) {
+        if (!done) {
+          done = true;
+          if (req._hasError) {
+            return socket.destroy();
+          }
+          callback(socket);
+        }
+      };
       var destroy = function () {
         if (client) {
           client.destroy();
           client.socket && client.socket.destroy();
           client = null;
+          handleConnect();
         }
       };
       var handleError = function (err) {
@@ -1302,12 +1339,6 @@ function getPipe(type, hookName) {
           }
         }
       };
-      var handleConnect = function (socket, _res) {
-        if (req._hasError) {
-          return socket.destroy();
-        }
-        callback(socket);
-      };
       client = config.connect(options, handleConnect);
       client.on('error', function () {
         if (client) {
@@ -1316,7 +1347,10 @@ function getPipe(type, hookName) {
           client && util.onSocketEnd(client, handleError);
         }
       });
-      req.once('_closed', destroy);
+      req.once('_closed', function() {
+        handleConnect();
+        destroy();
+      });
     });
   };
 }
@@ -1542,8 +1576,9 @@ pluginMgr.setProxy = function (p) {
 
 httpMgr.setPluginMgr(pluginMgr);
 
-var PLUGIN_KEY_RE =/^\$(?:whistle\.)?([a-z\d_-]+)[/:]([^\s]+)$/;
+var PLUGIN_KEY_RE =/^\$(?:whistle\.)?([a-z\d_-]+)[/:]([\S\s]+)$/;
 var MAX_VALUE_LEN = 1024 * 1024 * 16;
+var MAX_URL_VAL_LEN = 1024 * 256;
 
 function requestValue(options, callback, isBin) {
   options.needRawData = isBin;
@@ -1556,7 +1591,8 @@ function requestValue(options, callback, isBin) {
         err.code = code || 500;
       }
     }
-    callback(body, err);
+    err && logger.error(err);
+    callback(body, err, res);
   };
   httpMgr.request(extend({}, options), function(err, body, res) {
     if (err) {
@@ -1567,7 +1603,14 @@ function requestValue(options, callback, isBin) {
   return options;
 }
 
-pluginMgr.resolveKey = function(url) {
+pluginMgr.resolveKey = function(url, rule, req) {
+  if (HTTP_RE.test(url)) {
+    return {
+      url: url,
+      originalKey: url,
+      maxLength: MAX_URL_VAL_LEN
+    };
+  }
   if (!PLUGIN_KEY_RE.test(url)) {
     return;
   }
@@ -1576,12 +1619,24 @@ pluginMgr.resolveKey = function(url) {
   if (!getActivePluginByName(name)) {
     return;
   }
+  var ruleName = protocols.getRuleProto(rule);
+  var headers = extend({}, req && req.headers, config.pluginHeaders);
+  if (req) {
+    addPluginHeaders(req, headers, true);
+    headers[METHOD_HEADER] = req.method ? encodeURIComponent(req.method) : 'GET';
+    delete headers.upgrade;
+    delete headers.connection;
+    delete headers['content-length'];
+  }
+  if (ruleName) {
+    headers['x-whistle-rule-proto'] = ruleName;
+  }
   return {
     originalKey: url,
     pluginName: name,
     maxLength: MAX_VALUE_LEN,
     url: name + '/api/key/value?key=' + util.encodeURIComponent(key),
-    headers: config.pluginHeaders
+    headers: headers
   };
 };
 
@@ -1596,3 +1651,5 @@ pluginMgr.requestBin =function(options, callback) {
 util.setPluginMgr(pluginMgr);
 
 module.exports = pluginMgr;
+
+RulesMgr.setPluginMgr(pluginMgr);

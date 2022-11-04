@@ -89,10 +89,11 @@ config.WEBUI_PATH = '/.whistle-path.5b6af7b9884e1165/';
 config.PREVIEW_PATH_RE = /\?\?\?WHISTLE_PREVIEW_CHARSET=([A-Z\d_-]+)\?\?\?$/;
 config.PLUGIN_HOOK_NAME_HEADER = 'x-whistle-plugin-hook-name_';
 config.CLIENT_ID_HEADER = 'x-whistle-client-id';
+config.CLIENT_ID_HEAD = 'x-whistle-client-id';
 config.COMPOSER_CLIENT_ID_HEADER = 'x-whistle-client-id-' + uid;
 config.TUNNEL_DATA_HEADER = 'x-whistle-tunnel-data';
-config.TEMP_CLIENT_ID_HEADER = 'x-whistle-client-id-' + uid;
 config.TEMP_TUNNEL_DATA_HEADER = 'x-whistle-tunnel-data-' + uid;
+config.UPGRADE_HEADER = 'x-whistle-upgrade-' + uid;
 config.SNI_TYPE_HEADER = 'x-whistle-sni-type-' + uid;
 config.ALPN_PROTOCOL_HEADER = 'x-whistle-alpn-protocol';
 config.PLUGIN_HOOKS = {
@@ -139,9 +140,9 @@ function getDataDir(dirname) {
 }
 
 config.baseDir = getDataDir();
-config.SYSTEM_PLUGIN_PATH = path.join(getWhistlePath(), 'plugins');
 config.CUSTOM_PLUGIN_PATH = path.join(getWhistlePath(), 'custom_plugins');
 config.CUSTOM_CERTS_DIR = path.resolve(getWhistlePath(), 'custom_certs');
+config.DEV_PLUGINS_PATH = path.resolve(getWhistlePath(), 'dev_plugins');
 
 try {
   fse.ensureDirSync(config.CUSTOM_CERTS_DIR);
@@ -478,16 +479,21 @@ function getHostname(_url) {
   return index == -1 ? _url : _url.substring(0, index);
 }
 
-function getPaths(paths) {
+function getPaths(paths, isCustom) {
   if (typeof paths === 'string') {
     paths = paths.trim().split(/\s*[|,;]\s*/);
   } else if (!Array.isArray(paths)) {
     return;
   }
-  paths = paths.filter(function (path) {
-    return path && typeof path === 'string';
+  var result = [];
+  paths.forEach(function (path) {
+    if (isCustom && ['self', 'buildin', 'buildIn', 'build-in'].indexOf(path) !== -1) {
+      result.push(config.CUSTOM_PLUGIN_PATH);
+    } else if (path && typeof path === 'string') {
+      result.push(path);
+    }
   });
-  return paths.length ? paths : null;
+  return result.length ? result : null;
 }
 
 function getSecureFilter(newConf) {
@@ -584,11 +590,20 @@ function getPluginList(list) {
 exports.extend = function (newConf) {
   config.pluginHostMap = {};
   config.uiport = config.port;
-
+  if (process.env.WHISTLE_MODE) {
+    newConf = newConf || {};
+    newConf.mode = process.env.WHISTLE_MODE + '|' + (newConf.mode || '');
+  }
+  var useAgent;
+  var newAgentConf;
   if (newConf) {
     config.uiMiddleware = newConf.uiMiddlewares || newConf.uiMiddleware;
+    newAgentConf = newConf.agentConfig;
     if (newConf.cmdName && CMD_RE.test(newConf.cmdName)) {
       config.cmdName = newConf.cmdName;
+    }
+    if (newConf.account && typeof newConf.account === 'string') {
+      config.account = newConf.account;
     }
     config.allowPluginList = getPluginList(newConf.allowPluginList);
     config.blockPluginList = getPluginList(newConf.blockPluginList);
@@ -642,13 +657,6 @@ exports.extend = function (newConf) {
       }
     }
 
-    config.projectPluginPaths = getPaths(
-      newConf.projectPluginPaths || newConf.projectPluginsPath || newConf.projectPluginPath
-    );
-    var customPaths = newConf.customPluginPaths || newConf.customPluginsPath || newConf.customPluginPath;
-    if (Array.isArray(customPaths)) {
-      config.customPluginPaths = customPaths;
-    }
     if (newConf.inspect || newConf.inspectBrk) {
       config.inspectMode = true;
       process.env.PFORK_MODE = 'inline';
@@ -711,6 +719,10 @@ exports.extend = function (newConf) {
     if (isPort(newConf.realPort) && config.realPort != config.port) {
       config.realPort = newConf.realPort;
     }
+    var realHost = newConf.realHost;
+    if (typeof realHost === 'string' && (!realHost || /^[\w.-]+$/.test(newConf.realHost))) {
+      config.realHost = newConf.realHost;
+    }
 
     var socksPort = getHostPort(newConf.socksPort);
     if (socksPort) {
@@ -727,7 +739,7 @@ exports.extend = function (newConf) {
       config.httpsPort = httpsPort.port;
       config.httpsHost = httpsPort.host;
     }
-    config.addon = getPaths(newConf.addon);
+
     if (newConf.host && typeof newConf.host === 'string') {
       config.defaultHost = newConf.host;
     }
@@ -750,9 +762,13 @@ exports.extend = function (newConf) {
       mode.forEach(function (m) {
         m = m.trim();
         if (
-          /^(pureProxy|debug|master|captureData|headless|strict|proxyServer|encrypted|noGzip|disableUpdateTips|proxifier2?)$/.test(m)
+          /^(pureProxy|debug|master|disableAuthUI|captureData|headless|strict|proxyServer|encrypted|noGzip|disableUpdateTips|proxifier2?)$/.test(m)
         ) {
           config[m] = true;
+        } else if (m === 'agent') {
+          useAgent = true;
+        } else if (m === 'showPluginReq') {
+          config.showPluginReq = config.debugMode;
         } else if (m === 'disableCustomCerts') {
           config.disableCustomCerts = true;
         } else if (m === 'nohost' || m === 'multienv' || m === 'multiEnv') {
@@ -793,6 +809,7 @@ exports.extend = function (newConf) {
           config.socksMode = true;
         } else if (m === 'network') {
           config.networkMode = true;
+          config.captureData = true;
         } else if (m === 'shadowRules') {
           config.shadowRulesMode = true;
         } else if (m === 'shadowRulesOnly') {
@@ -824,20 +841,17 @@ exports.extend = function (newConf) {
           process.env.PFORK_EXEC_PATH = process.execPath;
         } else if (m === 'safe' || m === 'rejectUnauthorized') {
           config.rejectUnauthorized = true;
-        } else if (
-          ['capture', 'intercept', 'enable-capture', 'enableCapture'].indexOf(
-            m
-          ) !== -1
-        ) {
+        } else if (m === 'persistentCapture') {
+          config.isEnableCapture = true;
+          config.persistentCapture = true;
+        } else if (['capture', 'intercept', 'enable-capture', 'enableCapture'].indexOf(m) !== -1) {
           config.isEnableCapture = true;
         } else if (['disable-capture', 'disableCapture'].indexOf(m) !== -1) {
           config.isEnableCapture = false;
         } else if (['http2',  'enable-http2', 'enableHttp2', 'enable-h2', 'enableH2'].indexOf(m) !== -1) {
           config.isEnableHttp2 = true;
         } else if (
-          ['disable-http2', 'disableHttp2', 'disable-h2', 'disableH2'].indexOf(
-            m
-          ) !== -1
+          ['disable-http2', 'disableHttp2', 'disable-h2', 'disableH2'].indexOf(m) !== -1
         ) {
           config.isEnableHttp2 = false;
         } else if (m === 'hideLeftBar' || m === 'hideLeftMenu') {
@@ -864,7 +878,9 @@ exports.extend = function (newConf) {
       });
 
       if (config.headless) {
-        config.noGlobalPlugins = true;
+        if (!config.pluginsMode) {
+          config.noGlobalPlugins = true;
+        }
         config.pluginsOnlyMode = true;
         config.disableWebUI = true;
         delete config.rulesOnlyMode;
@@ -918,7 +934,19 @@ exports.extend = function (newConf) {
     if (typeof secureFilter === 'function') {
       config.secureFilter = secureFilter;
     }
+    config.notUninstallPluginPaths = getPaths(newConf.notUninstallPluginPath || newConf.notUninstallPluginPaths);
     config.pluginPaths = getPaths(newConf.pluginPaths || newConf.pluginsPath || newConf.pluginPath);
+    config.prePluginsPath = config.projectPluginPaths = getPaths(newConf.projectPluginPaths || newConf.projectPluginsPath || newConf.projectPluginPath);
+    config.accountPluginsPath = getPaths(newConf.accountPluginsPath);
+    config.customPluginPaths = getPaths(newConf.customPluginPaths || newConf.customPluginsPath || newConf.customPluginPath, true);
+    config.addon = getPaths(newConf.addonsPath || newConf.addonPath || newConf.addon);
+    if (config.accountPluginsPath) {
+      config.customPluginPaths = config.accountPluginsPath.concat(config.customPluginPaths || []);
+    }
+    if (config.customPluginPaths) {
+      config.prePluginsPath = (config.prePluginsPath || []).concat(config.customPluginPaths);
+    }
+
     var pluginHost = newConf.pluginHost;
     if (typeof pluginHost === 'string' && (pluginHost = pluginHost.trim())) {
       pluginHost = qs.parse(pluginHost);
@@ -1015,14 +1043,14 @@ exports.extend = function (newConf) {
   if (config.strict) {
     config.sockets = Math.max(config.sockets, 360);
   }
-  var agentConfig = {
+  var agentConfig = newAgentConf || {
     maxSockets: config.sockets,
     keepAlive: true,
     keepAliveMsecs: KEEP_ALIVE_MSECS,
     maxFreeSockets: 0
   };
   // node 11及以上版本缓存连接有问题，先禁掉
-  disableAgent = disableAgent || config.debug;
+  disableAgent = !newAgentConf && !useAgent && (disableAgent || config.debug);
   config.httpAgent = disableAgent ? false : createAgent(agentConfig);
   config.httpsAgent = disableAgent ? false : createAgent(agentConfig, true);
   config.getSocksAgent = function (options) {
@@ -1090,8 +1118,6 @@ exports.extend = function (newConf) {
     fs.writeFileSync(clientIdFile, clientId);
   }
   config.clientId = clientId;
-  config.LOCAL_FILES = path.join(config.baseDir, 'local_files');
-  fse.ensureDirSync(config.LOCAL_FILES);
   config.setModified = function (clientId, isRules) {
     if (isRules) {
       config.mrulesClientId = clientId || '';
