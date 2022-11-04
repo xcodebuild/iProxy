@@ -6,6 +6,7 @@ var path = require('path');
 var cluster = require('cluster');
 var os = require('os');
 var assert = require('assert');
+var common = require('./lib/util/common');
 
 var ver = process.version.substring(1).split('.');
 var PROD_RE = /(^|\|)prod(uction)?($|\|)/;
@@ -190,17 +191,19 @@ module.exports = function (options, callback) {
     });
   };
   if (options) {
-    if (/^\d+$/.test(options.cluster)) {
-      options.cluster = Math.min(parseInt(options.cluster, 10), 999);
-    } else if (options.cluster) {
-      options.cluster = Math.min(os.cpus().length, 999);
-    }
     if (options.cluster && cluster.isMaster) {
-      assert(!options.server, 'cannot exist options.server in cluster mode');
-      for (var i = 0; i < options.cluster; i++) {
-        forkWorker(i);
+      if (/^\d+$/.test(options.cluster)) {
+        options.cluster = Math.min(parseInt(options.cluster, 10), 999);
+      } else if (options.cluster) {
+        options.cluster = Math.min(os.cpus().length, 999);
       }
-      return;
+      if (options.cluster > 0) {
+        assert(!options.server, 'cannot exist options.server in cluster mode');
+        for (var i = 0; i < options.cluster; i++) {
+          forkWorker(i);
+        }
+        return;
+      }
     }
     if (options.debugMode) {
       if (PROD_RE.test(options.mode)) {
@@ -232,3 +235,5 @@ module.exports = function (options, callback) {
   }
   return startWhistle();
 };
+
+module.exports.getWhistlePath = common.getWhistlePath;

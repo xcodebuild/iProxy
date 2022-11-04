@@ -1,8 +1,5 @@
 # Https
 
-> 建议使用 `Node v12` 或以上版本。
-
-
 下载根证书，开启捕获HTTPS请求：
 
 ![Https](https://user-images.githubusercontent.com/11450939/83850712-e384cc80-a743-11ea-9cf4-c5c3f4cbf0c8.png)
@@ -84,7 +81,7 @@
 
 图中的打开的对话框有个checkbox：
 
-1.`Capture HTTPS CONNECTs`：开启Https拦截功能，只有勾上这个checkbox及装好根证书，whistle才能看到HTTPS、Websocket的请求
+1.`Capture HTTPS CONNECTS`：开启Https拦截功能，只有勾上这个checkbox及装好根证书，whistle才能看到HTTPS、Websocket的请求
 2. 也可以通过配置来开启对部分请求的Https拦截功能
   ```plain
   www.test.com enable://intercept

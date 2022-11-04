@@ -68,18 +68,18 @@ export type WhistleSecureFilter = ((item: WhistleSession, clientIp?: string, fil
 
 export interface WhistleOptions {
   config?: string;
-  cluster?: number;
+  cluster?: number | string;
   server?: EventEmitter | Server;
   debugMode?: boolean;
   mode?: string;
   realPort?: number;
+  realHost?: string;
   port?: number | string;
   uiport?: number | string;
   socksPort?: number | string;
   httpPort?: number | string;
   httpsPort?: number | string;
   host?: string;
-  addon?: string;
   authKey?: string;
   guestAuthKey?: string;
   reqCacheSize?: number;
@@ -101,10 +101,14 @@ export interface WhistleOptions {
   middleware?: string;
   uiMiddleware?: string;
   cmdName?: string;
+  account?: string;
   dnsServer?: string;
-  projectPluginsPath?: string;
-  customPluginsPath?: string;
-  pluginsPath?: string;
+  projectPluginsPath?: string | string[];
+  accountPluginsPath?: string | string[];
+  customPluginsPath?: string | string[];
+  notUninstallPluginPath?: string | string[];
+  pluginsPath?: string | string[];
+  addonsPath?: string | string[];
   inspect?: boolean;
   inspectBrk?: boolean;
   secureFilter?: WhistleSecureFilter;
@@ -177,6 +181,7 @@ export interface WhistleResult {
    info: WhistleLogFn;
    debug: WhistleLogFn;
  };
+ getWhistlePath(): string;
  setAuth(auth: WhistleAuth): void;
  setUIHost(host: string | string[]): void;
  setPluginUIHost(pluginName: string, host: string | string[]): void;
@@ -187,5 +192,7 @@ export interface WhistleResult {
 }
 
 export type WhistleCallback = (result?: WhistleResult) => void;
+
+export function getWhistlePath(): string;
 
 export default function(options?: WhistleOptions | WhistleCallback, callback?: WhistleCallback): WhistleResult;

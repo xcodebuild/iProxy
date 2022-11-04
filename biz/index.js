@@ -10,7 +10,7 @@ var WEBUI_PATH = config.WEBUI_PATH;
 var CUSTOM_WEBUI_PATH = /\/[\w.-]*\.whistle-path\.5b6af7b9884e1165[\w.-]*\/+/;
 var CUSTOM_WEBUI_PATH_RE = /^\/[\w.-]*\.whistle-path\.5b6af7b9884e1165[\w.-]*\/+/;
 var PREVIEW_PATH_RE = config.PREVIEW_PATH_RE;
-var WEBUI_PATH_RE = util.escapeRegExp(WEBUI_PATH);
+var WEBUI_PATH_RE = util.escapeRegExp(WEBUI_PATH, true);
 var REAL_WEBUI_HOST = new RegExp('^' + WEBUI_PATH_RE + '(__([a-z\\d.-]+)(?:__(\\d{1,5}))?__/)');
 var INTERNAL_APP = new RegExp('^' + WEBUI_PATH_RE + '(log|weinre|cgi)(?:\\.(\\d{1,5}))?/');
 var PLUGIN_RE = new RegExp('^' + WEBUI_PATH_RE + 'whistle\\.([a-z\\d_-]+)/');
@@ -18,6 +18,7 @@ var CUSTOM_REAL_WEBUI_HOST = new RegExp('^/[\\w.-]*\\.whistle-path\\.5b6af7b9884
 var CUSTOM_INTERNAL_APP = new RegExp('^/[\\w.-]*\\.whistle-path\\.5b6af7b9884e1165[\\w.-]*/+(log|weinre|cgi)(?:\\.(\\d{1,5}))?/');
 var CUSTOM_PLUGIN_RE = new RegExp('^/[\\w.-]*\\.whistle-path\\.5b6af7b9884e1165[\\w.-]*/+whistle\\.([a-z\\d_-]+)/');
 var REAL_WEBUI_HOST_PARAM = /_whistleInternalHost_=(__([a-z\d.-]+)(?:__(\d{1,5}))?__)/;
+var OUTER_PLUGIN_RE = /^(?:\/whistle)?\/((?:whistle|plugin)\.[a-z\\d_-]+)::(\d{1,5})\//;
 
 module.exports = function(req, res, next) {
   var config = this.config;
@@ -118,8 +119,16 @@ module.exports = function(req, res, next) {
     if (isOthers) {
       util.transformReq(req, res, transformPort);
     } else {
-      req._hasRespond = true;
       req.url = req.url.replace(transformPort ? internalAppRe : webUI, '/');
+      if (OUTER_PLUGIN_RE.test(req.path)) {
+        var outerPort = RegExp.$2;
+        req.url = req.url.replace(RegExp['$&'], '/' + RegExp.$1 + '/');
+        if (outerPort > 0 && outerPort < 65536 && outerPort != config.port) {
+          req.headers.host = '127.0.0.1:' + outerPort;
+          return util.transformReq(req, res, outerPort);
+        }
+      }
+      req._hasRespond = true;
       if (isWeinre) {
         handleWeinreReq(req, res);
       } else {
@@ -129,7 +138,7 @@ module.exports = function(req, res, next) {
   } else if (localRule = rules.resolveLocalRule(req)) {
     req.url = localRule.url;
     if (localRule.realPort) {
-      req.headers.host = '127.0.0.1:' + localRule.realPort; 
+      req.headers.host = '127.0.0.1:' + localRule.realPort;
       util.transformReq(req, res, localRule.realPort);
     } else {
       handleUIReq(req, res);

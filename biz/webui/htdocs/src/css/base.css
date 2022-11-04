@@ -7,7 +7,7 @@ body,
   height: 100%;
 }
 #container {
-  min-width: 1100px;
+  min-width: 1180px;
   min-height: 560px;
 }
 ::-webkit-scrollbar {
@@ -103,6 +103,9 @@ textarea {
 .hide {
   display: none !important;
 }
+.visible {
+  visibility: visible!important;
+}
 .box {
   display: -webkit-box;
   display: -moz-box;
@@ -139,7 +142,7 @@ textarea {
 .w-expand-collapse {
   margin-left: 5px;
   height: 20px;
-  line-height: 16px;
+  line-height: 14px;
   font-size: 12px;
   color: #000;
 }
@@ -241,6 +244,10 @@ textarea {
 .cm-s-vibrant-ink ::-webkit-scrollbar-track:hover,
 .cm-s-xq-dark ::-webkit-scrollbar-track:hover {
   background-color: rgba(255, 255, 255, 0.15);
+}
+
+.w-hide {
+  display: none!important;
 }
 
 .w-offline-status .w-menu a,

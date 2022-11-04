@@ -66,7 +66,6 @@
 4. [**resCookies** (修改响应cookies)](resCookies.html)
 5. [**resCors** (修改响应cors)](resCors.html)
 6. [**attachment** (设置下载头部)](attachment.html)
-7. [**redirect** (302重定向)](rule/redirect.html)
 
 #### 修改响应内容
 > 根据不同的数据类型采用不同的协议
@@ -102,7 +101,7 @@
 
 #### 过滤配置
 1. [**filter (excludeFilter|includeFilter)** (过滤规则，隐藏请求等)](filter.html)
-2. [**ignore** (忽略规则)](ignore.html)
+2. [**ignore (skip)** (忽略规则)](ignore.html)
 
 #### 启用或禁用一些配置
 1. [**enable** (设置capture HTTPs，隐藏请求等)](enable.html)

@@ -7,6 +7,7 @@ var base64Encode = jsBase64.encode;
 var toBase64 = jsBase64.toBase64;
 var json2 = require('./components/json');
 var evalJson = require('./components/json/eval');
+const events = require('./events');
 var isUtf8 = require('./is-utf8');
 var message = require('./message');
 var win = require('./win');
@@ -22,6 +23,7 @@ var DIG_RE = /^[+-]?[1-9]\d*$/;
 var INDEX_RE = /^\[(\d+)\]$/;
 var ARR_FILED_RE = /(.)?(?:\[(\d+)\])$/;
 var LEVELS = ['fatal', 'error', 'warn', 'info', 'debug'];
+var MAX_CURL_BODY = 1024 * 72;
 var useCustomEditor = window.location.search.indexOf('useCustomEditor') !== -1;
 var isJSONText;
 
@@ -57,6 +59,8 @@ exports.isString = function (str) {
 function notEStr(str) {
   return str && typeof str === 'string';
 }
+
+exports.notEStr = notEStr;
 
 exports.parseLogs = function (str) {
   try {
@@ -124,7 +128,20 @@ exports.getBase64FromHexText = function (str, check) {
 
 function stopDrag() {
   dragCallback = dragTarget = dragOffset = null;
+  hideIFrameMask();
 }
+
+function showIFrameMask(hideByHover) {
+  var mask = $('.w-iframe-mask').show();
+  hideByHover && mask.parent().attr('allow-dragover', 1);
+}
+
+function hideIFrameMask() {
+  $('.w-iframe-mask').hide().parent().removeAttr('allow-dragover');
+}
+
+exports.showIFrameMask = showIFrameMask;
+exports.hideIFrameMask = hideIFrameMask;
 
 $(document)
   .on('mousedown', function (e) {
@@ -143,6 +160,7 @@ $(document)
       return;
     }
     dragOffset = e;
+    showIFrameMask();
     e.preventDefault();
   })
   .on('mousemove', function (e) {
@@ -405,6 +423,19 @@ exports.getHost = getHost;
 exports.getProtocol = function getProtocol(url) {
   var index = url.indexOf('://');
   return index == -1 ? 'TUNNEL' : url.substring(0, index).toUpperCase();
+};
+
+
+exports.getTransProto = function(req) {
+  var headers = req.headers;
+  var proto = headers && headers['x-whistle-transport-protocol'];
+  if (!proto || typeof proto !== 'string' || proto.length > 33) {
+    return;
+  }
+  try {
+    return decodeURIComponent(proto).toUpperCase();
+  } catch (e) {}
+  return proto.toUpperCase();
 };
 
 exports.ensureVisible = function (elem, container, init) {
@@ -854,6 +885,32 @@ function toString(value) {
 
 exports.toString = toString;
 
+exports.getValue = function(item, key) {
+  key = key.split('.');
+  var len = key.length;
+  var value;
+  if (len > 1) {
+    value = item;
+    for (var i = 0; i < len; i++) {
+      var origVal = value;
+      value = origVal[key[i]];
+      if (value == null) {
+        value = origVal[key[i].toLowerCase()];
+        if (value == null) {
+          break;
+        }
+      }
+    }
+  } else {
+    value = item[key[0]];
+  }
+  if (value == null) {
+    return '';
+  }
+  value = String(value);
+  return value.length > 1690 ? value.substring(0, 1680) + '...' : value;
+};
+
 function openEditor(value) {
   if (
     useCustomEditor &&
@@ -862,13 +919,7 @@ function openEditor(value) {
   ) {
     return;
   }
-  var win = window.open('editor.html');
-  win.getValue = function () {
-    return value;
-  };
-  if (win.setValue) {
-    win.setValue(value);
-  }
+  events.trigger('openEditor', value);
 }
 
 exports.openEditor = openEditor;
@@ -955,6 +1006,13 @@ exports.canAbort = function (item) {
   return !!item.frames && !socketIsClosed(item);
 };
 
+function formatBody(body) {
+  if (body.indexOf('\'') === -1) {
+    return '\'' + body + '\'';
+  }
+  return '"' + body.replace(/"/g, '\\"') + '"';
+}
+
 exports.asCURL = function (item) {
   if (!item) {
     return item;
@@ -978,9 +1036,9 @@ exports.asCURL = function (item) {
       JSON.stringify((rawHeaderNames[key] || key) + ': ' + headers[key])
     );
   });
-  var body = isText(req.headers) || isUrlEncoded(req) ? getBody(req, true) : '';
-  if (body) {
-    result.push('-d', JSON.stringify(body));
+  var body = getBody(req, true);
+  if (body && (body.length <= MAX_CURL_BODY || isText(req.headers) || isUrlEncoded(req))) {
+    result.push('-d', formatBody(body));
   }
   return result.join(' ');
 };
@@ -1786,13 +1844,13 @@ exports.isUploadForm = function (req) {
   return UPLOAD_TYPE_RE.test(type);
 };
 
-function parseUploadBody(body, boundary) {
+function parseUploadBody(body, boundary, needObj) {
   var sep = '--' + boundary;
   var start = strToByteArray(sep + '\r\n');
   var end = strToByteArray('\r\n' + sep);
   var len = start.length;
   var index = indexOfList(body, start);
-  var result = [];
+  var result = needObj ? {} : [];
   while (index >= 0) {
     index += len;
     var hIndex = indexOfList(body, BODY_SEP, index);
@@ -1808,14 +1866,35 @@ function parseUploadBody(body, boundary) {
     var data = hIndex >= endIndex ? '' : body.slice(hIndex, endIndex);
     header = parseMultiHeader(header);
     if (header) {
-      if (header.type) {
-        header.data = data;
+      if (needObj) {
+        var name = header.name + (header.type ? ' (' + header.type + ')' : '');
+        var curVal = header.value;
+        if (data) {
+          try {
+            curVal = base64Decode(fromByteArray(data)) || '';
+          } catch (e) {
+            curVal = '[Binary data]';
+          }
+        }
+        var value = result[name];
+        if (value != null) {
+          if (!Array.isArray(value)) {
+            value = result[name] = [ value ];
+          }
+          value.push(curVal);
+        } else {
+          result[name] = curVal;
+        }
       } else {
-        try {
-          header.value = data && base64Decode(fromByteArray(data));
-        } catch (e) {}
+        if (header.type) {
+          header.data = data;
+        } else {
+          try {
+            header.value = data && base64Decode(fromByteArray(data));
+          } catch (e) {}
+        }
+        result.push(header);
       }
-      result.push(header);
     }
     index = indexOfList(body, start, endIndex + 2);
   }
@@ -1823,7 +1902,7 @@ function parseUploadBody(body, boundary) {
   return result;
 }
 
-exports.parseUploadBody = function (req) {
+exports.parseUploadBody = function (req, needObj) {
   if (!req.base64) {
     return;
   }
@@ -1833,7 +1912,7 @@ exports.parseUploadBody = function (req) {
   }
   var boundary = RegExp.$1 || RegExp.$2;
   var body = base64ToByteArray(req.base64);
-  return body && parseUploadBody(body, boundary);
+  return body && parseUploadBody(body, boundary, needObj);
 };
 
 function getMultiPart(part) {
@@ -2116,6 +2195,7 @@ function toHarReq(item) {
     var body = getBody(req, true);
     postData = postData || getPostData(req);
     postData.text = body;
+    postData.base64 = req.base64;
     postData.params = stringToArray(body);
   } else if (req.base64) {
     postData = postData || getPostData(req);
@@ -2204,6 +2284,9 @@ exports.toHar = function (item) {
     whistleRules: item.rules,
     whistleFwdHost: item.fwdHost,
     whistleSniPlugin: item.sniPlugin,
+    whistleVersion: item.version,
+    whistleNodeVersion: item.nodeVersion,
+    whistleRealUrl: item.realUrl,
     whistleTimes: {
       startTime: item.startTime,
       dnsTime: item.dnsTime,
@@ -2280,4 +2363,8 @@ exports.collapse = collapse;
 var PROTO_RE = /^((?:http|ws)s?:\/\/)[^/?]*/;
 exports.getRawUrl = function (item) {
   return item.fwdHost && item.url.replace(PROTO_RE, '$1' + item.fwdHost);
+};
+
+exports.isGroup = function(name) {
+  return name && name[0] === '\r';
 };

@@ -6,6 +6,7 @@
   padding-right: 80px;
   position: relative;
   z-index: 1001;
+  white-space: nowrap;
 }
 .w-menu a,
 .w-history-bar a {
@@ -20,6 +21,7 @@
 .w-menu a {
   height: 27px;
   line-height: 28px;
+  overflow: hidden;
 }
 .w-menu .glyphicon,
 .w-detail .glyphicon {
@@ -31,6 +33,7 @@
 }
 .w-menu .w-online {
   position: absolute;
+  top: 0;
   right: 0;
 }
 .w-menu .w-online,
@@ -52,8 +55,17 @@
 .w-left-menu .w-disabled {
   color: #aaa;
 }
-.w-menu .w-menu-enable {
+.w-menu .w-menu-enable .glyphicon-cog {
   color: #ff6666 !important;
+}
+.w-menu .w-new-version-icon {
+  position: absolute;
+  top: 2px;
+  left: 17px;
+  width: 5px;
+  height: 5px;
+  border-radius: 5px;
+  background: red;
 }
 .w-menu .w-menu-wrapper {
   display: inline-block;
@@ -80,6 +92,7 @@
   width: 246px;
   height: 32px;
   border: 1px solid #ccc;
+  border-radius: 0!important;
   border-radius: 2px;
   padding: 0 5px;
   vertical-align: middle;
@@ -91,6 +104,8 @@
   border-radius: 0;
   border-top-right-radius: 2px;
   border-bottom-right-radius: 2px;
+  margin-left: 1px;
+  border-color: #ccc;
 }
 
 .w-create-rules-input {
@@ -126,7 +141,7 @@
   display: block !important;
 }
 
-.w-values-list .glyphicon {
+.w-values-list .glyphicon-ok {
   display: none !important;
 }
 .w-values-list a {
@@ -197,6 +212,19 @@
 .w-confirm-import-dialog .modal-dialog {
   width: 320px;
   font-weight: bold;
+}
+
+.w-account-menu {
+  white-space: nowrap;
+  max-width: 100px;
+  max-width: calc(100% - 1000px);
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.w-show-left-menu .w-account-menu {
+  max-width: 220px;
+  max-width: calc(100% - 900px);
 }
 
 .w-show-left-menu-btn {
@@ -276,8 +304,11 @@
   color: red;
 }
 .w-replay-count-dialog .modal-content {
-  width: 236px;
+  width: 236px!important;
   white-space: nowrap;
+}
+.w-replay-count-dialog .modal-dialog {
+  width: 236px!important;
 }
 .w-replay-count-dialog .modal-content label {
   width: auto;
@@ -316,4 +347,38 @@
 
 .w-menu-selected {
   background-color: #ddd;
+}
+
+.w-root-ca-type {
+  width: 100px;
+  float: right;
+  margin: 3px 15px 0 0;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  height: 24px;
+  font-size: 12px;
+  padding-left: 8px;
+}
+
+
+.w-fieldset pre {
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px;
+}
+.w-fieldset {
+  border: 1px solid #ddd;
+}
+.w-fieldset legend {
+  font-size: 12px;
+  padding: 0 5px;
+  border: none;
+  width: auto;
+  margin: 0 10px;
+  font-weight: bold;
+}
+
+.w-fieldset legend .glyphicon {
+  margin-left: 5px;
+  cursor: pointer;
 }

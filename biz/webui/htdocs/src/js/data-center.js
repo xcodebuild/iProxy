@@ -31,9 +31,9 @@ var hashFilterObj;
 var clearNetwork;
 var inited;
 var logId;
-var uploadFiles;
 var port;
 var pageId;
+var account;
 var dumpCount = 0;
 var updateCount = 0;
 var MAX_UPDATE_COUNT = 4;
@@ -45,6 +45,7 @@ var disabledAllPlugins;
 var reqTabList = [];
 var resTabList = [];
 var tabList = [];
+var toolTabList = [];
 var comTabList = [];
 var DEFAULT_CONF = {
   timeout: TIMEOUT,
@@ -58,10 +59,6 @@ exports.MAX_INCLUDE_LEN = MAX_INCLUDE_LEN;
 exports.MAX_EXCLUDE_LEN = MAX_EXCLUDE_LEN;
 exports.changeLogId = function (id) {
   logId = id;
-};
-
-exports.getUploadFiles = function () {
-  return uploadFiles;
 };
 
 exports.getPort = function () {
@@ -429,10 +426,7 @@ exports.values = createCgiObj(
     },
     add: 'cgi-bin/values/add',
     remove: 'cgi-bin/values/remove',
-    rename: 'cgi-bin/values/rename',
-    upload: 'cgi-bin/values/upload',
-    checkFile: 'cgi-bin/values/check-file',
-    removeFile: 'cgi-bin/values/remove-file'
+    rename: 'cgi-bin/values/rename'
   },
   POST_CONF
 );
@@ -448,6 +442,7 @@ exports.plugins = createCgiObj(
 exports.rules = createCgiObj(
   {
     disableAllRules: 'cgi-bin/rules/disable-all-rules',
+    accountRules: 'cgi-bin/rules/account',
     recycleList: {
       type: 'get',
       url: 'cgi-bin/rules/recycle/list'
@@ -582,8 +577,16 @@ exports.getTabs = function () {
   return tabList;
 };
 
+exports.getToolTabs = function() {
+  return toolTabList;
+};
+
 exports.getComTabs = function () {
   return comTabList;
+};
+
+exports.getAccount = function() {
+  return account;
 };
 
 exports.getInitialData = function (callback) {
@@ -595,12 +598,16 @@ exports.getInitialData = function (callback) {
         if (!data) {
           return setTimeout(load, 1000);
         }
-        port = data.server && data.server.port;
+        var server = data.server;
+        port = server && server.port;
+        account = server && server.account;
         updateCertStatus(data);
         exports.supportH2 = data.supportH2;
         exports.custom1 = data.custom1;
         exports.custom2 = data.custom2;
-        uploadFiles = data.uploadFiles;
+        exports.custom1Key = data.custom1Key;
+        exports.custom2Key = data.custom2Key;
+        exports.hasAccountRules = data.hasARules;
         initialData = data;
         pageId = data.clientId;
         DEFAULT_CONF.data.clientId = pageId;
@@ -792,11 +799,19 @@ function startLoadData() {
       if (!data || data.ec !== 0) {
         return;
       }
-      port = data.server && data.server.port;
+      var server = data.server;
+      port = server && server.port;
+      account = server && server.account;
       updateCertStatus(data);
       exports.supportH2 = data.supportH2;
       exports.custom1 = data.custom1;
       exports.custom2 = data.custom2;
+      exports.custom1Key = data.custom1Key;
+      exports.custom2Key = data.custom2Key;
+      if (exports.hasAccountRules !== data.hasARules) {
+        exports.hasAccountRules = data.hasARules;
+        events.trigger('accountRulesChanged');
+      }
       if (options.dumpCount > 0) {
         dumpCount = 0;
       }
@@ -815,25 +830,23 @@ function startLoadData() {
       var _resTabList = resTabList;
       var _tabList = tabList;
       var _comTabList = comTabList;
+      var _toolTabList = toolTabList;
       var curTabList = [];
       if (!disabledAllPlugins) {
         Object.keys(pluginsMap).forEach(function (name) {
           var pluginName = name.slice(0, -1);
           if (!disabledPlugins[pluginName]) {
             var plugin = pluginsMap[name];
-            var reqTab = plugin.reqTab;
-            var resTab = plugin.resTab;
-            var tab = plugin.tab;
-            var comTab = plugin.comTab;
             curTabList.push({
               mtime: plugin.mtime,
               priority: plugin.priority,
               _key: name,
               plugin: pluginName,
-              reqTab: reqTab,
-              resTab: resTab,
-              tab: tab,
-              comTab: comTab
+              reqTab: plugin.reqTab,
+              resTab: plugin.resTab,
+              tab: plugin.tab,
+              comTab: plugin.comTab,
+              toolTab: plugin.toolTab
             });
           }
         });
@@ -843,10 +856,12 @@ function startLoadData() {
       resTabList = [];
       tabList = [];
       comTabList = [];
+      toolTabList = [];
       curTabList.forEach(function (info) {
         var reqTab = info.reqTab;
         var resTab = info.resTab;
         var tab = info.tab;
+        var toolTab = info.toolTab;
         var comTab = info.comTab;
         var plugin = info.plugin;
         if (reqTab) {
@@ -865,11 +880,16 @@ function startLoadData() {
           comTab.plugin = plugin;
           comTabList.push(comTab);
         }
+        if (toolTab) {
+          toolTab.plugin = plugin;
+          toolTabList.push(toolTab);
+        }
       });
       emitCustomTabsChange(reqTabList, _reqTabList, 'reqTabsChange');
       emitCustomTabsChange(resTabList, _resTabList, 'resTabsChange');
       emitCustomTabsChange(tabList, _tabList, 'tabsChange');
       emitCustomTabsChange(comTabList, _comTabList, 'comTabsChange');
+      emitCustomTabsChange(toolTabList, _toolTabList, 'toolTabsChange');
       disabledPlugins = data.disabledPlugins || {};
       disabledAllPlugins = data.disabledAllPlugins;
       if (len || svrLen) {
@@ -1106,8 +1126,14 @@ function setStyle(item) {
       backgroundColor: bgColor
     };
   }
-  item.custom1 = getCustomValue(style, true);
-  item.custom2 = getCustomValue(style);
+  var key1 = exports.custom1Key;
+  var key2 = exports.custom2Key;
+  if (!util.notEStr(key1)) {
+    item.custom1 = getCustomValue(style, true);
+  }
+  if (!util.notEStr(key2)) {
+    item.custom2 = getCustomValue(style);
+  }
 }
 
 function setReqData(item) {
@@ -1131,7 +1157,7 @@ function setReqData(item) {
   item.body = reqSize + ' + ' + resSize;
   var result = res.statusCode == null ? defaultValue : res.statusCode;
   item.result = (/^[1-9]/.test(result) && parseInt(result, 10)) || result;
-  item.type = (resHeaders['content-type'] || defaultValue)
+  item.type = (resHeaders['content-type'] || '')
     .split(';')[0]
     .toLowerCase();
   item.dns =
@@ -1167,11 +1193,12 @@ function setReqData(item) {
     item.rules.pipe = item.pipe;
   }
   if (!item.path) {
-    item.protocol = item.isHttps
-      ? 'HTTP'
-      : item.useH2
-      ? 'H2'
-      : util.getProtocol(url);
+    if (item.isHttps) {
+      item.protocol =  util.getTransProto(res) || util.getTransProto(req) || 'HTTP';
+    } else {
+      item.protocol =item.useH2
+        ? 'H2' : util.getProtocol(url);
+    }
     item.hostname = item.isHttps ? 'Tunnel to' : util.getHost(url);
     var pathIndex = url.indexOf('://');
     if (pathIndex !== -1) {
@@ -1414,7 +1441,10 @@ exports.getPlugin = function (name) {
 };
 
 function getMenus(menuName) {
-  var list = [];
+  var list = account && account[menuName];
+  if (!Array.isArray(list)) {
+    list = [];
+  }
   if (disabledAllPlugins) {
     return list;
   }

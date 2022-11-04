@@ -1,17 +1,17 @@
 var React = require('react');
-var ReactDOM = require('react-dom');
 var util = require('./util');
 var dataCenter = require('./data-center');
 var events = require('./events');
 var getBridge = require('./bridge');
+var IFrame = require('./iframe');
 
 var modal = dataCenter.networkModal;
 
-function onWhistleInspectorCustomTabReady(init) {
+function onWhistleInspectorCustomTabReady(init, win) {
   if (typeof init !== 'function') {
     return;
   }
-  var bridge = getBridge();
+  var bridge = getBridge(win);
   bridge.getActiveSession = function () {
     return modal.getActive();
   };
@@ -45,7 +45,7 @@ var TabFrame = React.createClass({
   },
   handlePush: function (_, item, comItem) {
     try {
-      var win = ReactDOM.findDOMNode(this.refs.iframe).contentWindow;
+      var win = this.refs.iframe.getWindow();
       if (
         win &&
         typeof win.__pushWhistle5b6af7b9884e1165SessionActive__ === 'function'
@@ -78,12 +78,11 @@ var TabFrame = React.createClass({
     // 防止被改
     window.onWhistleInspectorCustomTabReady = onWhistleInspectorCustomTabReady;
     return (
-      <iframe
+      <IFrame
         onLoad={this.onLoad}
         ref="iframe"
         src={this.state.url}
         style={{ display: display }}
-        className="fill w-tab-frame"
       />
     );
   }
