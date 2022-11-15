@@ -359,7 +359,7 @@ function setApplicationMenu() {
             },
         },
         {
-            label: 'Install Certificate & Helper',
+            label: 'Install Certificate && Helper',
             click: async () => {
                 await installCertAndHelper();
                 dialog.showMessageBox({
