@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment */
+/* eslint-disable @typescript-eslint/no-var-requires */
 'use strict';
 
 import {
@@ -272,6 +274,7 @@ function createMainWindow() {
         }
     });
 
+    // @ts-ignore
     window.webContents.on('new-window', function (event, url) {
         event.preventDefault();
         new BrowserWindow({
