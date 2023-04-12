@@ -1,3 +1,88 @@
+# v2.9.45
+1. feat: 插件界面提供 `copyText` 方法
+2. feat: 支持 `lineProps://strictHtml` 和 `lineProsy://safeHtml` 只对当前行的规则生效
+3. style: Mock Dialog 支持直接保存 Value
+
+# v2.9.44
+1. fix: 解决 `qs` 模块不存在问题
+
+# v2.9.43
+1. feat: 允许通过 `enable://capture` 解析 socks 代理的 HTTPS 请求
+2. feat: 支持通过 Network 右键菜单 `Mock` 按钮快速创建规则：http://wproxy.org/whistle/webui/mock.html
+
+# v2.9.42
+1. style: 支持自动提示 Values 的 Key
+2. style: Composer 的 History 选项改成箭头按钮
+3. feat: 支持批量删除 Rules & Values
+
+# v2.9.41
+1. fix: Network Settings 列设置刷新失效问题
+2. style: WebForm 支持显示 JSON 对象
+3. style: Preview 优先显示 JSON View
+
+# v2.9.40
+1. refactor: `Network / Tools / Console & Server` 支持捕获 `unhandledrejection` 的错误信息，且`Console & Server` 最大缓存日志条数调整为 230
+2. feat: 支持 earlyHints
+3. feat: JSONView 右键支持 `Expand All` 及 `Collapse All`
+
+# v2.9.39
+1. feat: JSON View 支持搜索
+2. feat: 自动记录用过的 npm registry
+3. feat: 模板字符串支持 `${env.xxx}` 获取环境变量 `xxx` 对应的值
+4. feat: 支持通过环境变量 `excludeFilter://env.xxx=pattern`
+5. style: 匹配 map local 的抓包字体颜色显示成黑色
+
+# v2.9.38
+1. refactor: `req.passThrough(handleReq?, handleRes?)` 提供更多功能
+	``` js
+	req.passThrough(function(rawBuffer, next, ctx) {
+		ctx.getText((err, text) => {
+			console.log(err, text);
+		}, encoding?); // 自动 unzip 并转成字符串，字符编码 encoding 可选
+		ctx.getJson((err, text) => {
+			console.log(err, text);
+			next({
+				body: rawBuffer,
+				rules: '* file://(abc)'
+			});
+		}, encoding?); // 自动 unzip 并转成json
+	}, function(rawBuffer, next, ctx) {
+		ctx.getText((err, text) => {
+			console.log(err, text);
+		}, encoding?); // 自动 unzip 并转成字符串，字符编码 encoding 可选
+		ctx.getJson((err, text) => {
+			console.log(err, text);
+			next({
+				body: rawBuffer,
+				rules: '* file://(abc)'
+			});
+		}, encoding?); // 自动 unzip 并转成json
+	});
+	```
+
+# v2.9.37
+1. fix: `resCookies://` 设置失败问题
+
+# v2.9.36
+1. feat: 支持通过插件的配置 `whistleConfig.networkColumn: { title: 'xxx', key: 'xxx', width: 90 }` 扩展 Network 表格的列
+2. feat: 支持通过插件的配置 `whistleConfig.webWorker: path` 自定义脚本在界面中执行，可以结合自定义列的功能实现查看接口返回错误码（后续补例子）
+3. feat: 插件处理非 WebSocket 及 Socket 请求的 `req.passThrough(handleReq?, handleRes?)` 支持传人两个方法（可选）获取请求或响应内容并返回请求内容及规则
+	``` js
+	req.passThrough(function(buffer, next) {
+		next({
+			body: buffer,
+			rules: '* file://(abc)'
+		});
+	}, function(buffer, next) {
+		next({
+			body: buffer,
+			rules: '* resCookies://x-test=123'
+		});
+	});
+	```
+4. refactor: `delete://resCookie.xxx` 和 `delete://cookie.xxx`  可以删除浏览器中的 cookie（只支持 `path: /` 及 `Domain=父代` 或本域名）
+5. style: Network 右键菜单支持 `Copy Cell Text`
+
 # v2.9.35
 1. feat: Netwok 的 table 表头支持通过右键调整列宽度
 2. feat: Network / Settings 自定义列支持设置关联的 `Data Key`，可以在界面获取抓包数据，无需配置 `style`
@@ -611,7 +696,7 @@
 # v2.4.7
 1. fix: https://github.com/avwo/whistle/pull/383
 2. refactor: HTTP/2 支持 delete 请求携带 body
-3. style: `HTTPS > View custom certs info` 支持高亮显示过期证书，且支持 copy 证书安装路径
+3. style: `HTTPS > View all custom certificates` 支持高亮显示过期证书，且支持 copy 证书安装路径
 3. fix: 设置 `reqBody://(xxxx) method://post` 无法同时生效问题
 
 # v2.4.6
@@ -845,7 +930,7 @@
 
 # v1.16.0
 1. feat: 支持插件通过 `options.getRules(cb), options.getValues(cb), options.getCustomCertsInfo(cb)`，分别获取插件Rules、Values、自定义证书信息
-2. style: HTTPS菜单的对话框添加 `View custom certs info` 按钮，用于查看自定义证书状态（是否过期等）
+2. style: HTTPS菜单的对话框添加 `View all custom certificates` 按钮，用于查看自定义证书状态（是否过期等）
 3. fix: WebSocket请求无法设置 `reqDelay://msNum` 的问题
 
 # v1.15.16

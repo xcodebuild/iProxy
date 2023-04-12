@@ -1,9 +1,14 @@
 var $ = require('jquery');
 var dataCenter = require('./data-center');
+var events = require('./events');
 var storage = require('./storage');
 var util = require('./util');
 
 var settings = dataCenter.getNetworkColumns();
+var sortedCols = Array.isArray(settings.columns) ? settings.columns : [];
+var pluginColList = dataCenter.getPluginColumns();
+
+var pluginColsMap = {};
 
 function getDefaultColumns() {
   return [
@@ -151,20 +156,12 @@ function getDefaultColumns() {
 
 var columnsMap;
 var curColumns;
+var buildInCols;
 var colWidthData;
 
-function reset(init) {
-  columnsMap = {};
-  if (init) {
-    try {
-      colWidthData = JSON.parse(storage.get('networkColumnsWidth'));
-    } catch (e) {}
-    colWidthData = colWidthData || {};
-  } else {
-    colWidthData = {};
-  }
-  
-  curColumns = getDefaultColumns();
+function updateColumns(reseted, init) {
+  buildInCols = buildInCols || getDefaultColumns();
+  curColumns = buildInCols.concat(pluginColList);
   curColumns.forEach(function (col) {
     var menus = [];
     var curWidth = colWidthData[col.name];
@@ -189,33 +186,52 @@ function reset(init) {
       colWidthData[col.name] = menus[0].action;
     }
   });
-  !init && storage.set('networkColumnsWidth');
+  if (reseted) {
+    sortedCols = curColumns;
+  }
+  sortColumns(init);
 }
 
-reset(true);
-if (Array.isArray(settings.columns)) {
-  var flagMap = {};
-  var checkColumn = function (col) {
-    var name = col && col.name;
-    if (!name || flagMap[name] || !columnsMap[name]) {
-      return false;
-    }
-    flagMap[name] = 1;
-    return true;
-  };
-  var columns = settings.columns.filter(checkColumn);
-  if (columns.length === curColumns.length) {
-    curColumns = columns.map(function (col) {
-      var curCol = columnsMap[col.name];
-      curCol.selected = !!col.selected;
-      return curCol;
-    });
+function reset(init) {
+  columnsMap = {};
+  if (init) {
+    try {
+      colWidthData = JSON.parse(storage.get('networkColumnsWidth'));
+    } catch (e) {}
+    colWidthData = colWidthData || {};
+  } else {
+    buildInCols = null;
+    colWidthData = {};
+  }
+  updateColumns(!init, init);
+  if (!init) {
+    save();
+    storage.set('networkColumnsWidth');
   }
 }
 
-settings = {
-  columns: curColumns
-};
+function sortColumns(init) {
+  var columns = [];
+  sortedCols.forEach(function(col) {
+    var name = col && col.name;
+    var curCol = name && columnsMap[name];
+    if (init && curCol) {
+      curCol.selected = !!col.selected;
+    }
+    if (curCol && curColumns.indexOf(curCol) !== -1 && columns.indexOf(curCol) === -1) {
+      columns.push(curCol);
+    }
+  });
+  curColumns.forEach(function(col) {
+    if (columns.indexOf(col) === -1) {
+      columns.push(col);
+    }
+  });
+  curColumns = columns;
+  settings = { columns: curColumns };
+}
+
+reset(true);
 
 function save() {
   settings.columns = curColumns;
@@ -245,10 +261,7 @@ function moveTo(name, targetName) {
 exports.getAllColumns = function () {
   return curColumns;
 };
-exports.reset = function () {
-  reset();
-  save();
-};
+exports.reset = reset;
 exports.setSelected = function (name, selected) {
   var col = columnsMap[name];
   if (col) {
@@ -259,7 +272,7 @@ exports.setSelected = function (name, selected) {
 exports.getSelectedColumns = function () {
   var width = 50;
   var list = curColumns.filter(function (col) {
-    if (col.selected || col.locked) {
+    if (col.selected || col.locked || col.isPlugin) {
       width += colWidthData[col.name] || col.width || col.minWidth;
       return true;
     }
@@ -363,3 +376,21 @@ exports.setWidth = function(name, width) {
 exports.getWidth = function(col) {
   return colWidthData[col.name] || col.width || col.minWidth;
 };
+
+events.on('pluginColumnsChange', function() {
+  var map = {};
+  pluginColList = dataCenter.getPluginColumns().map(function(col) {
+    map[col.name] = col;
+    var oldCol = pluginColsMap[col.name];
+    if (oldCol) {
+      oldCol.title = col.title;
+      oldCol.key = col.key;
+      oldCol.width = col.width;
+      return oldCol;
+    }
+    return col;
+  });
+  pluginColsMap = map;
+  updateColumns();
+  events.trigger('onColumnsChanged');
+});

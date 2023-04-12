@@ -6,10 +6,11 @@ var NUM_OPTIONS = [500, 1000, 1500, 2000, 2500, 3000];
 var curLength = parseInt(storage.get('maxNetworkRows'), 10) || 1500;
 var MAX_LENGTH = NUM_OPTIONS.indexOf(curLength) === -1 ? 1500 : curLength;
 var MAX_COUNT = MAX_LENGTH + 100;
+var dataCenter;
 var WIN_NAME_PRE =
   '__whistle_' + location.href.replace(/\/[^/]*([#?].*)?$/, '/') + '__';
 var KW_RE =
-  /^(url|u|content|c|b|body|headers|h|ip|i|status|result|s|r|method|m|mark|type|t):(.*)$/i;
+  /^(e|error|style|url|u|content|c|b|body|headers|h|ip|i|status|result|s|r|method|m|mark|type|t):(.*)$/i;
 var KW_LIST_RE = /([^\s]+)(?:\s+([^\s]+)(?:\s+([\S\s]+))?)?/;
 
 function NetworkModal(list) {
@@ -64,7 +65,7 @@ function parseKeyword(keyword) {
       keyword = keyword.substring(1);
     }
   }
-  if (!keyword && type !== 'mark') {
+  if (!keyword && !type) {
     return;
   }
   return {
@@ -126,6 +127,23 @@ function checkUrl(item, opts) {
   return checkKeywork(rawUrl, opts);
 }
 
+function checkData(item, opts) {
+  if (setNot(checkUrl(item, opts), opts.not)) {
+    return false;
+  }
+  var keys = dataCenter && dataCenter.getDataKeys();
+  var len = keys && keys.length;
+  if (len) {
+    for (var i = 0; i < len; i++) {
+      var value = util.getProperty(item, keys[i]);
+      if (value != null && setNot(checkKeywork(String(value), opts), opts.not)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 proto.hasKeyword = function () {
   return this._keyword;
 };
@@ -142,7 +160,7 @@ function setNot(flag, not) {
 function checkItem(item, opts) {
   switch (opts.type) {
   case 'mark':
-    return !item.mark || setNot(!checkUrl(item, opts), opts.not);
+    return !item.mark || checkData(item, opts);
   case 'c':
   case 'content':
   case 'b':
@@ -185,8 +203,16 @@ function checkItem(item, opts) {
   case 'method':
   case 'm':
     return setNot(!checkKeywork(item.req.method, opts), opts.not);
+  case 'e':
+  case 'error':
+    var statusCode = item.res && item.res.statusCode;
+    var isError = item.reqError || item.resError || (item.customData && item.customData.error) ||
+    (statusCode && (!/^\d+$/.test(statusCode) || statusCode >= 400));
+    return !isError || checkData(item, opts);
+  case 'style':
+    return !item.style ||  checkData(item, opts);
   default:
-    return setNot(!checkUrl(item, opts), opts.not);
+    return checkData(item, opts);
   }
 }
 
@@ -202,6 +228,13 @@ proto.hasUnmarked = function () {
 proto.getList = function () {
   return this._list || this.list;
 };
+
+function toStr(val) {
+  if (val == null) {
+    return '';
+  }
+  return val + '';
+}
 
 proto.filter = function () {
   var self = this;
@@ -224,8 +257,12 @@ proto.filter = function () {
     self._list = self.list.slice().sort(function (prev, next) {
       for (var i = 0; i < len; i++) {
         var column = columns[i];
-        var prevVal = prev[column.name];
-        var nextVal = next[column.name];
+        var prevVal = util.getCellValue(prev, column);
+        var nextVal = util.getCellValue(next, column);
+        if (column.key) {
+          prevVal = toStr(prevVal);
+          nextVal = toStr(nextVal);
+        }
         var result = compare(prevVal, nextVal, column.order, column.name);
         if (result) {
           return result;
@@ -862,5 +899,9 @@ function updateOrder(list, force) {
 
   return list;
 }
+
+NetworkModal.setDataCenter = function(dc) {
+  dataCenter = dc;
+};
 
 module.exports = NetworkModal;

@@ -200,13 +200,13 @@ var ReqDetail = React.createClass({
             <div className="fill orient-vertical-box">
               <div className="w-detail-webforms-title">Query</div>
               <div className="fill orient-vertical-box w-detail-request-query">
-                <Properties modal={query} enableViewSource="1" />
+                <Properties modal={query} enableViewSource="1" showJsonView="1" />
               </div>
             </div>
             <div className="fill orient-vertical-box">
               <div className="w-detail-webforms-title">Body</div>
               <div className="fill orient-vertical-box w-detail-request-form">
-                <Properties modal={form} enableViewSource="1" />
+                <Properties modal={form} enableViewSource="1" showJsonView="1" />
               </div>
             </div>
           </Divider>
@@ -215,6 +215,8 @@ var ReqDetail = React.createClass({
         )}
         {state.initedTextView ? (
           <Textarea
+            reqData={modal}
+            reqType="reqBody"
             defaultName={defaultName}
             tips={tips}
             base64={base64}
@@ -225,6 +227,8 @@ var ReqDetail = React.createClass({
         ) : undefined}
         {state.initedJSONView ? (
           <JSONViewer
+            reqData={modal}
+            reqType="reqRaw"
             defaultName={defaultName}
             data={json}
             hide={name != BTNS[3].name}
@@ -232,6 +236,8 @@ var ReqDetail = React.createClass({
         ) : undefined}
         {state.initedHexView ? (
           <Textarea
+            reqData={modal}
+            reqType="reqBody"
             defaultName={defaultName}
             isHexView="1"
             base64={base64}
@@ -252,6 +258,8 @@ var ReqDetail = React.createClass({
         ) : undefined}
         {state.initedRaw ? (
           <Textarea
+            reqData={modal}
+            reqType="reqRaw"
             defaultName={defaultName}
             value={raw}
             headers={headersStr}

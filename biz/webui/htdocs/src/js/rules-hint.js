@@ -7,13 +7,14 @@ var dataCenter = require('./data-center');
 
 var disabledEditor = window.location.href.indexOf('disabledEditor=1') !== -1;
 var NON_SPECAIL_RE = /[^:/]/;
-var PLUGIN_NAME_RE = /^((?:whistle\.)?([a-z\d_\-]+:))(\/?$|\/\/)/;
+var PLUGIN_NAME_RE = /^((?:whistle\.)?([a-z\d_-]+:))(\/?$|\/\/)/;
 var MAX_HINT_LEN = 512;
 var MAX_VAR_LEN = 100;
 var AT_RE = /^@/;
 var P_RE = /^%/;
 var P_VAR_RE = /^%([a-z\d_-]+)([=.])/;
 var PLUGIN_SPEC_RE = /^(pipe|sniCallback):/;
+var VAL_RE = /^([a-z\d_.-]+:\/\/)?(`)?\{([^\s]*?)(?:\}\1?)?$/i;
 var PROTOCOL_RE = /^([^\s:]+):\/\//;
 var HINT_TIMEOUT = 120;
 var curHintMap = {};
@@ -74,6 +75,42 @@ $(window).on('hashchange', function () {
     disabledEditor = disabled;
   }
 });
+
+var curKeys;
+var curRules;
+var MULTI_LINE_VALUE_RE =
+  /^[^\n\r\S]*(```+)[^\n\r\S]*(\S+)[^\n\r\S]*[\r\n]([\s\S]+?)[\r\n][^\n\r\S]*\1\s*$/gm;
+
+function getInlineKeys() {
+  var rulesModal = dataCenter.rulesModal;
+  var list = rulesModal && rulesModal.getSelectedList();
+  var active = rulesModal && rulesModal.getActive();
+  if (active) {
+    if (!list) {
+      list = [active];
+    } else if (list.indexOf(active) === -1) {
+      list.push(active);
+    }
+  }
+  var value = list && list.map(function(item) {
+    return item.value;
+  }).join('\n');
+  if (!value) {
+    return;
+  }
+  if (curRules !== value) {
+    curRules = value;
+    curKeys = null;
+    value.replace(MULTI_LINE_VALUE_RE, function (_, __, key) {
+      curKeys = curKeys || [];
+      if (curKeys.indexOf(key) === -1) {
+        curKeys.push(key);
+      }
+      return '';
+    });
+  }
+  return curKeys;
+}
 
 function getHintCgi(plugin, pluginVars) {
   var moduleName = plugin.moduleName;
@@ -287,6 +324,9 @@ function handleRemoteHints(data, editor, plugin, protoName, value, cgi, isVar) {
 var WORD = /\S+/;
 var showAtHint;
 var showVarHint;
+var toValKey = function(key, tpl) {
+  return tpl + '{' + key + '}' + tpl;
+};
 CodeMirror.registerHelper('hint', 'rulesHint', function (editor, options) {
   showAtHint = false;
   showVarHint = false;
@@ -348,6 +388,54 @@ CodeMirror.registerHelper('hint', 'rulesHint', function (editor, options) {
     };
   }
   if (curWord) {
+    if (VAL_RE.test(curWord)) {
+      var protoLen = RegExp.$1.length;
+      var tplStart = RegExp.$2;
+      var valKeyword = RegExp.$3;
+      var valuesModal = dataCenter.getValuesModal();
+      var valuesKeys = valuesModal && valuesModal.list;
+      var inlineKyes = getInlineKeys();
+      if (inlineKyes) {
+        if (valuesKeys) {
+          valuesKeys.forEach(function(key) {
+            if (inlineKyes.indexOf(key) === -1) {
+              inlineKyes.push(key);
+            }
+          });
+        }
+        valuesKeys = inlineKyes;
+      }
+      if (valKeyword.slice(-2) === '}`') {
+        valKeyword = valKeyword.slice(0, -2);
+      }
+      if (valuesKeys && valuesKeys.length) {
+        if (valKeyword) {
+          list = [];
+          var lowerKey = valKeyword.toLowerCase();
+          valuesKeys.forEach(function(key) {
+            if (key.toLowerCase().indexOf(lowerKey) !== -1) {
+              list.push(toValKey(key, tplStart));
+            }
+          });
+        } else {
+          list = valuesKeys.map(function(key) {
+            return toValKey(key, tplStart);
+          });
+        }
+        var valLen = list && list.length;
+        if (valLen) {
+          if (valLen === 1 && list[0] === curWord.substring(protoLen)) {
+            return;
+          }
+          curLine = curLine.substring(start).split(/\s/, 1)[0] || '';
+          return {
+            list: list,
+            from: CodeMirror.Pos(cur.line, start + protoLen),
+            to: CodeMirror.Pos(cur.line, start + curLine.length)
+          };
+        }
+      }
+    }
     if (plugin || PLUGIN_NAME_RE.test(curWord)) {
       plugin = plugin || dataCenter.getPlugin(RegExp.$2);
       var pluginConf = pluginVars || plugin;
@@ -423,7 +511,7 @@ CodeMirror.registerHelper('hint', 'rulesHint', function (editor, options) {
           if (commentIndex !== -1) {
             curLine = curLine.substring(0, commentIndex);
           }
-          curLine = curLine.substring(start).split(/\s/, 1)[0];
+          curLine = curLine.substring(start).split(/\s/, 1)[0] || '';
           curFocusProto = protoName;
           end = start + curLine.trim().length;
           var from = CodeMirror.Pos(cur.line, start);
