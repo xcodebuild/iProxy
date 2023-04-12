@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/ban-ts-comment */
 /* eslint-disable @typescript-eslint/no-var-requires */
 'use strict';
 
@@ -21,6 +20,7 @@ import { initIPC } from './api';
 import { hideOrQuit } from './platform';
 import { installCertAndHelper } from './install';
 
+// @ts-ignore
 import extract from 'extract-zip';
 
 import {
