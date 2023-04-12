@@ -15,10 +15,12 @@ var events = require('./events');
 var iframes = require('./iframes');
 var dataCenter = require('./data-center');
 var storage = require('./storage');
+var MockDialog = require('./mock-dialog');
 
 var TREE_ROW_HEIGHT = 24;
 var ROW_STYLE = { outline: 'none' };
 var columnState = {};
+var columnKeys = {};
 var CMD_RE = /^:dump\s+(\d{1,15})\s*$/;
 var NOT_BOLD_RULES = {
   plugin: 1,
@@ -51,6 +53,7 @@ var contextMenuList = [
     name: 'Copy',
     shiftToEdit: true,
     list: [
+      { name: 'Cell Text' },
       { name: 'Host' },
       { name: 'Path' },
       { name: 'URL' },
@@ -58,8 +61,6 @@ var contextMenuList = [
       { name: 'As CURL' },
       { name: 'Client IP' },
       { name: 'Server IP' },
-      { name: 'Req Headers' },
-      { name: 'Res Headers' },
       { name: 'Cookie' }
     ]
   },
@@ -104,6 +105,7 @@ var contextMenuList = [
       { name: 'Collapse All' }
     ]
   },
+  { name: 'Mock' },
   { name: 'Import' },
   { name: 'Export' },
   {
@@ -153,12 +155,24 @@ function getColStyle(col, style) {
   return style;
 }
 
+function getRuleStyle(data) {
+  var rules = data.rules;
+  if (!rules) {
+    return '';
+  }
+  var rule = rules.rule;
+  if (rule && (rule.isLoc || rule.isSpec)) {
+    return ' w-has-local';
+  }
+  return hasRules(rules) ? ' w-has-rules' : '';
+}
+
 function getClassName(data) {
   return (
     getStatusClass(data) +
     ' w-req-data-item' +
     (data.isHttps ? ' w-tunnel' : '') +
-    (hasRules(data) ? ' w-has-rules' : '') +
+    getRuleStyle(data) +
     (data.selected ? ' w-selected' : '') +
     (data.isPR ? ' w-pr' : '')
   );
@@ -173,11 +187,7 @@ function isVisibleInTree(item) {
   return !parent || (parent.expand && parent.pExpand);
 }
 
-function hasRules(data) {
-  var rules = data.rules;
-  if (!rules) {
-    return false;
-  }
+function hasRules(rules) {
   var keys = Object.keys(rules);
   if (keys && keys.length) {
     for (var i = 0, len = keys.length; i < len; i++) {
@@ -217,7 +227,7 @@ function getStatusClass(data) {
   }
 
   var statusCode = data.res && data.res.statusCode;
-  if (data.reqError || data.resError) {
+  if (data.reqError || data.resError || (data.customData && data.customData.error)) {
     type += ' danger w-error-status';
   } else if (statusCode == 403) {
     type += ' w-forbidden';
@@ -295,7 +305,7 @@ var Row = React.createClass({
     var style = item.style;
     
     return (
-      <table className="table" key={p.key} style={p.style}>
+      <table className="table w-req-table" key={p.key} style={p.style} data-id={item.id}>
         <tbody>
           <tr
             tabIndex="-1"
@@ -320,14 +330,12 @@ var Row = React.createClass({
                   item.custom2 = util.getValue(item, key2);
                 }
               }
-              var className = col.className;
-              var value =
-                name === 'hostIp' ? util.getServerIp(item) : item[name];
+              var value = util.getCellValue(item, col);
               var colStyle = getColStyle(col, style);
               return (
                 <td
                   key={name}
-                  className={className}
+                  className={col.className}
                   style={colStyle}
                   title={col.showTitle ? value : undefined}
                 >
@@ -471,6 +479,11 @@ var ReqData = React.createClass({
   componentDidMount: function () {
     var self = this;
     var timer;
+    events.on('showMockDialog', function(_, data) {
+      if (data) {
+        self.refs.mockDialog.show(data.item, data.type);
+      }
+    });
     events.on('hashFilterChange', function () {
       self.setState({});
     });
@@ -867,6 +880,9 @@ var ReqData = React.createClass({
     case 'Collapse All':
       self.collapseAll(treeId);
       break;
+    case 'Mock':
+      self.refs.mockDialog.show(item);
+      break;
     }
   },
   onHeadCtxMenu: function(e) {
@@ -885,12 +901,18 @@ var ReqData = React.createClass({
     this.refs.headContextMenu.show(data);
   },
   onContextMenu: function (e) {
-    var el = $(e.target).closest('.w-req-data-item');
+    var target = $(e.target);
+    var nodeName =  target.prop('nodeName');
+    var el = target.closest('.w-req-data-item');
+    if (!el.length) {
+      el = target.closest('.w-req-table');
+    }
     var dataId = el.attr('data-id');
     var treeId = el.attr('data-tree');
     var modal = this.props.modal;
     var item = modal.getItem(dataId);
     var disabled = !item;
+    var cellText = item && (nodeName === 'TD' || nodeName === 'TH') && (target.text() || '').trim();
     var treeNodeData = modal.isTreeView && modal.getTreeNode(treeId);
     this.treeTarget = null;
     e.preventDefault();
@@ -922,6 +944,10 @@ var ReqData = React.createClass({
     contextMenuList[1].list.forEach(function (menu) {
       menu.disabled = disabled;
       switch (menu.name) {
+      case 'Cell Text':
+        menu.copyText = cellText;
+        menu.disabled = disabled || !cellText;
+        break;
       case 'URL':
         menu.copyText = util.getUrl(
             (item && item.url.replace(/[?#].*$/, '')) || treeUrl
@@ -952,18 +978,6 @@ var ReqData = React.createClass({
         var serverIp = item && util.getServerIp(item);
         menu.disabled = !serverIp;
         menu.copyText = serverIp;
-        break;
-      case 'Req Headers':
-        menu.copyText =
-            item &&
-            util.objectToString(item.req.rawHeaders || item.req.headers);
-        menu.disabled = !menu.copyText;
-        break;
-      case 'Res Headers':
-        menu.copyText =
-            item &&
-            util.objectToString(item.res.rawHeaders || item.res.headers);
-        menu.disabled = !menu.copyText;
         break;
       case 'Cookie':
         var cookie = item && item.req.headers.cookie;
@@ -1061,7 +1075,10 @@ var ReqData = React.createClass({
       treeList[2].disabled = !hasData;
       treeList[3].disabled = !hasData;
     }
-    var pluginItem = contextMenuList[8];
+    var mockItem = contextMenuList[6];
+    mockItem.disabled = disabled;
+    mockItem.hide = dataCenter.hideMockMenu;
+    var pluginItem = contextMenuList[9];
     pluginItem.disabled = disabled && !selectedCount;
     util.addPluginMenus(
       pluginItem,
@@ -1069,7 +1086,7 @@ var ReqData = React.createClass({
       treeItem.hide ? 8 : 9,
       disabled
     );
-    var height = (treeItem.hide ? 280 : 310) - (pluginItem.hide ? 30 : 0);
+    var height = (treeItem.hide ? 310 : 340) - (pluginItem.hide ? 30 : 0) - (mockItem.hide ? 30 : 0);
     pluginItem.maxHeight = height;
     var data = util.getMenuPosition(e, 110, height);
     data.list = contextMenuList;
@@ -1112,8 +1129,10 @@ var ReqData = React.createClass({
     var order;
     if (name == 'order') {
       columnState = {};
+      columnKeys = {};
     } else {
       order = columnState[name];
+      columnKeys[name] = target.getAttribute('data-key');
       if (order == 'desc') {
         columnState[name] = 'asc';
       } else if (order == 'asc') {
@@ -1128,7 +1147,8 @@ var ReqData = React.createClass({
       if ((order = columnState[name])) {
         sortColumns.push({
           name: name,
-          order: order
+          order: order,
+          key: columnKeys[name]
         });
       }
     });
@@ -1174,6 +1194,7 @@ var ReqData = React.createClass({
         data-name={name}
         draggable={true}
         key={name}
+        data-key={col.key}
         className={col.className}
         style={style}
       >
@@ -1385,6 +1406,7 @@ var ReqData = React.createClass({
         <ContextMenu onClick={this.onClickContextMenu} ref="contextMenu" />
         <ContextMenu onClick={this.onClickHeadMenu} ref="headContextMenu" />
         <QRCodeDialog ref="qrcodeDialog" />
+        <MockDialog ref="mockDialog" />
       </div>
     );
   }

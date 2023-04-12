@@ -12,7 +12,33 @@
 .w-composer-url {
   padding: 2px 2px 2px 0;
   border-bottom: 1px solid #ccc;
+  position: relative;
 }
+
+.w-composer-url .w-filter-hint {
+  width: calc(100% - 168px);
+  z-index: 1;
+  top: 30px;
+  bottom: unset;
+  left: 125px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.w-filter-hint > ul {
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: 240px;
+}
+
+.w-filter-hint > ul li {
+  cursor: default;
+}
+
+.w-composer-url .w-filter-hint a {
+  text-decoration: none;
+  left: 2px;
+}
+
 .w-composer-input,
 .w-composer-method,
 .w-composer-execute {
@@ -24,12 +50,20 @@
   border: 1px solid #ccc;
   margin-left: 2px;
 }
+.w-composer-history-btn {
+  height: 24px;
+  width: 18px;
+  text-align: center;
+  line-height: 24px;
+  cursor: pointer;
+}
 .w-composer-method {
   display: block;
   width: 100px;
   margin: 0 2px;
   padding: 0;
   font-size: 13px;
+  border-radius: 0;
 }
 .w-composer-execute {
   padding: 0 8px;
@@ -273,7 +307,7 @@
   top: 0;
 }
 .w-composer-use-h2 {
-  right: 75px;
+  right: 5px;
 }
 
 .w-composer-history {
@@ -300,11 +334,11 @@
 }
 
 .w-composer-enable-rules {
-  right: 145px;
+  right: 80px;
 }
 
 .w-composer-enable-body {
-  right: 208px;
+  right: 146px;
 }
 
 .w-composer-tabs input {

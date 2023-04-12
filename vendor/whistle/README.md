@@ -7,7 +7,6 @@
 # whistle
 [![NPM version](https://img.shields.io/npm/v/whistle.svg?style=flat-square)](https://npmjs.org/package/whistle)
 [![node version](https://img.shields.io/badge/node.js-%3E=_8-green.svg?style=flat-square)](http://nodejs.org/download/)
-[![build status](https://img.shields.io/travis/avwo/whistle.svg?style=flat-square)](https://travis-ci.org/avwo/whistle)
 [![Test coverage](https://codecov.io/gh/avwo/whistle/branch/master/graph/badge.svg?style=flat-square)](https://codecov.io/gh/avwo/whistle)
 [![npm download](https://img.shields.io/npm/dm/whistle.svg?style=flat-square)](https://npmjs.org/package/whistle)
 [![NPM count](https://img.shields.io/npm/dt/whistle.svg?style=flat-square)](https://www.npmjs.com/package/whistle)
@@ -35,6 +34,8 @@ Whistle 是基于 Node 实现的跨平台抓包调试工具，其主要特点：
 	npm i -g whistle && w2 start --init
 	```
 	> 上述命令会先全局安装 Whistle 的 npm 包后，启动 Whistle 并设置系统全局代理，以及安装系统根证书，目前一键安装只支持 Mac & Windows 系统，其它系统按照下面 **手动安装** 的方式操作。
+	>
+	> 如果安装过程时报错 `Bad CPU type in executable`，在命令执行 `arch -x86_64 zsh` 再重新执行一键安装命令。
 3. 一键安装过程中注意事项：
 	* Mac 需要两次输入开机密码或指纹验证
 		<p>
@@ -68,6 +69,10 @@ Whistle 是基于 Node 实现的跨平台抓包调试工具，其主要特点：
 ### 详细用法参见：[Whistle 帮助文档](https://wproxy.org/whistle/quickstart.html)
 
 # 通过 SwitchyOmega 设置代理
+### 安装 SwitchyOmega
+打开 Chrome 扩展商店进行安装 https://chrome.google.com/webstore/detail/proxy-switchyomega/padekgcemlokbadohgkifijomclgjgif
+
+### 配置 SwitchyOmega
 全局代理如果会影响到某些客户端的请求（客户端设置了 ssl pinning），也可以使用 Chrome 插件设置代理（只对 Chrome 生效）：
 > 可以通过 `w2 proxy off` 关闭全局代理
 
@@ -78,6 +83,9 @@ Whistle 是基于 Node 实现的跨平台抓包调试工具，其主要特点：
 
     <img width="180" alt="image" src="https://user-images.githubusercontent.com/11450939/173984519-143615b2-2a99-4486-a22a-fec71fe00423.png">
 
+# 安全设置
+1. 通过启动参数给管理界面设置用户名密码：`w2 restart -n yourusername -w yourpassword`
+2. 通过插件给经过代理的请求设置用户名密码：https://github.com/whistle-plugins/whistle.proxyauth
 
 # License
 [MIT](./LICENSE)

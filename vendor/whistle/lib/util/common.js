@@ -2,7 +2,12 @@ var os = require('os');
 var path = require('path');
 var fse = require('fs-extra2');
 var fs = require('fs');
+var iconv = require('iconv-lite');
+var qs = require('querystring');
+var Buffer = require('safe-buffer').Buffer;
+var zlib = require('./zlib');
 var pkgConf = require('../../package.json');
+var isUtf8 = require('./is-utf8');
 
 var HEAD_RE = /^head$/i;
 var HOME_DIR_RE = /^[~～]\//;
@@ -27,6 +32,7 @@ var ILLEGAL_TRAILERS = [
   'keep-alive'
 ];
 var REMOTE_URL_RE = /^\s*((?:git[+@]|github:)[^\s]+\/whistle\.[a-z\d_-]+(?:\.git)?|https?:\/\/[^\s]+)\s*$/i;
+var HTTP_RE = /^https?:\/\/[^/?]/;
 
 exports.REMOTE_URL_RE = REMOTE_URL_RE;
 
@@ -230,13 +236,15 @@ function getHomePath(dir) {
 
 exports.getHomePath = getHomePath;
 
-function getWhistlePath() {
-  return (
-    getHomePath(process.env.WHISTLE_PATH) ||
-    path.join(getHomedir(), '.WhistleAppData')
-  );
+function getDefaultWhistlePath() {
+  return path.join(getHomedir(), '.WhistleAppData');
 }
 
+function getWhistlePath() {
+  return getHomePath(process.env.WHISTLE_PATH) ||  getDefaultWhistlePath();
+}
+
+exports.getDefaultWhistlePath = getDefaultWhistlePath;
 exports.getWhistlePath = getWhistlePath;
 
 function getLogFile(name) {
@@ -323,4 +331,132 @@ exports.wrapRuleValue = function(key, value, size, policy) {
 
 exports.isGroup = function(name) {
   return name && name[0] === '\r';
+};
+
+var UTF8_RE = /^utf-?8$/i;
+function bufferToString(buffer, encoding) {
+  if (typeof encoding === 'string') {
+    encoding = encoding.trim();
+  } else {
+    encoding = null;
+  }
+  if (Buffer.isBuffer(buffer) && !UTF8_RE.test(encoding) && !isUtf8(buffer)) {
+    try {
+      buffer = iconv.encode(buffer, encoding || 'GB18030');
+    } catch (e) {}
+  }
+  return String(buffer || '');
+}
+
+exports.bufferToString = bufferToString;
+
+var URLENCODED_RE = /application\/x-www-form-urlencoded/i;
+var POST_RE = /^post$/i;
+
+function isUrlEncoded(req) {
+  var type = req.method && req.headers && req.headers['content-type'];
+  return type && POST_RE.test(req.method) && URLENCODED_RE.test(type);
+}
+
+exports.isUrlEncoded = isUrlEncoded;
+
+function queryToString(query, req) {
+  if (!req || typeof query !== 'object' || !isUrlEncoded(req)) {
+    return query;
+  }
+  return qs.stringify(query);
+}
+
+exports.toBuffer = function(data, req) {
+  data = queryToString(data, req);
+  if (!data || Buffer.isBuffer(data)) {
+    return data && data.length && data;
+  }
+  if (typeof data !== 'string') {
+    try {
+      data = JSON.stringify(data);
+    } catch (e) {
+      return;
+    }
+  }
+  return Buffer.from(data);
+};
+
+
+exports.readStream = function(stream, callback) {
+  var buffer = null;
+  stream.on('data', function(chunk) {
+    buffer = buffer ? Buffer.concat([buffer, chunk]) : chunk;
+  });
+  stream.once('end', function() {
+    var buf;
+    var text;
+    var json;
+    var err;
+    var jsonErr;
+    stream.zlib = zlib;
+    var encoding = stream.headers && stream.headers['content-encoding'];
+    var getBuffer = function(cb) {
+      if (err || buf !== undefined) {
+        return cb(err, buf);
+      }
+      zlib.unzip(encoding, buffer, function(e, ctn) {
+        err = e;
+        buf = ctn || null;
+        cb(err, buf);
+      });
+    };
+    var getText = function(cb, ecd) {
+      if (err || text != null) {
+        return cb(err, text);
+      }
+      getBuffer(function(e, ctn) {
+        err = e;
+        text = bufferToString(ctn, ecd);
+        cb(err, text);
+      });
+    };
+    stream.getBuffer = getBuffer;
+    stream.getText = getText;
+    stream.getJson = function(cb, ecd) {
+      getText(function() {
+        if (err || jsonErr || !text || json !== undefined) {
+          return cb(err || jsonErr, json);
+        }
+        try {
+          if (isUrlEncoded(stream)) {
+            json = qs.parse(text);
+          } else {
+            text = text.trim();
+            if (text[0] === '[' || text[0] === '{') {
+              json = JSON.parse(text) || null;
+            } else {
+              json = null;
+            }
+          }
+        } catch (e) {
+          jsonErr = e;
+        }
+        cb(jsonErr, json);
+      }, ecd);
+    };
+    callback(buffer);
+  });
+};
+
+exports.readJsonSync = function(filepath) {
+  try {
+    return fse.readJsonSync(filepath);
+  } catch (e) {
+    try {
+      return fse.readJsonSync(filepath);
+    } catch (e) {}
+  }
+};
+
+exports.getRegistry = function(registry) {
+  if (!registry || !HTTP_RE.test(registry) || registry.length > 1024) {
+    return;
+  }
+  return registry;
 };

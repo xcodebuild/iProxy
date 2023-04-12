@@ -9,6 +9,7 @@ var columns = require('./columns');
 var dataCenter = require('./data-center');
 var events = require('./events');
 var util = require('./util');
+var win = require('./win');
 var storage = require('./storage');
 
 var NOT_EMPTY_STYLE = { backgroundColor: 'lightyellow' };
@@ -30,8 +31,13 @@ var Settings = React.createClass({
     this.setState({ columns: columns.getAllColumns() });
   },
   resetColumns: function () {
-    columns.reset();
-    this.onColumnsResort();
+    var self = this;
+    win.confirm('Are you sure to reset the columns of network table?', function(sure) {
+      if (sure) {
+        columns.reset();
+        self.onColumnsResort();
+      }
+    });
   },
   componentDidMount: function () {
     var self = this;
@@ -255,6 +261,9 @@ var Settings = React.createClass({
               </label>
             </legend>
             {columnList.map(function (col) {
+              if (col.isPlugin) {
+                return;
+              }
               var name = col.name;
               var canEdit1 = name === 'custom1';
               var canEdit = canEdit1 || name === 'custom2';

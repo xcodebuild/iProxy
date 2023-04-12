@@ -92,7 +92,8 @@ function tunnelProxy(server, proxy, type) {
     var isICloundCKDB = hostname === 'p22-ckdatabase.icloud.com';
     var isIPHost = !isICloundCKDB && net.isIP(hostname);
     var policy = headers[config.WHISTLE_POLICY_HEADER];
-    var useTunnelPolicy = policy == 'tunnel';
+    var weakTunnel = policy == 'weakTunnel';
+    var useTunnelPolicy = weakTunnel || policy == 'tunnel';
     var inspect = useTunnelPolicy;
     useTunnelPolicy = useTunnelPolicy || policy == 'connect';
     var enableTunnelAck =
@@ -114,13 +115,14 @@ function tunnelProxy(server, proxy, type) {
     rules.resolveRulesFile(req, function () {
       var filter = req._filters;
       var disable = req.disable;
+      var isDisabledProps = function() {
+        return disable.intercept || disable.https || disable.capture;
+      };
       var isDisabeIntercept = function () {
         return (
           isICloundCKDB ||
           useTunnelPolicy ||
-          disable.intercept ||
-          disable.https ||
-          disable.capture ||
+          isDisabledProps() ||
           (req.isPluginReq && policy !== 'capture')
         );
       };
@@ -147,7 +149,8 @@ function tunnelProxy(server, proxy, type) {
         return true;
       };
       var isIntercept = function () {
-        if (isLocalUIUrl || (!isDisabeIntercept() && isEnableIntercept())) {
+        if (isLocalUIUrl || ((!isDisabeIntercept() && isEnableIntercept()) ||
+          (weakTunnel && !isDisabledProps() && isCustomIntercept()))) {
           return true;
         }
         if (!isIPHost || !hasCustomCerts()) {
@@ -730,30 +733,34 @@ function tunnelProxy(server, proxy, type) {
                     curHeaders = extend({}, resHeaders);
                     curHeaders['x-whistle-req-id'] = req.reqId;
                   }
-                  var rawData =
-                    [
-                      statusLine,
-                      getRawHeaders(formatHeaders(curHeaders, rawHeaderNames))
-                    ].join('\r\n') + '\r\n\r\n';
-                  if (code != 200) {
-                    reqSocket.end(rawData, cb);
-                  } else {
-                    if (tunnelAck) {
-                      reqSocket.write(rawData);
-                      reqSocket.once('data', function (chunk) {
-                        buf = chunk.length > 1 ? chunk.slice(1) : null;
-                        reqSocket.pause();
-                        cb();
-                      });
+                  var rawData = [
+                    statusLine,
+                    getRawHeaders(formatHeaders(curHeaders, rawHeaderNames)),
+                    '\r\n'
+                  ].join('\r\n');
+                  try {
+                    if (code != 200) {
+                      reqSocket.end(rawData, cb);
                     } else {
-                      reqSocket.write(
-                        rawData,
-                        cb &&
-                          function () {
-                            setTimeout(cb, 16);
-                          }
-                      );
+                      if (tunnelAck) {
+                        reqSocket.write(rawData);
+                        reqSocket.once('data', function (chunk) {
+                          buf = chunk.length > 1 ? chunk.slice(1) : null;
+                          reqSocket.pause();
+                          cb();
+                        });
+                      } else {
+                        reqSocket.write(
+                          rawData,
+                          cb &&
+                            function () {
+                              setTimeout(cb, 16);
+                            }
+                        );
+                      }
                     }
+                  } catch (e) {
+                    reqSocket.emit('error', e);
                   }
                 }
                 if (reqEmitter) {

@@ -6,8 +6,7 @@ var base64Decode = jsBase64.decode;
 var base64Encode = jsBase64.encode;
 var toBase64 = jsBase64.toBase64;
 var json2 = require('./components/json');
-var evalJson = require('./components/json/eval');
-const events = require('./events');
+var events = require('./events');
 var isUtf8 = require('./is-utf8');
 var message = require('./message');
 var win = require('./win');
@@ -25,6 +24,7 @@ var ARR_FILED_RE = /(.)?(?:\[(\d+)\])$/;
 var LEVELS = ['fatal', 'error', 'warn', 'info', 'debug'];
 var MAX_CURL_BODY = 1024 * 72;
 var useCustomEditor = window.location.search.indexOf('useCustomEditor') !== -1;
+var JSON_RE = /^\s*(?:\{[\w\W]*\}|\[[\w\W]*\])\s*$/;
 var isJSONText;
 
 function replaceCrLf(char) {
@@ -37,6 +37,12 @@ function noop(_) {
 
 exports.noop = noop;
 
+function likeJson(str) {
+  return str && JSON_RE.test(str);
+}
+
+exports.likeJson = likeJson;
+
 function compare(v1, v2) {
   return v1 == v2 ? 0 : v1 > v2 ? -1 : 1;
 }
@@ -45,7 +51,7 @@ function comparePlugin(p1, p2) {
   return (
     compare(p1.priority, p2.priority) ||
     compare(p2.mtime, p1.mtime) ||
-    (p1._key > p2._key ? 1 : -1)
+    (p1._key > p2._key ? 1 : (p1._key == p2._key ? 0 : -1))
   );
 }
 
@@ -285,6 +291,16 @@ function getServerIp(modal) {
   }
   return modal.serverIp || ip;
 }
+
+function getCellValue(item, col) {
+  var name = col.name;
+  if (name === 'hostIp') {
+    return getServerIp(item);
+  }
+  return col.key ? getProperty(item, col.key) : item[name];
+}
+
+exports.getCellValue = getCellValue;
 
 exports.getServerIp = getServerIp;
 
@@ -588,8 +604,6 @@ var parseJ = function (str, resolve) {
   return typeof result === 'object' ? result : null;
 };
 
-exports.evalJson = evalJson;
-
 function parseJSON(str, resolve) {
   isJSONText = false;
   if (typeof str !== 'string' || !(str = str.trim())) {
@@ -607,9 +621,7 @@ function parseJSON(str, resolve) {
   }
   try {
     return parseJ(str, resolve);
-  } catch (e) {
-    return evalJson(str);
-  }
+  } catch (e) {}
 }
 
 exports.parseJSON = parseJSON;
@@ -1380,7 +1392,7 @@ function initData(data, isReq) {
   }
 }
 
-exports.getJson = function (data, isReq, decode) {
+function getJson(data, isReq, decode) {
   if (data[JSON_KEY] == null) {
     var body = getBody(data, isReq);
     body = body && resolveJSON(body, decode);
@@ -1397,6 +1409,13 @@ exports.getJson = function (data, isReq, decode) {
       : '';
   }
   return data[JSON_KEY];
+}
+
+exports.getJson = getJson;
+
+exports.getJsonStr = function(data, isReq, decode) {
+  var json = getJson(data, isReq, decode);
+  return json && json.str;
 };
 
 function getBody(data, isReq) {
@@ -1456,9 +1475,6 @@ function parseRawJson(str, quite) {
     }
     !quite && message.error('Error: not a json object.');
   } catch (e) {
-    if ((json = evalJson(str))) {
-      return json;
-    }
     !quite && message.error('Error: ' + e.message);
   }
 }
@@ -2367,4 +2383,50 @@ exports.getRawUrl = function (item) {
 
 exports.isGroup = function(name) {
   return name && name[0] === '\r';
+};
+
+function filterJson(obj, keyword, filterType) {
+  if (obj == null) {
+    return false;
+  }
+  var type = typeof obj;
+  var isKey = filterType === 1;
+  if (type === 'string' || type === 'number' || type === 'boolean') {
+    return !isKey && String(obj).toLowerCase().indexOf(keyword) !== -1;
+  }
+  if (type !== 'object') {
+    return false;
+  }
+  if (Array.isArray(obj)) {
+    for (var i = obj.length - 1; i >=0; i--) {
+      if (!filterJson(obj[i], keyword, filterType)) {
+        obj.splice(i, 1);
+      }
+    }
+    return obj.length;
+  }
+  Object.keys(obj).forEach(function(key) {
+    var isVal = filterType > 1;
+    var hasKey = !isVal && key.toLowerCase().indexOf(keyword) !== -1;
+    if (isKey && hasKey) {
+      return true;
+    }
+    if (!filterJson(obj[key], keyword, filterType) && !hasKey) {
+      delete obj[key];
+    }
+  });
+  return Object.keys(obj).length;
+}
+
+exports.filterJsonText = function(str, keyword, filterType) {
+  keyword = keyword.trim().toLowerCase();
+  var obj;
+  if (keyword) {
+    if (str.toLowerCase().indexOf(keyword) === -1) {
+      return {};
+    }
+    obj = JSON.parse(str);
+    filterJson(obj, keyword, filterType);
+  }
+  return obj;
 };

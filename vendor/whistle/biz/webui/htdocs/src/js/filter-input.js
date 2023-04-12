@@ -37,6 +37,11 @@ var FilterInput = React.createClass({
   componentDidMount: function () {
     this.hintElem = $(ReactDOM.findDOMNode(this.refs.hints));
   },
+  focus: function() {
+    var input = ReactDOM.findDOMNode(this.refs.input);
+    input.select();
+    input.focus();
+  },
   addHint: function () {
     var value = this.state.filterText;
     value = value && value.trim();
@@ -125,6 +130,7 @@ var FilterInput = React.createClass({
         elem = this.hintElem.find('li:last');
         elem.addClass('w-active');
       }
+      util.ensureVisible(elem, this.hintElem);
       e.preventDefault();
     } else if (e.keyCode === 40) {
       // down
@@ -141,6 +147,7 @@ var FilterInput = React.createClass({
         elem = this.hintElem.find('li:first');
         elem.addClass('w-active');
       }
+      util.ensureVisible(elem, this.hintElem);
       e.preventDefault();
     } else if (e.keyCode === 13) {
       elem = this.hintElem.find('.w-active');
@@ -226,7 +233,7 @@ var FilterInput = React.createClass({
           style={{ background: filterText.trim() ? '#000' : undefined }}
           className="w-filter-input"
           maxLength={MAX_LEN}
-          placeholder="Type filter text"
+          placeholder={'Type filter text' + (this.props.placeholder || '')}
         />
         <button
           onMouseDown={util.preventBlur}
