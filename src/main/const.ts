@@ -59,3 +59,14 @@ export const WINDOW_DEFAULT_WIDTH = 1100;
 export const WINDOW_DEFAULT_HEIGHT = 700;
 export const WINDOW_MIN_WIDTH = 640;
 export const WINDOW_MIN_HEIGHT = 375;
+
+
+export const BYPASS_DOMAINS = [
+    '*.lan',
+    '*.ali.com',
+    '*.hz.ali.com',
+    '*.symantacliveupdate.com',
+    '*.symantac.com',
+    'irmaagent.effirst.com:8080',
+    'in.appcenter.ms',
+];
