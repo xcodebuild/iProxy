@@ -80,7 +80,7 @@ var contextMenuList = [
   {
     name: 'Filter',
     list: [
-      { name: 'Edit' },
+      { name: 'Edit Settings' },
       { name: 'Exclude All Such Host', action: 'excludeHost' },
       { name: 'Exclude All Such URL', action: 'excludeUrl' }
     ]
@@ -91,7 +91,7 @@ var contextMenuList = [
       { name: 'Abort' },
       { name: 'Replay' },
       { name: 'Replay Times', action: 'replayTimes' },
-      { name: 'Compose' },
+      { name: 'Edit Request' },
       { name: 'Mark' },
       { name: 'Unmark' }
     ]
@@ -782,7 +782,7 @@ var ReqData = React.createClass({
       events.trigger('showTimeline');
       break;
     case 'Composer':
-    case 'Compose':
+    case 'Edit Request':
       events.trigger('composer', item);
       break;
     case 'Mark':
@@ -817,7 +817,7 @@ var ReqData = React.createClass({
     case 'Import':
       events.trigger('importSessions', e);
       break;
-    case 'Edit':
+    case 'Edit Settings':
       events.trigger('filterSessions', e);
       break;
     case 'removeAllSuchHost':
@@ -867,6 +867,7 @@ var ReqData = React.createClass({
         type: 'network',
         name: name,
         activeItem: item,
+        activeList: modal.getTreeLeafs(treeId),
         selectedList: self.props.modal.getSelectedList()
       });
       break;
@@ -927,11 +928,12 @@ var ReqData = React.createClass({
       list0[6].disabled =
         !item.res.base64 || (type !== 'HTML' && type !== 'IMG');
     }
-    list0[0].disabled = disabled;
-    list0[1].disabled = disabled;
+    list0[0].disabled = clickBlank;
+    list0[1].disabled = clickBlank;
     list0[2].disabled = disabled;
     list0[3].disabled = disabled;
-    list0[5].disabled = clickBlank;
+    list0[4].disabled = disabled;
+    list0[5].disabled = disabled;
     list0[7].disabled = disabled;
     if (modal.isTreeView) {
       list0[8].name = 'List View';
@@ -1078,13 +1080,14 @@ var ReqData = React.createClass({
     var mockItem = contextMenuList[6];
     mockItem.disabled = disabled;
     mockItem.hide = dataCenter.hideMockMenu;
+    contextMenuList[8].disabled = clickBlank && !selectedCount;
     var pluginItem = contextMenuList[9];
-    pluginItem.disabled = disabled && !selectedCount;
     util.addPluginMenus(
       pluginItem,
       dataCenter.getNetworkMenus(),
       treeItem.hide ? 8 : 9,
-      disabled
+      disabled,
+      treeId
     );
     var height = (treeItem.hide ? 310 : 340) - (pluginItem.hide ? 30 : 0) - (mockItem.hide ? 30 : 0);
     pluginItem.maxHeight = height;

@@ -134,8 +134,8 @@ program
   .option('-F, --frameCacheSize [frameCacheSize]', 'set the cache size of webSocket and socket\'s frames (512 by default)', String, undefined)
   .option('-A, --addon [pluginPaths]', 'add custom plugin paths', String, undefined)
   .option('--init [bypass]', 'auto set global proxy (and bypass) and install root CA')
-  .option('--config [workers]', 'start the cluster server and set worker number (os.cpus().length by default)', String, undefined)
-  .option('--cluster [config]', 'load the startup config from a local file', String, undefined)
+  .option('--cluster [workers]', 'start the cluster server and set worker number (os.cpus().length by default)', String, undefined)
+  .option('--config [config]', 'load the startup config from a local file', String, undefined)
   .option('--dnsServer [dnsServer]', 'set custom dns servers', String, undefined)
   .option('--socksPort [socksPort]', 'set the socksv5 server port', String, undefined)
   .option('--httpPort [httpPort]', 'set the http server port', String, undefined)
@@ -179,6 +179,16 @@ if (cmd === 'status') {
   if (force) {
     argv.splice(index, 1);
   }
+  index = argv.indexOf('-c');
+  var isClient = index !== -1;
+  if (isClient) {
+    argv.splice(index, 1);
+  }
+  index = argv.indexOf('--client');
+  if (index !== -1) {
+    isClient = true;
+    argv.splice(index, 1);
+  }
   var filepath = argv[3];
   if (filepath === '-S') {
     filepath = null;
@@ -189,7 +199,7 @@ if (cmd === 'status') {
   if (filepath && /^-/.test(filepath)) {
     filepath = null;
   }
-  useRules(filepath, storage, force);
+  useRules(filepath, storage, force, isClient);
 } else if ((cmd === 'run' || cmd === 'exec') && argv[3] && /^[^-]/.test(argv[3])) {
   cmd = argv[3];
   argv = Array.prototype.slice.call(argv, 4);

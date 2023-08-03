@@ -26,6 +26,8 @@ var curServerInfo;
 var initialDataPromise, initialData, startedLoad;
 var lastPageLogTime = -2;
 var lastSvrLogTime = -2;
+var curLogId;
+var curSvrLogId;
 var dataIndex = 1000000;
 var MAX_PATH_LENGTH = 1024;
 var MAX_LOG_LENGTH = 250;
@@ -443,7 +445,9 @@ exports.plugins = createCgiObj(
   {
     disablePlugin: 'cgi-bin/plugins/disable-plugin',
     disableAllPlugins: 'cgi-bin/plugins/disable-all-plugins',
-    getRegistryList: 'cgi-bin/plugins/registry-list'
+    getRegistryList: 'cgi-bin/plugins/registry-list',
+    installPlugins: 'cgi-bin/plugins/install',
+    uninstallPlugins: 'cgi-bin/plugins/uninstall'
   },
   POST_CONF
 );
@@ -533,7 +537,8 @@ $.extend(
       addRulesAndValues: {
         url: 'cgi-bin/add-rules-values',
         contentType: 'application/json'
-      }
+      },
+      setIPv6Only: 'cgi-bin/set-ipv6-only'
     },
     POST_CONF
   )
@@ -615,6 +620,7 @@ exports.getInitialData = function (callback) {
         port = server && server.port;
         account = server && server.account;
         updateCertStatus(data);
+        exports.enablePluginMgr = data.epm;
         exports.supportH2 = data.supportH2;
         exports.backRulesFirst = data.rules.backRulesFirst;
         exports.custom1 = data.custom1;
@@ -631,6 +637,8 @@ exports.getInitialData = function (callback) {
         if (data.lastSvrLogId) {
           lastSvrLogTime = data.lastSvrLogId;
         }
+        curLogId = data.curLogId;
+        curSvrLogId = data.curSvrLogId;
         if (data.lastDataId) {
           lastRowId = data.lastDataId;
         }
@@ -780,13 +788,15 @@ function startLoadData() {
         tunnelIds.push(item.id);
       }
     });
-
+    var clearedLogs = exports.clearedLogs;
+    var clearedSvrLogs = exports.clearedSvrLogs;
+    exports.clearedLogs = exports.clearedSvrLogs = false;
     if (!exports.pauseConsoleRefresh && len < MAX_LOG_LENGTH) {
-      startLogTime = lastPageLogTime;
+      startLogTime = (clearedLogs && curLogId) || lastPageLogTime;
     }
 
     if (!exports.pauseServerLogRefresh && svrLen < MAX_LOG_LENGTH) {
-      startSvrLogTime = lastSvrLogTime;
+      startSvrLogTime =  (clearedSvrLogs && curSvrLogId) || lastSvrLogTime;
     }
 
     var curActiveItem = networkModal.getActive();
@@ -831,6 +841,7 @@ function startLoadData() {
       port = server && server.port;
       account = server && server.account;
       updateCertStatus(data);
+      exports.enablePluginMgr = data.epm;
       exports.supportH2 = data.supportH2;
       exports.backRulesFirst = data.backRulesFirst;
       exports.custom1 = data.custom1;

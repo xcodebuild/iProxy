@@ -1,3 +1,49 @@
+
+# v2.9.56
+1. feat: 支持通过 `Online / IPv6-only network` 强制 dns 获取 ipv6（命令行版本还可以通过 `-M ipv6Only` 开启）
+2. feat: `w2 add` 命令支持 `type: module`
+# v2.9.55
+1. feat: 显示 `captureError`，且可以通过插件获取到这类型错误的抓包数据
+2. fix: 完善 `refreshPlugins` 方法（内部方法）
+
+# v2.9.54
+1. fix: 修复 Dark Mode 模式下图片显示问题
+2. fix: JSON 过滤搜索时保留数组的 index
+
+# v2.9.53
+1. feat: 支持通过 `enable://forHttp|forHttps` 设置 `enable://capture` 只对 http 或 https 生效
+2. feat: 支持通过请求参数设置登录态
+3. feat: 支持 `Dark Mode`，且可以通过界面 `Online -> 打开对话框 -> Disable dark mode` 关闭自动切换 `Dark Mode`
+
+# v2.9.52
+1. feat: 跨域请求本地替换自动设置 cors，可以通过 `disable://autoCors` 或 `lineProps://disableAutoCors` 关闭
+
+# v2.9.51
+1. fix: https://github.com/avwo/whistle/issues/912
+# v2.9.50
+1. fix: Node 20.1.0 版本 `http.request` 只支持通过 `options.search` 设置参数问题
+2. feat: 支持通过 `--uiport "127.0.0.1:8080"` 限制 WebUI 只能通过指定网卡和端口访问
+
+# v2.9.49
+1. fix: `headerReplace://req.host:pattern=value` 无效问题
+2. feat: 插件添加 `sharedStorage` 方便插件在不同实例中共享存储数据
+3. style: https://github.com/avwo/whistle/pull/898
+
+# v2.9.48
+1. feat: 插件扩展的右键菜单和 Tab 添加 `exportSessions(sessions, type, name)` 方法
+2. feat: 插件 server 的 options 添加 `generateSaz(sessions): Buffer` 和 `extract(saz: Buffer, cb(sessions))` 方法
+3. refactor: 兼容 saz 的 comment，需要配合插件使用：https://github.com/whistle-plugins/whistle.comment.git
+4. fix: 修复访问 socks 代理可能出现 pending 的问题
+5. style: 界面优化
+
+# v2.9.47
+1. refactor: 解决安装时依赖包安全警告问题
+2. feat: 支持自定义右键菜单获取树结点下的所有抓包数据
+
+# v2.9.46
+1. feat: 扩展 Tab 支持 `copyText` 方法
+2. feat: `tpl` 协议支持模板字符串语法
+
 # v2.9.45
 1. feat: 插件界面提供 `copyText` 方法
 2. feat: 支持 `lineProps://strictHtml` 和 `lineProsy://safeHtml` 只对当前行的规则生效

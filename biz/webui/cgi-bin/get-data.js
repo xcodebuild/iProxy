@@ -20,9 +20,12 @@ module.exports = function(req, res) {
   var stopRecordConsole = data.startLogTime == -3;
   var stopRecordSvrLog = data.startSvrLogTime == -3;
   var h = req.headers;
+  var curLogId = proxy.getLatestId();
+  var curSvrLogId = logger.getLatestId();
   util.sendGzip(req, res, {
     ec: 0,
     version: config.version,
+    epm: config.epm,
     custom1: properties.get('Custom1'),
     custom2: properties.get('Custom2'),
     custom1Key: properties.get('Custom1Key'),
@@ -36,8 +39,10 @@ module.exports = function(req, res) {
     mvaluesTime: config.mvaluesTime,
     server: util.getServerInfo(req),
     hasARules: rulesUtil.hasAccountRules ? 1 : undefined,
-    lastLogId: stopRecordConsole ? proxy.getLatestId() : undefined,
-    lastSvrLogId: stopRecordSvrLog ? logger.getLatestId() : undefined,
+    curLogId: stopRecordConsole ? undefined : curLogId,
+    curSvrLogId: stopRecordSvrLog ? undefined : curSvrLogId,
+    lastLogId: stopRecordConsole ? curLogId : undefined,
+    lastSvrLogId: stopRecordSvrLog ? curSvrLogId : undefined,
     log: stopRecordConsole ? [] : proxy.getLogs(data.startLogTime, data.count, data.logId),
     svrLog: stopRecordSvrLog ? [] : logger.getLogs(data.startSvrLogTime, data.count),
     plugins: pluginMgr.getPlugins(),

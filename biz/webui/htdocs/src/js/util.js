@@ -23,7 +23,8 @@ var INDEX_RE = /^\[(\d+)\]$/;
 var ARR_FILED_RE = /(.)?(?:\[(\d+)\])$/;
 var LEVELS = ['fatal', 'error', 'warn', 'info', 'debug'];
 var MAX_CURL_BODY = 1024 * 72;
-var useCustomEditor = window.location.search.indexOf('useCustomEditor') !== -1;
+var search = (window.location.search || '').substring(1);
+var useCustomEditor = search.indexOf('useCustomEditor') !== -1;
 var JSON_RE = /^\s*(?:\{[\w\W]*\}|\[[\w\W]*\])\s*$/;
 var isJSONText;
 
@@ -36,6 +37,13 @@ function noop(_) {
 }
 
 exports.noop = noop;
+
+exports.getQuery = function() {
+  if (typeof search === 'string') {
+    search = parseQueryString(search);
+  }
+  return search;
+};
 
 function likeJson(str) {
   return str && JSON_RE.test(str);
@@ -1684,7 +1692,7 @@ exports.readFileAsText = function (file, callback) {
   return readFile(file, callback, 'text');
 };
 
-exports.addPluginMenus = function (item, list, maxTop, disabled) {
+exports.addPluginMenus = function (item, list, maxTop, disabled, treeId) {
   var pluginsList = (item.list = list);
   var count = pluginsList.length;
   if (count) {
@@ -1692,9 +1700,10 @@ exports.addPluginMenus = function (item, list, maxTop, disabled) {
     var disabledOthers = disabled;
     for (var j = 0; j < count; j++) {
       var plugin = pluginsList[j];
-      if (plugin.required) {
-        plugin.disabled = disabled;
-        if (!disabled) {
+      if (plugin.required || plugin.requiredTreeNode) {
+        var disd = disabled && (!plugin.requiredTreeNode || !treeId);
+        plugin.disabled = disd;
+        if (!disd) {
           disabledOthers = false;
         }
       } else {
@@ -2297,12 +2306,17 @@ exports.toHar = function (item) {
   return {
     startedDateTime: new Date(item.startTime).toISOString(),
     time: time,
+    whistleCustomData: item.customData,
     whistleRules: item.rules,
     whistleFwdHost: item.fwdHost,
     whistleSniPlugin: item.sniPlugin,
     whistleVersion: item.version,
     whistleNodeVersion: item.nodeVersion,
     whistleRealUrl: item.realUrl,
+    whistleCaptureError: item.captureError,
+    whistleReqError: item.reqError,
+    whistleIsHttps: item.isHttps,
+    whistleResError: item.resError,
     whistleTimes: {
       startTime: item.startTime,
       dnsTime: item.dnsTime,
@@ -2391,6 +2405,7 @@ function filterJson(obj, keyword, filterType) {
   }
   var type = typeof obj;
   var isKey = filterType === 1;
+  var isVal = filterType > 1;
   if (type === 'string' || type === 'number' || type === 'boolean') {
     return !isKey && String(obj).toLowerCase().indexOf(keyword) !== -1;
   }
@@ -2398,15 +2413,18 @@ function filterJson(obj, keyword, filterType) {
     return false;
   }
   if (Array.isArray(obj)) {
+    var idx = [];
     for (var i = obj.length - 1; i >=0; i--) {
-      if (!filterJson(obj[i], keyword, filterType)) {
+      if ((isVal || (i + '').indexOf(keyword) === -1) && !filterJson(obj[i], keyword, filterType)) {
         obj.splice(i, 1);
+      } else {
+        idx.push(i);
       }
     }
+    obj._idx = idx.reverse();
     return obj.length;
   }
   Object.keys(obj).forEach(function(key) {
-    var isVal = filterType > 1;
     var hasKey = !isVal && key.toLowerCase().indexOf(keyword) !== -1;
     if (isKey && hasKey) {
       return true;

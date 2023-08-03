@@ -4,7 +4,6 @@ var path = require('path');
 var url = require('url');
 var http = require('http');
 var https = require('https');
-var getAuth = require('basic-auth');
 var parseurl = require('parseurl');
 var bodyParser = require('body-parser');
 var crypto = require('crypto');
@@ -18,6 +17,7 @@ var setProxy = require('./proxy');
 var rulesUtil = require('../../../lib/rules/util');
 var getRootCAFile = require('../../../lib/https/ca').getRootCAFile;
 var config = require('../../../lib/config');
+var parseAuth = require('../../../lib/util/common').parseAuth;
 var getWorker = require('../../../lib/plugins/util').getWorker;
 var loadAuthPlugins = require('../../../lib/plugins').loadAuthPlugins;
 
@@ -30,6 +30,7 @@ var uploadJsonParser = bodyParser.json(UPLOAD_PARSE_CONF);
 var GET_METHOD_RE = /^get$/i;
 var WEINRE_RE = /^\/weinre\/.*/;
 var ALLOW_PLUGIN_PATHS = ['/cgi-bin/rules/list2', '/cgi-bin/values/list2', '/cgi-bin/get-custom-certs-info'];
+var SPECIAL_PATHS = ['/cgi-bin/rules/project'];
 var DONT_CHECK_PATHS = ['/cgi-bin/server-info', '/cgi-bin/plugins/is-enable', '/cgi-bin/plugins/get-plugins',
   '/preview.html', '/cgi-bin/rootca', '/cgi-bin/log/set', '/cgi-bin/status'];
 var GUEST_PATHS = ['/cgi-bin/composer', '/cgi-bin/socket/data', '/cgi-bin/abort', '/cgi-bin/socket/abort',
@@ -75,10 +76,20 @@ function getLoginKey (req, res, auth) {
   return shasum([auth.username, password, ip].join('\n'));
 }
 
-function requireLogin(res, msg) {
+function requireLogin(req, res, msg) {
+  if (config.client) {
+    if (config.handleWebReq) {
+      return config.handleWebReq(req, res);
+    }
+    return res.status(404).end();
+  }
   res.setHeader('WWW-Authenticate', ' Basic realm=User Login');
   res.setHeader('Content-Type', 'text/html; charset=utf8');
   res.status(401).end(msg || 'Access denied, please <a href="javascript:;" onclick="location.reload()">try again</a>.');
+}
+
+function equalAuth(auth, src) {
+  return auth.name === src.username && auth.pass === src.password;
 }
 
 function verifyLogin(req, res, auth) {
@@ -105,14 +116,13 @@ function verifyLogin(req, res, auth) {
   if (correctKey === lkey) {
     return true;
   }
-  if (req.query.authorization && !req.headers.authorization) {
-    req.headers.authorization = 'Basic ' + req.query.authorization;
-  }
-  auth = getAuth(req) || {};
+  var headerAuth = parseAuth(req.headers.authorization);
+  var queryAuth = parseAuth(req.query.authorization);
   if (!isGuest && config.encrypted) {
-    auth.pass = shasum(auth.pass);
+    headerAuth.pass = headerAuth.pass && shasum(headerAuth.pass);
+    queryAuth.pass = queryAuth.pass && shasum(queryAuth.pass);
   }
-  if (auth.name === username && auth.pass === password) {
+  if (equalAuth(headerAuth, auth) || equalAuth(queryAuth, auth)) {
     var options = {
       expires: new Date(Date.now() + (MAX_AGE * 1000)),
       maxAge: MAX_AGE,
@@ -133,7 +143,11 @@ function checkAuth(req, res) {
   if (verifyLogin(req, res, auth)) {
     return true;
   }
-  requireLogin(res);
+  if (config.specialAuth && SPECIAL_PATHS.indexOf(req.path) !== -1 &&
+    config.specialAuth === req.headers['x-whistle-special-auth']) {
+    return true;
+  }
+  requireLogin(req, res);
   return false;
 }
 
@@ -186,7 +200,7 @@ app.use(function(req, res, next) {
       return res.redirect(status);
     }
     if (status === 401) {
-      return requireLogin(res, msg);
+      return requireLogin(req, res, msg);
     }
     res.set('Content-Type', 'text/html; charset=utf8');
     if (authUrl) {
