@@ -229,6 +229,22 @@ proto.getList = function () {
   return this._list || this.list;
 };
 
+proto.getTreeLeafs = function(treeId) {
+  if (!treeId) {
+    return;
+  }
+  var isTunnel = !treeId.indexOf('tunnel://');
+  if (isTunnel) {
+    treeId = treeId.substring(9);
+  } else {
+    treeId += '/';
+  }
+  var result = this.list.filter(function (item) {
+    return isTunnel ? item.url === treeId : !item.url.indexOf(treeId);
+  });
+  return result.length ? result : undefined;
+};
+
 function toStr(val) {
   if (val == null) {
     return '';

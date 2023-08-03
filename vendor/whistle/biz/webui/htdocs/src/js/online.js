@@ -9,8 +9,19 @@ var Dialog = require('./dialog');
 var dataCenter = require('./data-center');
 var util = require('./util');
 var DNSDialog = require('./dns-servers-dialog');
+var storage = require('./storage');
 
 var dialog;
+var disabledDarkMode = storage.get('disabledDarkMode');
+disabledDarkMode = !!disabledDarkMode || (disabledDarkMode == null && util.getQuery().mode !== 'client');
+
+function setDiableDarkMode(flag) {
+  disabledDarkMode = flag;
+  try {
+    document.documentElement.className = flag ? '' : 'w-allow-dark-mode';
+  } catch (e) {}
+}
+setDiableDarkMode(disabledDarkMode);
 
 function createDialog() {
   if (!dialog) {
@@ -33,6 +44,8 @@ function createDialog() {
         '<div class="w-online-dialog-info">' +
         proxyInfoList.join('') +
         '</div>' +
+        '<label class="w-online-option w-dark-mode-option"><input type="checkbox" /> <span>Disable dark mode</span></label>' +
+        '<label class="w-online-option w-ipv6-option"><input type="checkbox" /> <span>IPv6-only network</span></label>' +
         '<a class="w-online-view-dns">View custom DNS servers</a>' +
         '</div>' +
         '<div class="modal-footer">' +
@@ -42,6 +55,13 @@ function createDialog() {
         '</div>' +
         '</div>'
     ).appendTo(document.body);
+    var box = dialog.find('.w-dark-mode-option input');
+    box.on('change', function(e) {
+      const checked = e.target.checked;
+      setDiableDarkMode(checked);
+      storage.set('disabledDarkMode', checked ? 1 : '');
+    });
+    box.prop('checked', disabledDarkMode);
   }
 
   return dialog;
@@ -109,6 +129,15 @@ var Online = React.createClass({
     this.updateServerInfo(this.state.server);
     dialog.modal('show');
   },
+  setIPv6Only: function(ipv6Only) {
+    ipv6Only = !!ipv6Only;
+    this.ipv6Only = !!this.ipv6Only;
+    if (this.ipv6Only !== ipv6Only) {
+      this.ipv6Only = ipv6Only;
+      dialog.find('.w-ipv6-option input').prop('checked', ipv6Only);
+      this.setState({});
+    }
+  },
   updateServerInfo: function (server) {
     if (!server) {
       return;
@@ -160,6 +189,7 @@ var Online = React.createClass({
     }
     var ctn = createDialog().find('.w-online-dialog-ctn').html(info.join(''));
     ctn.find('h5:first').attr('title', server.host);
+    this.setIPv6Only(server.ipv6Only);
     if (!this._initProxyInfo) {
       this._initProxyInfo = true;
       var curServerInfo;
@@ -167,6 +197,7 @@ var Online = React.createClass({
       var dnsElem = dialog.find('.w-online-view-dns');
       var hideDns = true;
       var self = this;
+
       dnsElem.on('click', function () {
         self.refs.dnsDialog.show(dataCenter.getServerInfo());
       });
@@ -188,6 +219,7 @@ var Online = React.createClass({
         var info = dataCenter.getServerInfo();
         var pInfo = info && info.pInfo;
         toggleDns(info);
+        info && self.setIPv6Only(info.ipv6Only);
         if (!pInfo) {
           if (isHide) {
             isHide = true;
@@ -358,6 +390,25 @@ var Online = React.createClass({
         }
         curServerInfo = info;
       }, 1000);
+      var pending;
+      dialog.find('.w-ipv6-option input').on('change', function(e) {
+        if (pending) {
+          return;
+        }
+        pending = true;
+        var checked = e.target.checked;
+        e.target.checked = !checked;
+        dataCenter.setIPv6Only({ checked: checked ? 1 : '' }, function(data, xhr) {
+          if (!data) {
+            util.showSystemError(xhr);
+            return;
+          }
+          setTimeout(function() {
+            pending = false;
+            self.setIPv6Only(data.ipv6Only);
+          }, 300);
+        });
+      });
     }
   },
   reload: function () {
@@ -436,7 +487,7 @@ var Online = React.createClass({
     ReactDOM.findDOMNode(this.refs.onlineMenu).title = this.getTitle(server);
   },
   render: function () {
-    var server = this.state.server;
+    var server = this.state.server || '';
     return (
       <a
         ref="onlineMenu"
@@ -447,9 +498,9 @@ var Online = React.createClass({
       >
         <span className="glyphicon glyphicon-stats"></span>
         {server ? 'Online' : 'Offline'}
-        {server && server.dns ? (
-          <span>{server.doh ? '(DOH)' : server.r6 ? '(IPv6)' : '(IPv4)'}</span>
-        ) : null}
+        {server.dns ? (
+          <span>{server.doh ? '(DoH)' : server.r6 ? '(IPv6)' : '(IPv4)'}</span>
+        ) : (this.ipv6Only ? '(IPv6)' : null)}
         <Dialog
           ref="confirmReload"
           wstyle="w-confirm-reload-dialog w-confirm-reload-global"

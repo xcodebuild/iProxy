@@ -75,6 +75,11 @@ function parseMetaInfo(result) {
   if (clientPort) {
     req.port = clientPort;
   }
+  var comment = meta['ui-comments'];
+  if (comment && typeof comment === 'string') {
+    result.customData = result.customData || {};
+    result.customData.comment = comment;
+  }
   var size = meta['x-transfer-size'] || meta['x-responsebodytransferlength'];
   if (typeof size === 'string') {
     size = parseInt(size.replace(/\s*,\s*/g, ''), 10);
@@ -220,6 +225,15 @@ module.exports = function (buffer, cb) {
           if (data.mark) {
             result.mark = true;
           }
+          if (data.captureError) {
+            result.captureError = true;
+          }
+          if (data.reqError) {
+            result.reqError = true;
+          }
+          if (data.resError) {
+            result.resError = true;
+          }
           var times = data.times;
           if (times) {
             result.startTime = times.startTime;
@@ -235,6 +249,9 @@ module.exports = function (buffer, cb) {
           }
           if (data.nodeVersion) {
             result.nodeVersion = data.nodeVersion;
+          }
+          if (data.customData) {
+            result.customData = data.customData;
           }
         }
         execCallback();

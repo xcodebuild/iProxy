@@ -65,3 +65,12 @@
   font-size: 13px;
   font-weight: normal;
 }
+
+.w-online-option {
+  font-weight: normal!important;
+  display: block;
+}
+
+.w-online-option input, .w-online-option span {
+  vertical-align: middle;
+}

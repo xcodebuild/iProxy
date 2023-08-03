@@ -68,6 +68,7 @@ var resetContext = function () {
   ctxTimer = null;
   CONTEXT = vm.createContext();
 };
+var TIMEOUT_ERR = new Error('Timeout');
 var SUB_MATCH_RE = /\$[&\d]/;
 var HTTP_URL_RE = /^https?:\/\//;
 var PROTO_NAME_RE = /^([\w.-]+):\/\//;
@@ -133,6 +134,7 @@ var pluginMgr;
 
 workerIndex = workerIndex >= 0 ? padReqId(config.workerIndex) : '';
 
+exports.TIMEOUT_ERR = TIMEOUT_ERR;
 exports.encodeHtml = encodeHtml;
 exports.hasProtocol = hasProtocol;
 exports.removeProtocol = removeProtocol;
@@ -2290,10 +2292,10 @@ function parseHeaderReplace(rule) {
     obj &&
       Object.keys(obj).forEach(function (key) {
         var value = obj[key];
-        if (!key.indexOf('req.')) {
+        if (!key.indexOf('req.') || !key.indexOf('reqH.')) {
           prop = 'req';
           name = null;
-        } else if (!key.indexOf('res.')) {
+        } else if (!key.indexOf('res.') || !key.indexOf('resH.')) {
           prop = 'res';
           name = null;
         } else if (!key.indexOf('trailer.')) {
@@ -2304,7 +2306,7 @@ function parseHeaderReplace(rule) {
         }
         result = result || {};
         var index = key.indexOf(':');
-        name = name || key.substring(prop.length + 1, index).trim();
+        name = name || key.substring(key.indexOf('.') + 1, index).trim();
         if (!name) {
           return;
         }
@@ -2501,7 +2503,8 @@ exports.getPluginMenu = function (menus, pluginName) {
       result.push({
         name: name.substring(0, 20),
         action: 'plugin.' + pluginName + '/' + page,
-        required: menu.required ? true : undefined
+        required: menu.required ? true : undefined,
+        requiredTreeNode: menu.requiredTreeNode ? true : undefined
       });
       if (--count === 0) {
         return result;
@@ -2659,32 +2662,14 @@ function padReqId(num) {
   return '00' + num;
 }
 
-exports.getReqId = function () {
+exports.getReqId = function (now) {
   if (index > 999) {
     index = 0;
   }
-  return Date.now() + '-' + padReqId(index++) + workerIndex;
+  return (now || Date.now()) + '-' + padReqId(index++) + workerIndex;
 };
 
-function onSocketEnd(socket, callback) {
-  var execCallback = function (err) {
-    socket._hasError = true;
-    if (callback) {
-      callback(err);
-      callback = null;
-    }
-  };
-  if (socket.aborted || socket.destroyed || socket._hasError) {
-    return execCallback();
-  }
-  socket.on('error', execCallback);
-  socket.once('close', execCallback);
-  socket.once('end', execCallback);
-  socket.once('timeout', execCallback);
-}
-
-exports.onSocketEnd = onSocketEnd;
-
+exports.onSocketEnd = common.onSocketEnd;
 exports.onResEnd = common.onResEnd;
 
 exports.getEmptyRes = function getRes() {
@@ -3381,7 +3366,7 @@ exports.connect = function (options, callback) {
     });
   };
   var handleTimeout = function () {
-    handleError(new Error('Timeout'));
+    handleError(TIMEOUT_ERR);
   };
   var sockMgr = options.ALPNProtocols ? tls : net;
   timer = setTimeout(handleTimeout, 6000);

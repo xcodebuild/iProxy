@@ -5,6 +5,7 @@ var mime = require('mime');
 var qs = require('querystring');
 var Buffer = require('safe-buffer').Buffer;
 var PassThrough = require('stream').PassThrough;
+var rulesMgr = require('../rules');
 var protoMgr = require('../rules/protocols');
 var pluginMgr = require('../plugins');
 
@@ -13,6 +14,10 @@ var RAW_FILE_RE = /rawfile/;
 var HEADERS_SEP_RE = /(\r?\n(?:\r\n|\r|\n)|\r\r\n?)/;
 var MAX_HEADERS_SIZE = 256 * 1024;
 var TPL_RE = /(?:dust|tpl|jsonp):$/;
+var VAR_RE = /\{\S+\}/;
+var QUERY_VAR_RE = /\$?(?:\{\{([\w$-]+)\}\}|\{([\w$-]+)\})/g;
+var UTF8_OPTIONS = { encoding: 'utf8' };
+var ENABLE_OPTIONS = { enable: true };
 
 function isRawFileProtocol(protocol) {
   return RAW_FILE_RE.test(protocol);
@@ -157,7 +162,17 @@ function addRangeHeaders(res, range, size) {
   res.statusCode = 206;
 }
 
-function sendResponse(rule, res, reader) {
+function isAutoCors(req, rule) {
+  if (rule.lineProps.disableAutoCors || rule.lineProps.disabledAutoCors) {
+    return false;
+  }
+  return !req.disable.autoCors && req.headers.origin;
+}
+
+function sendResponse(rule, res, reader, req) {
+  if (isAutoCors(req, rule)) {
+    util.setResCors(reader, ENABLE_OPTIONS, req);
+  }
   rule.isLoc = 1;
   res.response(reader);
 }
@@ -169,13 +184,18 @@ module.exports = function (req, res, next) {
   if (!protoMgr.isFileProxy(protocol)) {
     return next();
   }
+  var rules = req.rules;
+  var rule = rules.rule;
+  if (isAutoCors(req, rule) && req.method === 'OPTIONS') {
+    var optsRes = util.wrapResponse({ statusCode: 200  });
+    optsRes.realUrl = rule.matcher;
+    return sendResponse(rule, res, optsRes, req);
+  }
   var isTpl = TPL_RE.test(protocol);
   var defaultType = mime.lookup(
     req.fullUrl.replace(/[?#].*$/, ''),
     'text/html'
   );
-  var rules = req.rules;
-  var rule = rules.rule;
   delete rules.proxy;
   delete rules.host;
   if (rule.value) {
@@ -210,7 +230,7 @@ module.exports = function (req, res, next) {
       }
       reader = util.wrapResponse(reader);
       reader.realUrl = rule.matcher;
-      sendResponse(rule, res, reader);
+      sendResponse(rule, res, reader, req);
     }
     return;
   }
@@ -233,7 +253,7 @@ module.exports = function (req, res, next) {
           }
         });
         notFound.realUrl = rule.matcher;
-        sendResponse(rule, res, notFound);
+        sendResponse(rule, res, notFound, req);
       }
       return;
     }
@@ -253,7 +273,7 @@ module.exports = function (req, res, next) {
         reader.body = buffer + '';
         render(reader);
       } else {
-        fs.readFile(path, { encoding: 'utf8' }, function (err, data) {
+        fs.readFile(path, UTF8_OPTIONS, function (err, data) {
           if (err) {
             return util.emitError(req, err);
           }
@@ -274,7 +294,7 @@ module.exports = function (req, res, next) {
           reader.headers = reader.headers || headers;
           addRangeHeaders(reader, range, size);
           !range && addLength(reader, realSize);
-          sendResponse(rule, res, reader);
+          sendResponse(rule, res, reader, req);
         },
         buffer
       );
@@ -283,18 +303,20 @@ module.exports = function (req, res, next) {
 
   function render(reader) {
     if (reader.body) {
-      var data = qs.parse(util.getQueryString(req.fullUrl));
-      if (Object.keys(data).length) {
-        reader.body = reader.body.replace(
-          /\{\{([\w\-$]+)\}\}|\$?\{([\w\-$]+)\}/g,
-          function (all, matched1, matched2) {
-            var value = data[matched1 || matched2];
-            if (value === undefined) {
+      if (VAR_RE.test(reader.body)) {
+        var data = util.getQueryString(req.fullUrl);
+        data = data && qs.parse(data);
+        if (data) {
+          reader.body = reader.body.replace(QUERY_VAR_RE, function (all, matched1, matched2) {
+            if (all[0] === '$') {
               return all;
             }
-            return util.getQueryValue(value);
+            var value = data[matched1 || matched2];
+            return value === undefined ? all : util.getQueryValue(value);
           }
-        );
+          );
+        }
+        reader.body = rulesMgr.resolveTplVar(reader.body, req);
       }
       addLength(reader, Buffer.byteLength(reader.body));
     } else {
@@ -303,6 +325,6 @@ module.exports = function (req, res, next) {
     var realUrl = reader.realUrl;
     reader = util.wrapResponse(reader);
     reader.realUrl = realUrl;
-    sendResponse(rule, res, reader);
+    sendResponse(rule, res, reader, req);
   }
 };

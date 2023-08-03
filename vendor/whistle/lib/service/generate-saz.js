@@ -1,11 +1,19 @@
 var fs = require('fs');
 var path = require('path');
-var Zip = require('node-native-zip2');
+var AdmZip = require('adm-zip');
 var Buffer = require('safe-buffer').Buffer;
 var util = require('./util');
 
 var fiddlerAssets = path.join(__dirname, '../../assets/fiddler/');
 var fiddlerMeta = fs.readFileSync(fiddlerAssets + 'meta.xml', 'utf8');
+var SPEC_XML_RE = /[<>&"']/g;
+var specMap = {
+  '<': '&lt;',
+  '>': '&gt;',
+  '&': '&amp;',
+  '\'': '&apos;',
+  '"': '&quot;'
+};
 
 function filterSessions(sessions) {
   return sessions.filter(function (item) {
@@ -22,6 +30,15 @@ function renderTpl(tpl, locals) {
     tpl = tpl.replace('${' + name + '}', locals[name]);
   });
   return tpl;
+}
+
+function escapeXml(str) {
+  if (!str || typeof str !== 'string') {
+    return '';
+  }
+  return str.replace(SPEC_XML_RE, function(char) {
+    return specMap[char] || char;
+  });
 }
 
 function getMetaData(item) {
@@ -47,6 +64,8 @@ function getMetaData(item) {
   ) {
     meta[name] = 0;
   });
+  var comment = item.customData && item.customData.comment;
+  meta['ui-comments'] = escapeXml(comment);
 
   meta.ClientConnected = util.toISOString(item.startTime);
   if (item.dnsTime >= item.startTime) {
@@ -77,7 +96,7 @@ function getMetaData(item) {
     meta['transfer-size'] = res.size;
   }
   meta.clientip = req.ip || '127.0.0.1';
-  meta.hostip = res.ip || '127.0.0.1';
+  meta.hostip = res.ip || '';
   meta.clientport = req.port || 0;
   meta.serverport = res.port || 0;
   return meta;
@@ -87,10 +106,13 @@ function getFiddler2Meta(item) {
   return renderTpl(fiddlerMeta, item);
 }
 
-module.exports = function (body) {
-  var sessions = util.parseJSON(body.sessions);
+module.exports = function (body, callback) {
+  var sessions = body;
   if (!Array.isArray(sessions)) {
-    return '';
+    sessions = util.parseJSON(body.sessions);
+    if (!Array.isArray(sessions)) {
+      return '';
+    }
   }
   sessions = filterSessions(sessions);
   var index = 0;
@@ -103,7 +125,7 @@ module.exports = function (body) {
       : new Array(paddingCount + 1).join('0') + name;
   };
 
-  var zip = new Zip();
+  var zip = new AdmZip();
   sessions.map(function (item, index) {
     item.req.url = item.url;
     var req = util.getReqRaw(item.req);
@@ -113,15 +135,16 @@ module.exports = function (body) {
         : util.getResRaw(item.res);
     var name = getName();
     item.index = index;
-    zip.add('raw/' + name + '_c.txt', req);
-    zip.add('raw/' + name + '_m.xml', Buffer.from(getFiddler2Meta(item)));
-    zip.add('raw/' + name + '_s.txt', res);
-    zip.add(
+    zip.addFile('raw/' + name + '_c.txt', req);
+    zip.addFile('raw/' + name + '_m.xml', Buffer.from(getFiddler2Meta(item)));
+    zip.addFile('raw/' + name + '_s.txt', res);
+    zip.addFile(
       'raw/' + name + '_whistle.json',
       Buffer.from(
         JSON.stringify({
           version: item.version,
           nodeVersion: item.nodeVersion,
+          customData: item.customData,
           url: item.url,
           realUrl: item.realUrl,
           fwdHost: item.fwdHost,
@@ -134,6 +157,9 @@ module.exports = function (body) {
           sniPlugin: item.sniPlugin,
           trailers: item.res && item.res.trailers,
           rawTrailerNames: item.res && item.res.rawTrailerNames,
+          captureError: item.captureError,
+          reqError: item.reqError,
+          resError: item.resError,
           times: {
             startTime: item.startTime,
             dnsTime: item.dnsTime,
@@ -145,6 +171,15 @@ module.exports = function (body) {
       )
     );
   });
-
-  return zip.toBuffer();
+  var done;
+  var handleCallback = function(err, body) {
+    if (done) {
+      return;
+    }
+    done = true;
+    callback(err, body);
+  };
+  return zip.toBuffer(function(body) {
+    handleCallback(null, body);
+  }, handleCallback);
 };

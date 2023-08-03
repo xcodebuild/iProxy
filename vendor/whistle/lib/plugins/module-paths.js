@@ -1,6 +1,8 @@
 var path = require('path');
 var config = require('../config');
 
+var PLUGIN_DIR_RE = /[/\\]whistle\.[a-z\d_-]+[/\\]?$/;
+
 var uniqueArr = function(list) {
   var result = [];
   list.forEach(function(item) {
@@ -23,18 +25,20 @@ function addDebugPaths(plugins) {
     plugins.unshift(cwd);
     config.projectPluginPaths = config.projectPluginPaths || [];
     config.projectPluginPaths.push(cwd);
-    var pluginDirRe = /[/\\]whistle\.[a-z\d_-]+[/\\]?$/;
-    if (pluginDirRe.test(cwd)) {
-      plugins.unshift(cwd.replace(pluginDirRe, '/'));
+    if (PLUGIN_DIR_RE.test(cwd)) {
+      plugins.unshift(cwd.replace(PLUGIN_DIR_RE, '/'));
     }
   }
 }
 
 var pluginPaths = config.pluginPaths;
 if (pluginPaths) {
-  pluginPaths = prePlugins.concat(pluginPaths.concat(
-    pluginPaths.map(formatPath).concat(addon)
-  ));
+  pluginPaths = pluginPaths.concat(pluginPaths.map(formatPath).concat(addon));
+  if (config.client) {
+    pluginPaths = pluginPaths.concat(prePlugins);
+  } else {
+    pluginPaths = prePlugins.concat(pluginPaths);
+  }
   addDebugPaths(pluginPaths);
   pluginPaths = uniqueArr(pluginPaths);
   exports.getPaths = function () {
