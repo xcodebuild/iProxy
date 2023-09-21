@@ -15,7 +15,7 @@ let trayContextMenu;
 // dirty translate
 let t: TFunction;
 
-async function buildTrayContextMenu() {
+function buildTrayContextMenu() {
     const rules: Rule[] = CoreAPI.store.get(RULE_STORE_KEY) || [];
     const ruleListMenus = rules.map((item, index) => {
         return {
@@ -87,7 +87,7 @@ all_proxy=${generateSocksProxyUrl(port)}
             },
         },
     ]);
-    tray.setContextMenu(trayContextMenu);
+    return trayContextMenu;
 }
 
 export class RuleEditor extends Extension {
@@ -98,8 +98,20 @@ export class RuleEditor extends Extension {
             const image = remote.nativeImage.createFromPath(ICON_TEMPLATE_PATH);
             tray = await new remote.Tray(image);
 
-            tray.on('mouse-move', buildTrayContextMenu);
-            tray.on('click', buildTrayContextMenu);
+            tray.on('mouse-move', () => {
+                tray.setContextMenu(buildTrayContextMenu());
+            });
+            tray.on('click', () => {
+                const window = remote.getCurrentWindow();
+                if (!window.isVisible() || window.isFullScreen()) {
+                    window.show();
+                } else {
+                    window.hide();
+                }
+            });
+            tray.on('right-click', () => {
+                tray.popUpContextMenu(buildTrayContextMenu());
+            });
             tray.setToolTip('iProxy');
         })();
     }
