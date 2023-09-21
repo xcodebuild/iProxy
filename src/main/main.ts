@@ -269,7 +269,11 @@ function createMainWindow() {
 
     window.on('close', (event) => {
         if (!forceQuit) {
-            hideOrQuit();
+            if (SYSTEM_IS_MACOS) {
+                app.hide();
+            } else {
+                window.hide();
+            }
             event?.preventDefault();
         }
     });
