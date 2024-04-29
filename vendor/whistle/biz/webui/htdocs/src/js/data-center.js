@@ -30,7 +30,7 @@ var curLogId;
 var curSvrLogId;
 var dataIndex = 1000000;
 var MAX_PATH_LENGTH = 1024;
-var MAX_LOG_LENGTH = 250;
+var MAX_LOG_LENGTH = 360;
 var lastRowId;
 var endId;
 var hashFilterObj;
@@ -538,7 +538,11 @@ $.extend(
         url: 'cgi-bin/add-rules-values',
         contentType: 'application/json'
       },
-      setIPv6Only: 'cgi-bin/set-ipv6-only'
+      setIPv6Only: 'cgi-bin/set-ipv6-only',
+      createTempFile: {
+        url: 'cgi-bin/sessions/create-temp-file',
+        contentType: 'application/json'
+      }
     },
     POST_CONF
   )
@@ -550,7 +554,9 @@ $.extend(
       donotShowAgain: 'cgi-bin/do-not-show-again',
       checkUpdate: 'cgi-bin/check-update',
       importRemote: 'cgi-bin/import-remote',
-      getHistory: 'cgi-bin/history'
+      getHistory: 'cgi-bin/history',
+      getCookies: 'cgi-bin/sessions/cookies',
+      getTempFile: 'cgi-bin/sessions/get-temp-file'
     },
     GET_CONF
   )
@@ -642,6 +648,7 @@ exports.getInitialData = function (callback) {
         if (data.lastDataId) {
           lastRowId = data.lastDataId;
         }
+        exports.pluginsRoot = data.pluginsRoot;
         exports.upload = createCgiObj(
           {
             importSessions: 'cgi-bin/sessions/import?clientId=' + pageId,
@@ -840,6 +847,7 @@ function startLoadData() {
       var server = data.server;
       port = server && server.port;
       account = server && server.account;
+      exports.pluginsRoot = data.pluginsRoot;
       updateCertStatus(data);
       exports.enablePluginMgr = data.epm;
       exports.supportH2 = data.supportH2;
@@ -979,7 +987,7 @@ function startLoadData() {
         lastSvrLogTime = data.lastSvrLogId;
       }
       data = data.data;
-      var hasChhanged;
+      var hasChanged;
       var framesLen = data.frames && data.frames.length;
 
       if (framesLen) {
@@ -993,18 +1001,18 @@ function startLoadData() {
         if (status) {
           curActiveItem.closed = undefined;
           if (status.sendStatus > -1) {
-            hasChhanged = curActiveItem.sendStatus !== status.sendStatus;
+            hasChanged = curActiveItem.sendStatus !== status.sendStatus;
             curActiveItem.sendStatus = status.sendStatus;
           }
           if (status.receiveStatus > -1) {
-            hasChhanged =
-              hasChhanged ||
+            hasChanged =
+              hasChanged ||
               curActiveItem.receiveStatus !== status.receiveStatus;
             curActiveItem.receiveStatus = status.receiveStatus;
           }
         } else {
           if (!curActiveItem.closed) {
-            hasChhanged = true;
+            hasChanged = true;
             curActiveItem.closed = true;
           }
         }
@@ -1020,7 +1028,7 @@ function startLoadData() {
         (!data.ids.length && !data.newIds.length) ||
         networkModal.clearNetwork
       ) {
-        if (hasChhanged || framesLen) {
+        if (hasChanged || framesLen) {
           framesUpdateCallbacks.forEach(function (cb) {
             cb();
           });
@@ -1278,7 +1286,7 @@ function setReqData(item) {
       item.path = url;
     }
     if (item.path.length > MAX_PATH_LENGTH) {
-      item.path = item.path.substring(0, MAX_PATH_LENGTH) + '...';
+      item.shortPath = item.path.substring(0, MAX_PATH_LENGTH) + '...';
     }
   } else if (item.useH2) {
     item.protocol = 'H2';
@@ -1340,6 +1348,7 @@ exports.addNetworkList = function (list) {
       data.frames = data.frames.filter(function (frame) {
         if (frame) {
           delete frame.json;
+          delete frame.data;
         }
         return frame;
       });
@@ -1511,6 +1520,10 @@ exports.getPlugin = function (name) {
   return pluginsMap[name];
 };
 
+exports.setDisabledPlugins = function(plugins) {
+  disabledPlugins = plugins;
+};
+
 function getMenus(menuName) {
   var list = account && account[menuName];
   if (!Array.isArray(list)) {
@@ -1530,6 +1543,7 @@ function getMenus(menuName) {
           menu.mtime = plugin.mtime;
           menu.priority = plugin.priority;
           menu._key = name;
+          menu._urlPattern = util.toRegExp(menu.urlPattern) || util.toRegExp(menu.namePattern);
           list.push(menu);
         });
       }
@@ -1548,6 +1562,10 @@ exports.getRulesMenus = function () {
 
 exports.getValuesMenus = function () {
   return getMenus('valuesMenus');
+};
+
+exports.getPluginsMenus = function () {
+  return getMenus('pluginsMenus');
 };
 
 exports.getPluginColumns = function() {

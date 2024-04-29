@@ -80,14 +80,15 @@ function getPluginName(rule) {
 }
 
 function getRawProps(rule, all) {
+  var filter = getStr(rule.filter);
   rule = rule.rawProps;
   if (!rule) {
-    return '';
+    return filter;
   }
   if (!all) {
     rule = rule.filter(filterImportant);
   }
-  return getStr(rule.join(' '));
+  return getStr(rule.join(' ')) + filter;
 }
 
 function getInjectProps(rule) {
@@ -96,16 +97,6 @@ function getInjectProps(rule) {
   }
 
   return rule.safeHtml ? ' enable://safeHtml' : '';
-}
-
-function getLineProps(rule) {
-  if (rule.lineStrict) {
-    return ' lineProps://strictHtml';
-  }
-  if (rule.lineSafe) {
-    return ' lineProps://safeHtml';
-  }
-  return '';
 }
 
 function getRuleStr(rule) {
@@ -121,7 +112,7 @@ function getRuleStr(rule) {
     }
     matcher = matcher + ':' + rule.port;
   }
-  return rule.rawPattern + ' ' + matcher + getRawProps(rule, true) + getStr(rule.filter);
+  return rule.rawPattern + ' ' + matcher + getRawProps(rule, true);
 }
 
 function getTime(time) {
@@ -141,12 +132,6 @@ PROTOCOLS.forEach(function (name) {
   }
   DEFAULT_RULES_MODAL[name] = '';
 });
-
-function formatSize(value) {
-  return value >= 1024
-    ? value + '(' + Number(value / 1024).toFixed(2) + 'k)'
-    : value;
-}
 
 var Overview = React.createClass({
   getInitialState: function () {
@@ -201,22 +186,11 @@ var Overview = React.createClass({
           } else if (!value && prop === 'clientId') {
             value = util.getProperty(modal, 'req.headers.x-whistle-client-id');
           }
+          var isFinalUrl = prop == 'realUrl';
           if (value != null) {
             if (prop == 'req.size' || prop == 'res.size') {
-              var size = value;
-              value = formatSize(size);
-              var unzipSize = value
-                ? util.getProperty(modal, prop.substring(0, 4) + 'unzipSize')
-                : -1;
-              if (unzipSize >= 0 && unzipSize != size) {
-                value +=
-                  ' / ' +
-                  formatSize(unzipSize) +
-                  (unzipSize
-                    ? ' = ' + Number((size * 100) / unzipSize).toFixed(2) + '%'
-                    : '');
-              }
-            } else if (prop == 'realUrl') {
+              value = util.formatSize(value, value ? util.getProperty(modal, prop.substring(0, 4) + 'unzipSize') : -1);
+            } else if (isFinalUrl) {
               if (value == modal.url) {
                 value = '';
               } else if (modal.isHttps) {
@@ -228,6 +202,14 @@ var Overview = React.createClass({
             }
           } else if (prop == 'res.statusMessage') {
             value = util.getStatusMessage(modal.res);
+          }
+          var loc = isFinalUrl && util.getProperty(modal, 'res.headers.location');
+          if (loc) {
+            var statusCode = util.getProperty(modal, 'res.statusCode');
+            if (loc && (statusCode == 301 || statusCode == 302  || statusCode == 303 ||
+              statusCode == 307 || statusCode == 308)) {
+              overviewModal['Redirect Url'] = loc;
+            }
           }
           overviewModal[name] = value;
         } else {
@@ -353,7 +335,7 @@ var Overview = React.createClass({
             var prop = getInjectProps(rule);
             rulesModal[name] = rule.list
               .map(function (rule) {
-                return rule.rawPattern + ' ' + rule.matcher + getRawProps(rule) + prop + getLineProps(rule) + getPluginName(rule);
+                return rule.rawPattern + ' ' + rule.matcher + getRawProps(rule, true) + prop + getPluginName(rule);
               })
               .join('\n');
             titleModal[name] = rule.list

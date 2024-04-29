@@ -11,7 +11,6 @@ var qs = require('querystring');
 var extend = require('extend');
 var LRU = require('lru-cache');
 var json5 = require('json5');
-var PassThrough = require('stream').PassThrough;
 var iconv = require('iconv-lite');
 var zlib = require('zlib');
 var dns = require('dns');
@@ -46,7 +45,7 @@ var GEN_URL_RE = /^\s*(?:https?:)?\/\/\w[^\s]*\s*$/i;
 var CORS_KEY_RE = /^(?:enable|use-credentials|useCredentials|credentials)$/i;
 var G_NON_LATIN1_RE = /\s|[^\x00-\xFF]/gu;
 var NON_LATIN1_RE = /[^\x00-\xFF]/;
-var SCRIPT_START = toBuffer('<script>');
+var SCRIPT_START = toBuffer('<script');
 var SCRIPT_END = toBuffer('</script>');
 var STYLE_START = toBuffer('<style>');
 var STYLE_END = toBuffer('</style>');
@@ -70,7 +69,6 @@ var resetContext = function () {
 };
 var TIMEOUT_ERR = new Error('Timeout');
 var SUB_MATCH_RE = /\$[&\d]/;
-var HTTP_URL_RE = /^https?:\/\//;
 var PROTO_NAME_RE = /^([\w.-]+):\/\//;
 var replacePattern = ReplacePatternTransform.replacePattern;
 var CIPHER_OPTIONS = [
@@ -121,6 +119,7 @@ var CIPHER_OPTIONS = [
   'ECDHE-ECDSA-AES256-CCM8'
 ];
 var TLSV2_CIPHERS = 'ECDHE-ECDSA-AES256-GCM-SHA384';
+var cryptoConsts = crypto.constants || {};
 var EMPTY_BUFFER = toBuffer('');
 var encodeHtml = common.encodeHtml;
 var lowerCaseify = common.lowerCaseify;
@@ -128,6 +127,7 @@ var removeIPV6Prefix = common.removeIPV6Prefix;
 var hasBody = common.hasBody;
 var hasProtocol = common.hasProtocol;
 var removeProtocol = common.removeProtocol;
+var isUrl = common.isUrl;
 var workerIndex = process.env && process.env.workerIndex;
 var INTERNAL_ID = process.pid + '-' + Math.random();
 var pluginMgr;
@@ -143,6 +143,8 @@ exports.getProtocol = common.getProtocol;
 exports.replaceProtocol = common.replaceProtocol;
 exports.isWebSocket = common.isWebSocket;
 exports.wrapRuleValue = common.wrapRuleValue;
+exports.createTransform = common.createTransform;
+exports.isUrl = isUrl;
 exports.workerIndex = workerIndex;
 exports.proc = proc;
 exports.INTERNAL_ID = INTERNAL_ID;
@@ -172,17 +174,21 @@ exports.localIpCache = localIpCache;
 exports.listenerCount = require('./patch').listenerCount;
 exports.EMPTY_BUFFER = EMPTY_BUFFER;
 
+function setSecureOptions(options) {
+  var secureOptions = cryptoConsts.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION;
+  if (secureOptions) {
+    options.secureOptions = secureOptions;
+  }
+  return options;
+}
+
+exports.setSecureOptions = setSecureOptions;
+
 function noop(_) {
   return _;
 }
 
 exports.noop = noop;
-
-function isUrl(str) {
-  return HTTP_URL_RE.test(str);
-}
-
-exports.isUrl = isUrl;
 
 function isCiphersError(e) {
   return (
@@ -195,14 +201,42 @@ function isCiphersError(e) {
 
 exports.isCiphersError = isCiphersError;
 
-function wrapJs(js, charset, isUrl) {
+function getScriptProps(props) {
+  var result = '';
+  if (props['use-credentials'] || props.useCredentials){
+    result += ' crossorigin="use-credentials"';
+  } else if (props.anonymous) {
+    result += ' crossorigin="anonymous"';
+  } else if (props.crossorigin) {
+    result += ' crossorigin';
+  }
+  if (props.defer) {
+    result += ' defer';
+  }
+  if (props.async) {
+    result += ' async';
+  }
+  if (props.nomodule) {
+    result += ' nomodule';
+  }
+  if (props.module) {
+    result += ' type="module"';
+  } else if (props.importmap) {
+    result += ' type="importmap"';
+  } else if (props.speculationrules) {
+    result += ' type="speculationrules"';
+  }
+  return result;
+}
+
+function wrapJs(js, charset, isUrl, props) {
   if (!js) {
     return '';
   }
   if (isUrl) {
-    return toBuffer('<script src="' + js + '"></script>', charset);
+    return toBuffer('<script' + getScriptProps(props) + ' src="' + js + '"></script>', charset);
   }
-  return Buffer.concat([SCRIPT_START, toBuffer(js, charset), SCRIPT_END]);
+  return Buffer.concat([SCRIPT_START, toBuffer(getScriptProps(props) + '>'), toBuffer(js, charset), SCRIPT_END]);
 }
 
 function wrapCss(css, charset, isUrl) {
@@ -490,9 +524,11 @@ exports.formatDate = formatDate;
 
 var REG_EXP_RE = /^\/(.+)\/(i?u?|ui)$/;
 
-exports.isRegExp = function isRegExp(regExp) {
+function isRegExp(regExp) {
   return REG_EXP_RE.test(regExp);
-};
+}
+
+exports.isRegExp = isRegExp;
 
 var ORIG_REG_EXP = /^\/(.+)\/([igmu]{0,4})$/;
 
@@ -966,7 +1002,7 @@ function parsePathReplace(urlPath, params) {
 exports.parsePathReplace = parsePathReplace;
 
 function wrapResponse(res) {
-  var passThrough = new PassThrough();
+  var passThrough = common.createTransform();
   passThrough.statusCode = res.statusCode;
   passThrough.rawHeaderNames = res.rawHeaderNames;
   passThrough.headers = lowerCaseify(res.headers);
@@ -1228,6 +1264,16 @@ exports.parseRuleJson = function(rules, callback, req) {
   ).spread(callback);
 };
 
+function getTempFilePath(filePath, rule) {
+  var root = rule.root;
+  if (!root && common.TEMP_PATH_RE.test(filePath)) {
+    rule._suffix = RegExp.$2;
+    return path.join(config.TEMP_FILES_PATH, RegExp.$1);
+  }
+  filePath = decodePath(filePath);
+  return root ? join(root, filePath) : filePath;
+}
+
 function readRuleValue(rule, callback, checkUrl, needRawData, req) {
   if (!rule) {
     return callback();
@@ -1247,10 +1293,7 @@ function readRuleValue(rule, callback, checkUrl, needRawData, req) {
   }
 
   readFile = fileMgr[needRawData ? 'readFile' : 'readFileText'];
-  filePath = decodePath(filePath);
-  if (rule.root) {
-    filePath = join(rule.root, filePath);
-  }
+  filePath = getTempFilePath(filePath, rule);
   readFile(filePath, callback);
 }
 
@@ -1346,15 +1389,16 @@ function readRuleList(rule, callback, isJson, charset, isHtml, req) {
       r,
       function (value) {
         if (isHtml && value) {
+          var props = r.lineProps;
           if (checkUrl) {
             var isUrl = isGenUrl(value);
             var wrap = isJsHtml ? wrapJs : wrapCss;
-            value = wrap(isUrl ? value.trim() : value, charset, isUrl);
+            value = wrap(isUrl ? value.trim() : value, charset, isUrl, props);
           } else {
             value = toBuffer(value, charset);
           }
-          var strictHtml = r.lineProps.strictHtml;
-          var safeHtml = r.lineProps.safeHtml;
+          var strictHtml = props.strictHtml;
+          var safeHtml = props.safeHtml;
           if (strictHtml || safeHtml) {
             value._strictHtml = strictHtml;
             value._safeHtml = safeHtml;
@@ -1417,7 +1461,6 @@ function decodePath(path) {
 
 exports.getRuleFiles = function(rule, req) {
   var files = rule.files || [getPath(getUrl(rule))];
-  var root = rule.root;
   var rawFiles = rule.rawFiles || files;
   var result = [];
   files.map(function (file, i) {
@@ -1425,8 +1468,8 @@ exports.getRuleFiles = function(rule, req) {
     if (opts) {
       result.push(opts);
     } else {
-      file = decodePath(file);
-      file = fileMgr.convertSlash(root ? join(root, file) : file);
+      file = getTempFilePath(file, rule);
+      file = fileMgr.convertSlash(file);
       if (END_WIDTH_SEP_RE.test(file)) {
         result.push(file.slice(0, -1));
         result.push(join(file, 'index.html'));
@@ -2366,7 +2409,9 @@ function handleHeaderReplace(headers, opList) {
 
 exports.handleHeaderReplace = handleHeaderReplace;
 
-function transformReq(req, res, port, host) {
+var HTML_RE = /html/i;
+
+function transformReq(req, res, port, host, html) {
   var options = parseUrl(getFullUrl(req));
   var headers = req.headers;
   options.headers = headers;
@@ -2386,20 +2431,7 @@ function transformReq(req, res, port, host) {
     }
   }
   options.hostname = null;
-  var client = http.request(options, function (_res) {
-    var origin =
-      !_res.headers['access-control-allow-origin'] && req.headers.origin;
-    if (origin) {
-      _res.headers['access-control-allow-origin'] = origin;
-      _res.headers['access-control-allow-credentials'] = true;
-    }
-    if (getStatusCode(_res.statusCode)) {
-      res.writeHead(_res.statusCode, _res.headers);
-      _res.pipe(res);
-    } else {
-      sendStatusCodeError(res, _res);
-    }
-  });
+  html && removeUnsupportsHeaders(headers);
   var destroyed;
   var abort = function () {
     if (!destroyed) {
@@ -2407,6 +2439,38 @@ function transformReq(req, res, port, host) {
       client.destroy();
     }
   };
+  var client = http.request(options, function (_res) {
+    var resHeaders = _res.headers;
+    var origin =
+      !resHeaders['access-control-allow-origin'] && req.headers.origin;
+    if (origin) {
+      resHeaders['access-control-allow-origin'] = origin;
+      resHeaders['access-control-allow-credentials'] = true;
+    }
+    if (getStatusCode(_res.statusCode)) {
+      var type = resHeaders['content-type'];
+      if (html && (!type || HTML_RE.test(type)) && hasBody(_res)) {
+        var unzip = getUnzipStream(resHeaders);
+        var zip = getZipStream(resHeaders);
+        delete resHeaders['content-length'];
+        res.writeHead(_res.statusCode, resHeaders);
+        if (unzip && zip) {
+          unzip.on('error', abort);
+          zip.on('error', abort);
+          zip.write(html);
+          _res.pipe(unzip).pipe(zip).pipe(res);
+        } else {
+          res.write(html);
+          _res.pipe(res);
+        }
+      } else {
+        res.writeHead(_res.statusCode, resHeaders);
+        _res.pipe(res);
+      }
+    } else {
+      sendStatusCodeError(res, _res);
+    }
+  });
   req.on('error', abort);
   res.on('error', abort);
   res.once('close', abort);
@@ -2468,6 +2532,34 @@ exports.getCustomTab = function (tab, pluginName) {
   };
 };
 
+function checkStyle(style) {
+  if (!style || style > 0) {
+    return style;
+  }
+  if (typeof style !== 'string') {
+    return;
+  }
+  return style.substring(0, 32);
+}
+
+exports.getPluginModal = function(conf) {
+  var modal = conf.openInModal || conf.openInDialog;
+  if (!modal) {
+    return;
+  }
+  var result;
+  var width = checkStyle(modal.width);
+  var height = checkStyle(modal.height);
+  if (width) {
+    result = { width: width };
+  }
+  if (height) {
+    result = result || {};
+    result.height = height;
+  }
+  return result || 1;
+};
+
 function getString(str) {
   if (!isString(str)) {
     return;
@@ -2487,7 +2579,7 @@ exports.getPluginMenu = function (menus, pluginName) {
     return;
   }
   var len = menus.length;
-  var count = 3;
+  var count = 5;
   var map = {};
   var result, menu, name, page;
   for (var i = 0; i < len; i++) {
@@ -2500,11 +2592,13 @@ exports.getPluginMenu = function (menus, pluginName) {
     ) {
       result = result || [];
       map[name] = 1;
+      var pattern = menu.urlPattern;
       result.push({
         name: name.substring(0, 20),
         action: 'plugin.' + pluginName + '/' + page,
         required: menu.required ? true : undefined,
-        requiredTreeNode: menu.requiredTreeNode ? true : undefined
+        requiredTreeNode: menu.requiredTreeNode ? true : undefined,
+        urlPattern: isRegExp(pattern) && pattern.length < 256 ? pattern : undefined
       });
       if (--count === 0) {
         return result;
@@ -2673,7 +2767,7 @@ exports.onSocketEnd = common.onSocketEnd;
 exports.onResEnd = common.onResEnd;
 
 exports.getEmptyRes = function getRes() {
-  var res = new PassThrough();
+  var res = common.createTransform();
   res._transform = noop;
   res.on('data', noop);
   res.destroy = noop;
@@ -2796,7 +2890,6 @@ exports.deleteReqHeaders = function (req) {
 
 exports.parseDelProps = parseDelProps;
 
-var URL_RE = /^https?:\/\/./;
 function parseOrigin(origin) {
   if (!isString(origin)) {
     return;
@@ -2819,7 +2912,7 @@ exports.setReqCors = function (data, cors) {
   var origin;
   if (cors.origin === '*') {
     origin = cors.origin;
-  } else if (URL_RE.test(cors.origin)) {
+  } else if (isUrl(cors.origin)) {
     origin = parseOrigin(cors.origin);
   }
   if (origin !== undefined) {
@@ -2843,7 +2936,7 @@ exports.setResCors = function (data, cors, req) {
   var cusOrigin;
   if (cors.origin === '*') {
     cusOrigin = cors.origin;
-  } else if (URL_RE.test(cors.origin)) {
+  } else if (isUrl(cors.origin)) {
     cusOrigin = parseOrigin(cors.origin);
   }
   var isEnable = cors.enable;
@@ -3022,6 +3115,7 @@ function getCookieItem(name, cookie) {
 
   (cookie.secure || cookie.Secure) && attrs.push('Secure');
   (cookie.httpOnly || cookie.HttpOnly || cookie.httponly) && attrs.push('HttpOnly');
+  (cookie.partitioned || cookie.Partitioned) && attrs.push('Partitioned');
   var path = cookie.path || cookie.Path;
   var domain = cookie.domain || cookie.Domain;
   var sameSite = cookie.sameSite || cookie.samesite || cookie.SameSite;
@@ -3160,18 +3254,26 @@ function isRulesContent(ctn) {
 exports.isRulesContent = isRulesContent;
 
 var RESPONSE_FOR_NAME = /^name=(.+)$/;
-exports.setResponseFor = function (rules, headers, req, serverIp) {
+exports.setResponseFor = function (rules, headers, req, serverIp, phost) {
   var responseFor = getMatcherValue(rules.responseFor);
+  phost = phost && phost.host;
   if (!responseFor) {
-    if (req.isPluginReq && !isLocalAddress(serverIp)) {
-      responseFor = trimStr(headers['x-whistle-response-for']);
-      responseFor = responseFor
-        ? responseFor.split(',').map(trim).filter(noop)
-        : [];
-      if (responseFor.indexOf(serverIp) === -1) {
-        responseFor.push(serverIp);
+    if (req.isPluginReq) {
+      var isLocal1 = isLocalAddress(serverIp);
+      var isLocal2 = !phost || isLocalAddress(phost);
+      if (!isLocal1 || !isLocal2) {
+        responseFor = trimStr(headers['x-whistle-response-for']);
+        responseFor = responseFor
+          ? responseFor.split(',').map(trim).filter(noop)
+          : [];
+        if (!isLocal2 && responseFor.indexOf(phost) === -1) {
+          responseFor.push(phost);
+        }
+        if (!isLocal1 && responseFor.indexOf(serverIp) === -1) {
+          responseFor.push(serverIp);
+        }
+        headers['x-whistle-response-for'] = responseFor.join(', ');
       }
-      headers['x-whistle-response-for'] = responseFor.join(', ');
     }
     return;
   }
@@ -3189,7 +3291,13 @@ exports.setResponseFor = function (rules, headers, req, serverIp) {
         return headers[name];
       })
       .filter(noop);
-    result.push(serverIp || '127.0.0.1');
+    if (phost && result.indexOf(phost) === -1) {
+      result.push(phost);
+    }
+    serverIp = serverIp || '127.0.0.1';
+    if (result.indexOf(serverIp) === -1) {
+      result.push(serverIp);
+    }
     responseFor = result.concat(reqResult).join(', ');
   }
   headers['x-whistle-response-for'] = responseFor;
@@ -3297,7 +3405,9 @@ exports.parseClientInfo = function (req) {
   var clientInfo = req.headers[config.CLIENT_INFO_HEAD] || '';
   if (req.headers[config.REQ_FROM_HEADER] === 'W2COMPOSER') {
     req.fromComposer = true;
+    req._disabledProxyRules = !!req.headers[config.DISABLE_RULES_HEADER];
     delete req.headers[config.REQ_FROM_HEADER];
+    delete req.headers[config.DISABLE_RULES_HEADER];
   }
   var socket = req.socket || '';
   if (socket.fromTunnel) {
@@ -3798,4 +3908,62 @@ exports.checkProxyHost = function(proxy, host) {
 
 exports.getInspectorTabs = function(conf) {
   return conf.inspectorsTabs || conf.inspectorsTab || conf.inspectorTabs || conf.inspectorTab || '';
+};
+
+
+var SPEC_PATH = '/_WHISTLE_5b6af7b9884e1165_/';
+
+exports.removeSpecPath = function(req) {
+  var specPath = config.SPEC_PATH || SPEC_PATH;
+  if (req.url && req.url.indexOf(specPath) !== -1) {
+    req.url = req.url.replace(specPath, '/');
+  }
+};
+
+function getRulesText(req) {
+  var rules = req.rules;
+  var keys = rules && Object.keys(rules);
+  if (!keys || !keys.length) {
+    return;
+  }
+  return safeEncodeURIComponent(keys.map(function(key) {
+    var rule = rules[key];
+    return rule.rawPattern + ' ' + (rule.rawMatcher || rule.matcher);
+  }).join('\n'));
+}
+
+exports.addMatchedRules = function(req, res) {
+  var enable = req.enable || '';
+  if (!enable || (res ? !isEnable(req, 'responseWithMatchedRules') : !isEnable(req, 'requestWithMatchedRules'))) {
+    return;
+  }
+  var rules = getRulesText(req);
+  if (rules) {
+    var headers = res ? res.headers : req.headers;
+    headers['x-whistle-matched-rules'] = rules;
+  }
+};
+
+exports.needAbortReq = function(req) {
+  var disable = req.disable;
+  if (disable.abort || disable.abortReq) {
+    return false;
+  }
+  if (req.enable.abort || req._filters.abort ||
+    req.enable.abortReq || req._filters.abortReq) {
+    return true;
+  }
+  return req.isTunnel && disable.tunnel;
+};
+
+exports.needAbortRes = function(req) {
+  var disable = req.disable;
+  if (disable.abort || disable.abortRes) {
+    return false;
+  }
+  if (req.enable.abort || req._filters.abort ||
+    req.enable.abortRes || req._filters.abortRes) {
+    return true;
+  }
+  return req.isTunnel && disable.tunnel;
 };

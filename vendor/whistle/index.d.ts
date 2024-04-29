@@ -109,6 +109,8 @@ export interface WhistleOptions {
   notUninstallPluginPath?: string | string[];
   pluginsPath?: string | string[];
   addonsPath?: string | string[];
+  specialAuth?: string;
+  specialPath?: string;
   inspect?: boolean;
   inspectBrk?: boolean;
   secureFilter?: WhistleSecureFilter;
@@ -130,6 +132,13 @@ export interface WhistleOptions {
   customHandler?: (req: IncomingMessage, res: ServerResponse, next?: Function) => void;
   pluginHost?: string;
   copy?: string;
+  uiExt?: {
+    required?: boolean;
+    htmlPrepend?: string;
+    htmlAppend?: string;
+    jsPrepend?: string;
+    jsAppend?: string;
+  };
   [propName: string]: any;
 }
 

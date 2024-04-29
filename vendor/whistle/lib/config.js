@@ -9,7 +9,7 @@ var qs = require('querystring');
 var LRU = require('lru-cache');
 var httpAgent = http.Agent;
 var httpsAgent = require('https').Agent;
-var url = require('url');
+var parseUrl = require('./util/parse-url-safe');
 var fse = require('fs-extra2');
 var Buffer = require('safe-buffer').Buffer;
 var extend = require('extend');
@@ -66,6 +66,7 @@ config.rejectUnauthorized = false;
 config.enableH2 = version[0] > 12; // 支持 HTTP2 要求的最低 Node 版本
 config.ASSESTS_PATH = path.join(__dirname, '../assets');
 config.REQ_FROM_HEADER = 'x-whistle-request-from';
+config.DISABLE_RULES_HEADER = 'x-whistle-proxy-rules-' + uid;
 config.WHISTLE_POLICY_HEADER = 'x-whistle-policy';
 config.CUSTOM_CERT_HEADER = 'x-whistle-exists-custom-cert';
 config.ENABLE_CAPTURE_HEADER = 'x-whistle-enable-capture';
@@ -142,10 +143,18 @@ function getDataDir(dirname) {
 }
 
 config.baseDir = getDataDir();
+config.TEMP_FILES_PATH = path.join(getWhistlePath(), 'temp_files');
 config.CUSTOM_PLUGIN_PATH = path.join(getWhistlePath(), 'custom_plugins');
 config.CUSTOM_CERTS_DIR = path.resolve(getWhistlePath(), 'custom_certs');
 config.DEV_PLUGINS_PATH = path.resolve(getWhistlePath(), 'dev_plugins');
 
+try {
+  fse.ensureDirSync(config.TEMP_FILES_PATH);
+  var blankFile = path.join(config.TEMP_FILES_PATH, 'blank');
+  if (!fs.existsSync(blankFile)) {
+    fs.writeFileSync(blankFile, '');
+  }
+} catch (e) {}
 try {
   fse.ensureDirSync(config.CUSTOM_CERTS_DIR);
 } catch (e) {}
@@ -262,7 +271,7 @@ function getCacheKey(options, isSocks) {
 }
 
 function getAuths(_url) {
-  var options = typeof _url == 'string' ? url.parse(_url) : _url;
+  var options = typeof _url == 'string' ? parseUrl(_url) : _url;
   if (!options || !options.auth) {
     return [socks.auth.None()];
   }
@@ -475,7 +484,7 @@ function getHostname(_url) {
     return '';
   }
   if (_url.indexOf('/') != -1) {
-    return url.parse(_url).hostname;
+    return parseUrl(_url).hostname;
   }
   var index = _url.indexOf(':');
   return index == -1 ? _url : _url.substring(0, index);
@@ -521,10 +530,24 @@ function createHash(str) {
   return shasum.digest('hex');
 }
 
-function readFileText(filepath) {
+function readFileText(filepath, retry) {
   try {
     return fs.readFileSync(filepath, { encoding: 'utf8' }).trim();
-  } catch (e) {}
+  } catch (e) {
+    if (!retry) {
+      return readFileText(filepath, true);
+    }
+  }
+}
+
+function readFileBuffer(filepath, required, retry) {
+  try {
+    return fs.readFileSync(filepath);
+  } catch (e) {
+    if (!retry) {
+      return required !== false ? fs.readFileSync(filepath) : readFileBuffer(filepath, required, true);
+    }
+  }
 }
 
 function isPort(port) {
@@ -579,6 +602,27 @@ function getPluginList(list) {
   return result;
 }
 
+function readUIExt(uiExt) {
+  if (!uiExt) {
+    return;
+  }
+  var htmlPrepend = uiExt.htmlPrepend && readFileBuffer(uiExt.htmlPrepend, uiExt.required);
+  var htmlAppend = uiExt.htmlAppend && readFileBuffer(uiExt.htmlAppend, uiExt.required);
+  var jsPrepend = uiExt.jsPrepend && readFileBuffer(uiExt.jsPrepend, uiExt.required);
+  var jsAppend = uiExt.jsAppend && readFileBuffer(uiExt.jsAppend, uiExt.required);
+  if (htmlPrepend ||htmlAppend || jsPrepend || jsAppend) {
+    if (htmlPrepend) {
+      htmlPrepend = Buffer.concat([Buffer.from('<!DOCTYPE html>\n'), htmlPrepend]);
+    }
+    return {
+      htmlPrepend: htmlPrepend,
+      htmlAppend: htmlAppend,
+      jsPrepend: jsPrepend,
+      jsAppend: jsAppend
+    };
+  }
+}
+
 exports.extend = function (newConf) {
   config.pluginHostMap = {};
   config.uiport = config.port;
@@ -590,6 +634,10 @@ exports.extend = function (newConf) {
   var useAgent;
   var newAgentConf;
   if (newConf) {
+    if (newConf.specialPath && typeof newConf.specialPath === 'string') {
+      config.SPEC_PATH = newConf.specialPath;
+    }
+    config.uiExt = readUIExt(newConf.uiExt);
     config.specialAuth = newConf.specialAuth;
     config.uiMiddleware = newConf.uiMiddlewares || newConf.uiMiddleware;
     newAgentConf = newConf.agentConfig;
@@ -618,7 +666,7 @@ exports.extend = function (newConf) {
     var dnsOptional;
     if (dnsServer && typeof dnsServer === 'string') {
       dnsServer = dnsServer.trim();
-      if (/^https?:\/\/.+/.test(dnsServer)) {
+      if (common.isUrl(dnsServer)) {
         config.dnsOverHttps = dnsServer;
       } else {
         dnsServer = dnsServer.split(/[|,&]/);

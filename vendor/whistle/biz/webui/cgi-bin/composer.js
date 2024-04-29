@@ -11,6 +11,7 @@ var zlib = require('../../../lib/util/zlib');
 var properties = require('../../../lib/rules/util').properties;
 var getSender = require('ws-parser').getSender;
 var hparser = require('hparser');
+var sendGzip = require('./util').sendGzip;
 
 var formatHeaders = hparser.formatHeaders;
 var getRawHeaders = hparser.getRawHeaders;
@@ -250,6 +251,9 @@ module.exports = function(req, res) {
   var isWebSocket = method === 'WEBSOCKET';
   delete headers[config.WEBUI_HEAD];
   headers[config.REQ_FROM_HEADER] = 'W2COMPOSER';
+  if (req.body.enableProxyRules === false) {
+    headers[config.DISABLE_RULES_HEADER] = '1';
+  }
   headers.host = options.host;
   options.clientId = clientId;
   var clientIp = util.getClientIp(req);
@@ -337,7 +341,7 @@ module.exports = function(req, res) {
         }});
         return;
       }
-      res.json({ec: 0, em: 'success', res: data || ''});
+      sendGzip(req, res, {ec: 0, em: 'success', res: data || ''});
     } : null;
     if (err) {
       return handleResponse && handleResponse(err);

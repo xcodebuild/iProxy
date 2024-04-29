@@ -22,23 +22,27 @@ var storage = require('./storage');
 var Dialog = require('./dialog');
 var ListDialog = require('./list-dialog');
 var FilterBtn = require('./filter-btn');
-// var FilesDialog = require('./files-dialog');
+var EditorDialog = require('./editor-dialog');
 var message = require('./message');
 var UpdateAllBtn = require('./update-all-btn');
 var ContextMenu = require('./context-menu');
 var CertsInfoDialog = require('./certs-info-dialog');
+var RulesDialog = require('./rules-dialog');
 var SyncDialog = require('./sync-dialog');
 var AccountDialog = require('./account-dialog');
 var JSONDialog = require('./json-dialog');
 var Account = require('./account');
+var MockDialog = require('./mock-dialog');
+var IframeDialog = require('./iframe-dialog');
 var win = require('./win');
 
+var TEMP_LINK_RE = /^(?:[\w-]+:\/\/)?temp\/([\da-z]{64}|blank)(?:\.[\w-]+)?$/;
 var H2_RE = /http\/2\.0/i;
 var JSON_RE = /^\s*(?:[\{｛][\w\W]+[\}｝]|\[[\w\W]+\])\s*$/;
 var DEFAULT = 'Default';
 var MAX_PLUGINS_TABS = 7;
 var MAX_FILE_SIZE = 1024 * 1024 * 128;
-var MAX_OBJECT_SIZE = 1024 * 1024 * 6;
+var MAX_OBJECT_SIZE = 1024 * 1024 * 36;
 var MAX_LOG_SIZE = 1024 * 1024 * 2;
 var MAX_REPLAY_COUNT = 100;
 var LINK_SELECTOR = '.cm-js-type, .cm-js-http-url, .cm-string, .cm-js-at';
@@ -54,6 +58,23 @@ var search = window.location.search;
 var isClient = util.getQuery().mode === 'client';
 var hideLeftMenu;
 var showTreeView;
+var dataUrl;
+
+function isUrl(url) {
+  return /^https?:\/\/[^/]/i.test(url);
+}
+
+window.setWhistleDataUrl = function(url) {
+  if (isUrl(url)) {
+    if (dataCenter.handleDataUrl) {
+      dataCenter.handleDataUrl(url);
+    } else {
+      dataUrl = url;
+    }
+    return true;
+  }
+  return false;
+};
 
 if (/[&#?]showTreeView=(0|false|1|true)(?:&|$|#)/.test(search)) {
   showTreeView = RegExp.$1 === '1' || RegExp.$1 === 'true';
@@ -64,6 +85,21 @@ if (/[&#?]hideLeft(?:Bar|Menu)=(0|false|1|true)(?:&|$|#)/.test(search)) {
 } else if (/[&#?]showLeft(?:Bar|Menu)=(0|false|1|true)(?:&|$|#)/.test(search)) {
   hideLeftMenu = RegExp.$1 === '0' || RegExp.$1 === 'false';
 }
+
+var TOP_BAR_MENUS = [
+  {
+    name: 'Scroll To Top',
+    action: 'top'
+  },
+  {
+    name: 'Scroll To Selected',
+    action: 'selected'
+  },
+  {
+    name: 'Scroll To Bottom',
+    action: 'bottom'
+  }
+];
 
 var LEFT_BAR_MENUS = [
   {
@@ -162,10 +198,21 @@ function checkJson(item) {
   }
 }
 
+function checkConflict(data, modal) {
+  var keys = Object.keys(data);
+  for (var i = 0, len = keys.length; i < len; i++) {
+    var name = keys[i];
+    var item = modal.get(name);
+    if (item && item.value !== data[name]) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function getJsonForm(data, name) {
-  data = JSON.stringify(data);
   var form = new FormData();
-  var file = new File([data], 'data.json', { type: 'application/json' });
+  var file = new File([JSON.stringify(data)], 'data.json', { type: 'application/json' });
   form.append(name || 'rules', file);
   return form;
 }
@@ -176,15 +223,16 @@ function checkUrl(url) {
     message.error('The url cannot be empty.');
     return;
   }
-  if (!/^https?:\/\/[^/]/i.test(url)) {
+  if (!isUrl(url)) {
     message.error('Please input the correct url.');
     return;
   }
   return url;
 }
 
-function getRemoteDataHandler(callback) {
-  return function (data, xhr) {
+function getRemoteData(url, callback) {
+  var opts = {  url: url };
+  dataCenter.importRemote(opts,  function (data, xhr) {
     if (!data) {
       util.showSystemError(xhr);
       return callback(true);
@@ -204,7 +252,38 @@ function getRemoteDataHandler(callback) {
       message.error(e.message);
     }
     callback(true);
-  };
+  });
+}
+
+function readFileJson(file, cb) {
+  if (util.isString(file)) {
+    if (file.length > MAX_OBJECT_SIZE) {
+      win.alert('The file size is too large.');
+      return cb();
+    }
+    return cb(parseJSON(file));
+  }
+  if (!file || !/\.(txt|json)$/i.test(file.name)) {
+    win.alert('Only supports .txt or .json file.');
+    return cb();
+  }
+
+  if (file.size > MAX_OBJECT_SIZE) {
+    win.alert('The file size is too large.');
+    return cb();
+  }
+  util.readFileAsText(file, function(text) {
+    cb(parseJSON(text));
+  });
+}
+
+function handleImportData(file, cb, name) {
+  readFileJson(file, function(data) {
+    if (!data || util.handleImportData(data)) {
+      return cb();
+    }
+    cb(data);
+  });
 }
 
 function getPageName(options) {
@@ -237,6 +316,15 @@ function getPageName(options) {
     return storage.get('pageName') || 'network';
   }
   return hash;
+}
+
+function parseJSON(text) {
+  try {
+    var obj = JSON.parse(text);
+    return obj && typeof obj === 'object' ? obj : null;
+  } catch (e) {
+    message.error(e.message);
+  }
 }
 
 function compareSelectedNames(src, target) {
@@ -780,6 +868,80 @@ var Index = React.createClass({
     var preventDefault = function (e) {
       e.preventDefault();
     };
+    events.on('showRulesDialog', function(_, data) {
+      if (data && !self.isHideRules()) {
+        self.refs.rulesDialog.show(data.rules, data.values);
+      }
+    });
+
+    var composerDidMount;
+    var composerData;
+
+    events.one('composerDidMount', function() {
+      composerDidMount = true;
+      if (composerData) {
+        events.trigger('_setComposerData', composerData);
+        composerData = null;
+      }
+    });
+
+    events.on('showPluginOptionTab', function(_, plugin) {
+      plugin && self.showPluginTab(util.getSimplePluginName(plugin));
+    });
+
+    events.on('disablePlugin', function(_, plugin, disabled) {
+      self.setPluginState(util.getSimplePluginName(plugin), disabled);
+    });
+
+    events.on('setComposerData', function(_, data) {
+      if (!data || self.state.rulesMode) {
+        return;
+      }
+      if (self.state.name !== 'network') {
+        self.showNetwork();
+      }
+      events.trigger('showComposerTab');
+      if (composerDidMount) {
+        events.trigger('_setComposerData', data);
+      } else {
+        composerData = data;
+      }
+    });
+   
+    events.on('showPluginOption', function(_, plugin) {
+      if (!plugin) {
+        return;
+      }
+      var name = util.getSimplePluginName(plugin);
+      var url =  plugin.pluginHomepage || 'plugin.' + name + '/';
+      if ((plugin.pluginHomepage || plugin.openExternal) && !plugin.openInPlugins && !plugin.openInModal) {
+        return window.open(url);
+      }
+      var modal = plugin.openInModal || '';
+      if (modal && !plugin.pluginHomepage) {
+        url += '?openInModal=5b6af7b9884e1165';
+      }
+      self.refs.iframeDialog.show({
+        name: name,
+        url: url,
+        homepage: plugin.homepage,
+        disabled: util.pluginIsDisabled(self.state, name),
+        width: modal.width,
+        height: modal.height
+      });
+    });
+    events.on('hidePluginOption', function() {
+      self.refs.iframeDialog.hide();
+    });
+  
+    events.on('download', function(_, data) {
+      self.download(data);
+    });
+    events.on('showMockDialog', function(_, data) {
+      if (data) {
+        self.refs.mockDialog.show(data.item, data.type);
+      }
+    });
     events.on('enableRecord', function () {
       self.enableRecord();
     });
@@ -831,6 +993,9 @@ var Index = React.createClass({
     });
     var editorWin;
     events.on('openEditor', function(_, text) {
+      if (storage.get('viewAllInNewWindow') === '1') {
+        return util.openInNewWin(text || '');
+      }
       try {
         if (editorWin && typeof editorWin.setValue === 'function') {
           window.getTextFromWhistle_ = null;
@@ -842,6 +1007,12 @@ var Index = React.createClass({
           editorWin.setValue(text);
         };
         self.refs.editorWin.show('editor.html');
+      } catch (e) {}
+    });
+    events.on('openInNewWin', function() {
+      try {
+        util.openInNewWin(editorWin.getEditorValue() || '');
+        self.refs.editorWin.hide();
       } catch (e) {}
     });
 
@@ -858,17 +1029,27 @@ var Index = React.createClass({
 
     events.on('addNewRulesFile', function(_, data) {
       var filename = data.filename;
-      var item = self.state.rules.add(filename, data.data);
+      var modal = self.state.rules;
+      var item = modal.add(filename, data.data);
+      modal.setChanged(filename, false);
       self.setRulesActive(filename);
       self.setState({ activeRules: item });
-      self.triggerRulesChange('create');
+      if (!data.update) {
+        self.triggerRulesChange('create');
+      }
     });
     events.on('addNewValuesFile', function(_, data) {
       var filename = data.filename;
-      var item = self.state.values.add(filename, data.data);
-      self.setValuesActive(filename);
-      self.setState({ activeValues: item });
-      self.triggerValuesChange('create');
+      var modal = self.state.values;
+      var item = modal.add(filename, data.data);
+      modal.setChanged(filename, false);
+      if (data.update) {
+        self.setState({});
+      } else {
+        self.setValuesActive(filename);
+        self.setState({ activeValues: item });
+        self.triggerValuesChange('create');
+      }
     });
 
     events.on('recoverRules', function (_, data) {
@@ -983,20 +1164,25 @@ var Index = React.createClass({
           data = new FormData();
           data.append('importSessions', files[0]);
           self.uploadSessionsForm(data);
-        }
-        if (target.closest('.w-divider-left').length) {
-          if (name === 'rules') {
-            data = new FormData();
-            data.append('rules', files[0]);
-            self.rulesForm = data;
-            self.refs.confirmImportRules.show();
-          } else if (name === 'values') {
-            data = new FormData();
-            data.append('values', files[0]);
-            self.valuesForm = data;
-            self.refs.confirmImportValues.show();
+          if (!/\.(txt|json)$/i.test(file && file.name)) {
+            return;
           }
         }
+        var overLeftBar = target.closest('.w-divider-left').length;
+        var overPlugins = name === 'plugins';
+        if ((!overLeftBar && !overPlugins) || self.isHideRules()) {
+          return;
+        }
+        handleImportData(file, function(json) {
+          if (!json || !overLeftBar) {
+            return;
+          }
+          if (name === 'rules') {
+            self.handleImportRules(json);
+          } else if (name === 'values') {
+            self.handleImportValues(json);
+          }
+        });
       })
       .on('keydown', function (e) {
         if ((e.metaKey || e.ctrlKey) && e.keyCode === 82) {
@@ -1114,11 +1300,13 @@ var Index = React.createClass({
           return;
         }
         var elem = $(this);
+        var text;
         if (
           elem.hasClass('cm-js-http-url') ||
           elem.hasClass('cm-string') ||
           elem.hasClass('cm-js-at') ||
-          getKey(elem.text())
+          TEMP_LINK_RE.test(text = elem.text()) ||
+          getKey(text)
         ) {
           elem.addClass('w-is-link');
         }
@@ -1151,15 +1339,24 @@ var Index = React.createClass({
           window.open(text);
           return;
         }
-        var name = getKey(text);
-        if (name) {
-          self.showAndActiveValues({ name: name });
-          return;
+        if (TEMP_LINK_RE.test(text)) {
+          var tempFile = RegExp.$1;
+          return events.trigger('showEditorDialog', [{
+            ruleName: self.getActiveRuleName(),
+            tempFile: tempFile
+          }, elem]);
+        } else {
+          var name = getKey(text);
+          if (name) {
+            return events.trigger('showEditorDialog', {
+              name: name
+            });
+          }
         }
       });
 
     if (self.state.name == 'network') {
-      self.startLoadData();
+      self.startLoadData(true);
     }
     dataCenter.on('settings', function (data) {
       var state = self.state;
@@ -1466,6 +1663,9 @@ var Index = React.createClass({
         });
       }
     } catch (e) {}
+    self.handleDataUrl(dataUrl || util.getDataUrl());
+    dataCenter.handleDataUrl = self.handleDataUrl;
+    dataUrl = null;
   },
   shouldComponentUpdate: function (_, nextSate) {
     var name = this.state.name;
@@ -1474,8 +1674,19 @@ var Index = React.createClass({
     }
     return true;
   },
+  handleDataUrl: function(url) {
+    if (!isUrl(url)) {
+      return;
+    }
+    var self = this;
+    getRemoteData(url, function(err, data) {
+      if (!err) {
+        self.importAnySessions(data);
+      }
+    });
+  },
   importAnySessions: function (data) {
-    if (data) {
+    if (data && !util.handleImportData(data)) {
       if (Array.isArray(data)) {
         dataCenter.addNetworkList(data);
       } else {
@@ -1597,10 +1808,14 @@ var Index = React.createClass({
   preventBlur: function (e) {
     e.target.nodeName != 'INPUT' && e.preventDefault();
   },
-  startLoadData: function () {
+  startLoadData: function (init) {
     var self = this;
     if (self._updateNetwork) {
-      self._updateNetwork();
+      if (init) {
+        self._updateNetwork();
+      } else {
+        setTimeout(self._updateNetwork, 30);
+      }
       return;
     }
     var scrollTimeout;
@@ -1661,15 +1876,22 @@ var Index = React.createClass({
     self.autoRefresh = scrollToBottom;
     self.scrollerAtBottom = atBottom;
 
-    function atBottom() {
-      var body = baseDom.find(
-        '.ReactVirtualized__Grid__innerScrollContainer'
-      )[0];
+    function atBottom(force) {
+      var body = baseDom.find('.ReactVirtualized__Grid__innerScrollContainer')[0];
       if (!body) {
+        if (force) {
+          events.trigger('toggleBackToBottomBtn', false);
+        }
         return true;
       }
-      return con.scrollTop + con.offsetHeight + 5 > body.offsetHeight;
+      var height = con.offsetHeight + 5;
+      var ctnHeight = body.offsetHeight;
+      var isBottom = con.scrollTop + height > ctnHeight;
+      events.trigger('toggleBackToBottomBtn', !isBottom && ctnHeight >= height);
+      return isBottom;
     }
+
+    events.on('checkAtBottom', atBottom);
   },
   showPlugins: function (e) {
     if (this.state.name != 'plugins') {
@@ -1822,16 +2044,13 @@ var Index = React.createClass({
     }
     var self = this;
     self.setState({ pendingSessions: true });
-    dataCenter.importRemote(
-      { url: url },
-      getRemoteDataHandler(function (err, data) {
-        self.setState({ pendingSessions: false });
-        if (!err) {
-          byInput && self.refs.importRemoteSessions.hide();
-          self.importAnySessions(data);
-        }
-      })
-    );
+    getRemoteData(url, function (err, data) {
+      self.setState({ pendingSessions: false });
+      if (!err) {
+        byInput && self.refs.importRemoteSessions.hide();
+        self.importAnySessions(data);
+      }
+    });
   },
   importRemoteSessions: function (e) {
     if (e && e.type !== 'click' && e.keyCode !== 13) {
@@ -1867,20 +2086,16 @@ var Index = React.createClass({
       return;
     }
     self.setState({ pendingRules: true });
-    dataCenter.importRemote(
-      { url: url },
-      getRemoteDataHandler(function (err, data) {
-        self.setState({ pendingRules: false });
-        if (err) {
-          return;
-        }
-        self.refs.importRemoteRules.hide();
-        if (data) {
-          self.rulesForm = getJsonForm(data);
-          self.refs.confirmImportRules.show();
-        }
-      })
-    );
+    getRemoteData(url, function (err, data) {
+      self.setState({ pendingRules: false });
+      if (err) {
+        return;
+      }
+      self.refs.importRemoteRules.hide();
+      if (data && !util.handleImportData(data)) {
+        self.handleImportRules(data);
+      }
+    });
   },
   importValues: function (e, data) {
     var self = this;
@@ -1907,20 +2122,16 @@ var Index = React.createClass({
       return;
     }
     self.setState({ pendingValues: true });
-    dataCenter.importRemote(
-      { url: url },
-      getRemoteDataHandler(function (err, data) {
-        self.setState({ pendingValues: false });
-        if (err) {
-          return;
-        }
-        self.refs.importRemoteValues.hide();
-        if (data) {
-          self.valuesForm = getJsonForm(data, 'values');
-          self.refs.confirmImportValues.show();
-        }
-      })
-    );
+    getRemoteData(url, function (err, data) {
+      self.setState({ pendingValues: false });
+      if (err) {
+        return;
+      }
+      self.refs.importRemoteValues.hide();
+      if (data && !util.handleImportData(data)) {
+        self.handleImportValues(data);
+      }
+    });
   },
   _uploadRules: function (data, showResult) {
     var self = this;
@@ -1949,57 +2160,57 @@ var Index = React.createClass({
       }
     });
   },
-  uploadRules: function (e) {
-    var data = this.rulesForm;
-    this.rulesForm = null;
+  handleImportRules: function(data) {
     if (!data) {
       return;
     }
-    var file = data.get('rules');
-    if (!file || !/\.(txt|json)$/i.test(file.name)) {
-      return win.alert('Only supports .txt or .json file.');
+    this.rulesForm = getJsonForm(data);
+    if (checkConflict(data, this.state.rules)) {
+      this.refs.confirmImportRules.show();
+    } else {
+      this.uploadRules();
     }
-
-    if (file.size > MAX_OBJECT_SIZE) {
-      return win.alert('The file size cannot exceed 6m.');
+  },
+  handleImportValues: function(data) {
+    if (!data) {
+      return;
     }
-    if ($(e.target).hasClass('btn-danger')) {
-      data.append('replaceAll', '1');
+    this.valuesForm = getJsonForm(data, 'values');
+    this.refs.confirmImportValues.show();
+  },
+  uploadRules: function (e) {
+    var form = this.rulesForm;
+    self.rulesForm = null;
+    if (form) {
+      if (!e || $(e.target).hasClass('btn-danger')) {
+        form.append('replaceAll', '1');
+      }
+      this._uploadRules(form);
+      ReactDOM.findDOMNode(this.refs.importRules).value = '';
     }
-    this._uploadRules(data);
-    ReactDOM.findDOMNode(this.refs.importRules).value = '';
   },
   uploadValues: function (e) {
-    var data = this.valuesForm;
-    this.valuesForm = null;
-    if (!data) {
-      return;
+    var form = this.valuesForm;
+    self.valuesForm = null;
+    if (form) {
+      if (!e || $(e.target).hasClass('btn-danger')) {
+        form.append('replaceAll', '1');
+      }
+      this._uploadValues(form);
+      ReactDOM.findDOMNode(this.refs.importValues).value = '';
     }
-    var file = data.get('values');
-    if (!file || !/\.(txt|json)$/i.test(file.name)) {
-      return win.alert('Only supports .txt or .json file.');
-    }
-
-    if (file.size > MAX_OBJECT_SIZE) {
-      return win.alert('The file size cannot exceed 6m.');
-    }
-    if ($(e.target).hasClass('btn-danger')) {
-      data.append('replaceAll', '1');
-    }
-    this._uploadValues(data);
-    ReactDOM.findDOMNode(this.refs.importValues).value = '';
   },
   uploadRulesForm: function () {
-    this.rulesForm = new FormData(
+    var form = new FormData(
       ReactDOM.findDOMNode(this.refs.importRulesForm)
     );
-    this.refs.confirmImportRules.show();
+    handleImportData(form.get('rules'), this.handleImportRules);
   },
   uploadValuesForm: function () {
-    this.valuesForm = new FormData(
+    var form = new FormData(
       ReactDOM.findDOMNode(this.refs.importValuesForm)
     );
-    this.refs.confirmImportValues.show();
+    handleImportData(form.get('values'), this.handleImportValues);
   },
   showAndActiveRules: function (item, e) {
     if (this.state.name === 'rules') {
@@ -2336,9 +2547,10 @@ var Index = React.createClass({
   hideRenameValueInput: function () {
     this.setState({ showEditValues: false });
   },
-  showCreateRules: function (_, item) {
+  showCreateRules: function (_, group, focusItem) {
     var createRulesInput = ReactDOM.findDOMNode(this.refs.createRulesInput);
-    this._curFocusRulesItem = item;
+    this._curFocusRulesGroup = group;
+    this._curFocusRulesItem = focusItem;
     this.setState(
       {
         showCreateRules: true
@@ -2348,9 +2560,10 @@ var Index = React.createClass({
       }
     );
   },
-  showCreateValues: function (_, item) {
+  showCreateValues: function (_, group, focusItem) {
     var createValuesInput = ReactDOM.findDOMNode(this.refs.createValuesInput);
-    this._curFocusValuesItem = item;
+    this._curFocusValuesGroup = group;
+    this._curFocusValuesItem = focusItem;
     this.setState(
       {
         showCreateValues: true
@@ -2426,23 +2639,41 @@ var Index = React.createClass({
       return;
     }
     var addToTop = type === 'top' ? 1 : '';
-    var curItem = self._curFocusRulesItem;
+    var groupItem = self._curFocusRulesGroup;
+    var focusItem = self._curFocusRulesItem;
     var params = { name: name, addToTop: addToTop };
-    if (curItem) {
-      params.groupName = curItem.name;
+    if (isGroup) {
+      var focusName = focusItem && focusItem.name;
+      if (focusName) {
+        if (focusName === 'Default') {
+          focusName = self.state.rules.list[1];
+        }
+        params.focusName = focusName;
+      }
+    } else if (groupItem) {
+      params.groupName = groupItem.name;
     }
     dataCenter.rules.add(params, function (data, xhr) {
       if (data && data.ec === 0) {
         var item = modal[addToTop ? 'unshift' : 'add'](name);
         target.value = '';
         target.blur();
-        modal.moveToGroup(name, params.groupName, addToTop);
-        !isGroup && self.setRulesActive(name);
+        var toName = params.focusName;
+        if (toName) {
+          modal.moveTo(name, toName);
+        } else {
+          modal.moveToGroup(name, params.groupName, addToTop);
+        }
+        if (isGroup) {
+          if (item) {
+            item._isNewGroup = true;
+          }
+        } else {
+          self.setRulesActive(name);
+        }
         params.groupName && events.trigger('expandRulesGroup', params.groupName);
         self.setState(isGroup ? {} : {
           activeRules: item
-        }, function() {
-          isGroup && events.trigger('scrollRulesBottom');
         });
         self.triggerRulesChange('create');
       } else {
@@ -2484,23 +2715,37 @@ var Index = React.createClass({
       message.error('The name \'' + name + '\' already exists.');
       return;
     }
-    var curItem = self._curFocusValuesItem;
+    var groupItem = self._curFocusValuesGroup;
+    var focusItem = self._curFocusValuesItem;
     var params = { name: name };
-    if (curItem) {
-      params.groupName = curItem.name;
+    if (isGroup) {
+      if (focusItem) {
+        params.focusName = focusItem.name;
+      }
+    } else if (groupItem) {
+      params.groupName = groupItem.name;
     }
     dataCenter.values.add(params, function (data, xhr) {
       if (data && data.ec === 0) {
         var item = modal.add(name);
         target.value = '';
         target.blur();
-        modal.moveToGroup(name, params.groupName);
-        !isGroup && self.setValuesActive(name);
+        var toName = params.focusName;
+        if (toName) {
+          modal.moveTo(name, toName);
+        } else {
+          modal.moveToGroup(name, params.groupName);
+        }
+        if (isGroup) {
+          if (item) {
+            item._isNewGroup = true;
+          }
+        } else {
+          self.setValuesActive(name);
+        }
         params.groupName && events.trigger('expandValuesGroup', params.groupName);
         self.setState(isGroup ? {} : {
           activeValues: item
-        }, function() {
-          isGroup && events.trigger('scrollValuesBottom');
         });
         self.triggerValuesChange('create');
       } else {
@@ -2632,6 +2877,11 @@ var Index = React.createClass({
         }
       }
     );
+  },
+  getActiveRuleName: function() {
+    var modal = this.state.rules;
+    var activeItem = modal.getActive();
+    return activeItem ? activeItem.name : '';
   },
   showAnonymousWeinre: function () {
     this.openWeinre();
@@ -3109,20 +3359,20 @@ var Index = React.createClass({
     );
     e && e.preventDefault();
   },
-  disablePlugin: function (e) {
+  setPluginState: function(name, disabled) {
     var self = this;
-    var target = e.target;
     if (self.state.ndp) {
       return message.warn('Not allowed disable plugins.');
     }
     dataCenter.plugins.disablePlugin(
       {
-        name: $(target).attr('data-name'),
-        disabled: target.checked ? 0 : 1
+        name: name,
+        disabled: disabled ? 1 : 0
       },
       function (data, xhr) {
         if (data && data.ec === 0) {
           self.state.disabledPlugins = data.data;
+          dataCenter.setDisabledPlugins(data.data);
           protocols.setPlugins(self.state);
           self.setState({});
         } else {
@@ -3130,6 +3380,10 @@ var Index = React.createClass({
         }
       }
     );
+  },
+  disablePlugin: function (e) {
+    var target = e.target;
+    this.setPluginState($(target).attr('data-name'), !target.checked);
   },
   abort: function (list) {
     if (!Array.isArray(list)) {
@@ -3331,19 +3585,19 @@ var Index = React.createClass({
     if (file.size > MAX_FILE_SIZE) {
       return win.alert('The file size cannot exceed 64m.');
     }
-    var isText = /\.txt$/i.test(file.name);
+    var isText = /\.(?:txt|json)$/i.test(file.name);
     if (isText || /\.har$/i.test(file.name)) {
       var self = this;
       util.readFileAsText(file, function (result) {
         try {
           result = JSON.parse(result);
           if (isText) {
-            dataCenter.addNetworkList(result);
+            dataCenter.importAnySessions(result);
           } else {
             self.importHarSessions(result);
           }
         } catch (e) {
-          win.alert('Unrecognized format.');
+          win.alert('Format error.');
         }
       });
       return;
@@ -3431,6 +3685,15 @@ var Index = React.createClass({
       self.refs.certsInfoDialog.show(data.certs, data.dir);
     });
   },
+  onTopContextMenu: function(e) {
+    if (this.getTabName() !== 'network') {
+      return;
+    }
+    e.preventDefault();
+    var data = util.getMenuPosition(e, 110, 100);
+    data.list = TOP_BAR_MENUS;
+    this.refs.topContextMenu.show(data);
+  },
   onContextMenu: function (e) {
     var count = 0;
     var list = LEFT_BAR_MENUS;
@@ -3467,6 +3730,23 @@ var Index = React.createClass({
     }
     e.preventDefault();
   },
+  onClickTopMenu: function(action) {
+    switch(action) {
+    case 'top':
+      if (this.container) {
+        this.container[0].scrollTop = 0;
+      }
+      break;
+    case 'selected':
+      events.trigger('ensureSelectedItemVisible');
+      break;
+    case 'bottom':
+      if (this.container) {
+        this.container[0].scrollTop = 10000000;
+      }
+      break;
+    }
+  },
   onClickContextMenu: function (action) {
     var self = this;
     var state = self.state;
@@ -3474,7 +3754,7 @@ var Index = React.createClass({
     switch (action) {
     case 'Tree View':
       list[2].checked = !state.network.isTreeView;
-      self.toggleTreeView();
+      setTimeout(self.toggleTreeView, 0);
       break;
     case 'Rules':
       self.disableAllRules(null, function (disabled) {
@@ -3548,6 +3828,17 @@ var Index = React.createClass({
       this.toggleTreeView();
     }
   },
+  download: function(data) {
+    if (!data || !(util.isString(data.content) ||
+      util.isString(data.value) || util.isString(data.base64))) {
+      return;
+    }
+    var base64 = util.getString(data.base64);
+    ReactDOM.findDOMNode(this.refs.filename).value = util.getString(data.name);
+    ReactDOM.findDOMNode(this.refs.dataType).value = base64 ? 'rawBase64' : '';
+    ReactDOM.findDOMNode(this.refs.content).value = base64 || util.getString(data.value|| data.content);
+    ReactDOM.findDOMNode(this.refs.downloadForm).submit();
+  },
   getTabName: function () {
     var state = this.state;
     var rulesMode = state.rulesMode;
@@ -3568,6 +3859,9 @@ var Index = React.createClass({
       name = name !== 'plugins' ? 'network' : name;
     }
     return name || 'network';
+  },
+  isHideRules: function() {
+    return this.state.networkMode || this.state.pluginsMode;
   },
   render: function () {
     var state = this.state;
@@ -3703,7 +3997,7 @@ var Index = React.createClass({
       caUrl += '?type=' + caType;
       caShortUrl += caType;
     }
-    var hideEditor = pluginsMode || networkMode;
+    var hideEditor = this.isHideRules();
     var hideEditorStyle = hideEditor ? HIDE_STYLE : null;
     dataCenter.hideMockMenu = hideEditor;
 
@@ -3716,7 +4010,7 @@ var Index = React.createClass({
           + (rulesOnlyMode || rulesMode ? ' w-show-rules-mode' : '')
         }
       >
-        <div className={'w-menu w-' + name + '-menu-list'}>
+        <div className={'w-menu w-' + name + '-menu-list'} onContextMenu={this.onTopContextMenu}>
           <a
             onClick={this.toggleLeftMenu}
             draggable="false"
@@ -4255,6 +4549,7 @@ var Index = React.createClass({
         </div>
         <div className="w-container box fill">
           <ContextMenu onClick={this.onClickContextMenu} ref="contextMenu" />
+          <ContextMenu onClick={this.onClickTopMenu} ref="topContextMenu" />
           <div
             onContextMenu={this.onContextMenu}
             onDoubleClick={this.onContextMenu}
@@ -4517,7 +4812,7 @@ var Index = React.createClass({
             </div>
           </div>
         </div>
-        <NetworkSettings ref="networkSettings" />
+        {rulesMode ? null : <NetworkSettings ref="networkSettings" />}
         <div ref="rootCADialog" className="modal fade w-https-dialog">
           <div className="modal-dialog">
             <div className="modal-content">
@@ -4978,6 +5273,21 @@ var Index = React.createClass({
         <SyncDialog ref="syncDialog" />
         <JSONDialog ref="jsonDialog" />
         <div id="copyTextBtn" style={{display: 'none'}} />
+        <MockDialog ref="mockDialog" />
+        <RulesDialog ref="rulesDialog" />
+        <form
+          ref="downloadForm"
+          action="cgi-bin/download"
+          style={{ display: 'none' }}
+          method="post"
+          target="downloadTargetFrame"
+        >
+          <input ref="dataType" name="type" type="hidden" />
+          <input ref="filename" name="filename" type="hidden" />
+          <input ref="content" name="content" type="hidden" />
+        </form>
+        <IframeDialog ref="iframeDialog" />
+        <EditorDialog textEditor />
       </div>
     );
   }

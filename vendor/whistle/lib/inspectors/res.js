@@ -1,7 +1,7 @@
 var https = require('https');
 var http = require('http');
 var net = require('net');
-var url = require('url');
+var parseUrl = require('../util/parse-url-safe');
 var mime = require('mime');
 var extend = require('extend');
 var util = require('../util');
@@ -286,7 +286,7 @@ module.exports = function (req, res, next) {
                 };
                 checkH2(req, isHttps);
                 if (proxyUrl) {
-                  proxyOptions = url.parse(proxyUrl);
+                  proxyOptions = parseUrl(proxyUrl);
                   proxyOptions.host = ip;
                   proxyOptions.auth = proxyOptions.auth || req._pacAuth;
                   isSocks = proxyRule.isSocks;
@@ -651,6 +651,9 @@ module.exports = function (req, res, next) {
                       }
                     }
                     options.protocol = useHttps ? 'https:' : 'http:';
+                    if (useHttps && !req.disable.secureOptions) {
+                      util.setSecureOptions(options);
+                    }
                     try {
                       var client = (useHttps ? https : http).request(
                         options,
@@ -780,6 +783,7 @@ module.exports = function (req, res, next) {
                   req.options = options;
                   isHttps &&
                     util.setClientCert(options, key, cert, isPfx, cacheKey);
+                  util.addMatchedRules(req);
                   h2.request(req, res, send);
                 }
               },
@@ -1204,6 +1208,11 @@ module.exports = function (req, res, next) {
                           if (req._hasError) {
                             return;
                           }
+                          if (util.needAbortRes(req)) {
+                            req.__resHeaders = _res.headers;
+                            req.__statusCode = _res.statusCode;
+                            return res.destroy();
+                          }
                           res.src(_res, null, firstChunk);
                           firstChunk = null;
                           var rawNames = res.rawHeaderNames || {};
@@ -1228,7 +1237,8 @@ module.exports = function (req, res, next) {
                             resRules,
                             _resHeaders,
                             req,
-                            req.hostIp
+                            req.hostIp,
+                            req._phost
                           );
                           pluginMgr.postStats(req, res);
                           if (
@@ -1265,6 +1275,7 @@ module.exports = function (req, res, next) {
                             curHeaders = extend({}, _resHeaders);
                             curHeaders['x-whistle-req-id'] = req.reqId;
                           }
+                          util.addMatchedRules(req, _res);
                           try {
                             res.writeHead(
                               _res.statusCode,

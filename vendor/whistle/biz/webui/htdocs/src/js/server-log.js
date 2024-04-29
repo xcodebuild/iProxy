@@ -62,8 +62,7 @@ var ServerLog = React.createClass({
       if (curLogs !== svrLogs && Array.isArray(curLogs)) {
         svrLogs.push.apply(svrLogs, curLogs);
       }
-      state.logs = svrLogs;
-      util.filterLogList(state.logs, self.keyword);
+      state.logs = util.filterLogList(svrLogs, self.keyword, true);
       if (self.props.hide) {
         return;
       }
@@ -167,7 +166,7 @@ var ServerLog = React.createClass({
     clearTimeout(self.filterTimer);
     self.filterTimer = setTimeout(function () {
       self.filterTimer = null;
-      self.setState({ serverKeyword: serverKeyword });
+      self.setState({});
     }, 500);
   },
   showNameInput: function (e) {
@@ -260,6 +259,7 @@ var ServerLog = React.createClass({
     var logs = state.logs || [];
     var level = state.level;
     var disabled = !util.hasVisibleLog(logs);
+    var index = 0;
 
     return (
       <div
@@ -271,6 +271,7 @@ var ServerLog = React.createClass({
         <div className="w-log-action-bar">
           <DropDown onChange={this.changeLevel} options={state.levels} />
           <div className="w-textarea-bar">
+            <RecordBtn onClick={this.handleAction} />
             <a className="w-import" onClick={this.selectFile} draggable="false">
               Import
             </a>
@@ -282,7 +283,6 @@ var ServerLog = React.createClass({
             >
               Export
             </a>
-            <RecordBtn onClick={this.handleAction} />
             <a
               className={'w-clear' + (disabled ? ' w-disabled' : '')}
               onClick={disabled ? undefined : this.clearLogs}
@@ -349,6 +349,9 @@ var ServerLog = React.createClass({
                 log.hide || (level && !hide && log.level !== level)
                   ? ' hide'
                   : '';
+              if (!hide) {
+                ++index;
+              }
               return (
                 <li
                   key={log.id}
@@ -356,6 +359,7 @@ var ServerLog = React.createClass({
                   className={'w-' + log.level + hide}
                 >
                   <pre>
+                    <strong>#{index}</strong>
                     {text && text.length >= 2100 ? (
                       <ExpandCollapse text={text} />
                     ) : (

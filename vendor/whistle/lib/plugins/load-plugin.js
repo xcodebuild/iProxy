@@ -28,7 +28,6 @@ var getEncodeTransform = transproto.getEncodeTransform;
 var getDecodeTransform = transproto.getDecodeTransform;
 
 var LEVELS = ['log', 'error', 'warn', 'info', 'debug', 'trace'];
-var URL_RE = /^https?:\/\/[^\s]+$/;
 var HTTPS_RE = /^(?:https|wss):\/\//;
 var MAX_BODY_SIZE = 1024 * 256;
 var PING_INTERVAL = 22000;
@@ -481,6 +480,7 @@ var initReq = function (req, res, isServer) {
   req.isHttps = oReq.isHttps = HTTPS_RE.test(fullUrl);
   oReq.remoteAddress = req.headers[REMOTE_ADDR_HEAD] || '127.0.0.1';
   oReq.remotePort = parseInt(req.headers[REMOTE_PORT_HEAD], 10) || 0;
+  req.notDecompressed = oReq.notDecompressed = req.headers['x-whistle-disable-ws-decompress'] === '1';
   req.fromTunnel = oReq.fromTunnel = req.headers[FROM_TUNNEL_HEADER] === '1';
   delete req.headers[FROM_TUNNEL_HEADER];
   delete req.headers[REMOTE_ADDR_HEAD];
@@ -1017,7 +1017,7 @@ function setReqRules(uri, reqRules) {
 
 function addFrameHandler(req, socket, maxWsPayload, fromClient, toServer) {
   socket.wsExts = req.headers['sec-websocket-extensions'] || '';
-  var receiver = wsParser.getReceiver(socket, !fromClient, maxWsPayload);
+  var receiver = wsParser.getReceiver(socket, !fromClient, maxWsPayload, req.notDecompressed);
   var emit = socket.emit;
   var write = socket.write;
   var end = socket.end;
@@ -1210,6 +1210,11 @@ module.exports = async function (options, callback) {
   PROXY_ID_HEADER = config.PROXY_ID_HEADER;
   REQ_FROM_HEADER = config.REQ_FROM_HEADER;
   options.REQ_FROM_HEADER = REQ_FROM_HEADER; // 兼容老逻辑
+  options.getTempFilePath = function(filePath) {
+    if (common.TEMP_PATH_RE.test(filePath)) {
+      return path.join(config.TEMP_FILES_PATH, RegExp.$1);
+    }
+  };
 
   GLOBAL_PLUGIN_VARS_HEAD = options.GLOBAL_PLUGIN_VARS_HEAD;
   PLUGIN_VARS_HEAD = options.PLUGIN_VARS_HEAD;
@@ -1790,7 +1795,7 @@ module.exports = async function (options, callback) {
           req.setRedirect = function (url) {
             if (!url) {
               location = null;
-            } else if (URL_RE.test(url)) {
+            } else if (common.isUrl(url)) {
               location = url;
               htmlBody = null;
               htmlUrl = null;

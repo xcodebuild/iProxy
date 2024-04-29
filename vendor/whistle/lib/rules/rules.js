@@ -1,4 +1,4 @@
-var url = require('url');
+var parseUrl = require('../util/parse-url-safe');
 var net = require('net');
 var extend = require('extend');
 var util = require('../util');
@@ -12,6 +12,7 @@ var values = rulesUtil.values;
 var env = process.env || {};
 var allowDnsCache = true;
 var SUB_MATCH_RE = /\$[&\d]/;
+var BODY_MATCH_RE = /\$b[&\d]/;
 var SPACE_RE = /\s+/g;
 var MULTI_TO_ONE_RE = /^\s*line`\s*[\r\n]([\s\S]*?)[\r\n]\s*`\s*?$/gm;
 var MULTI_LINE_VALUE_RE =
@@ -525,6 +526,9 @@ function resolveResCookiesVar(req, key) {
         case 'samesite':
           item.samesite = item.sameSite = item.SameSite = c[key];
           break;
+        case 'partitioned':
+          item.partitioned = true;
+          break;
         default:
           if (!cookies[key]) {
             item.value = c[key];
@@ -838,11 +842,13 @@ function removeFilters(rule) {
   }
 }
 
-function replaceSubMatcher(url, regExp) {
-  if (!regExp || !SUB_MATCH_RE.test(url)) {
+function replaceSubMatcher(url, regExp, req) {
+  var vals = req._bodySubVals;
+  req._bodySubVals = undefined;
+  if ((!regExp || !SUB_MATCH_RE.test(url)) && (!vals || !BODY_MATCH_RE.test(url))) {
     return url;
   }
-  return util.replacePattern(url, regExp);
+  return util.replacePattern(url, regExp, vals);
 }
 
 function resolveRuleList(req, list, vals, index, isFilter, isEnableProxy, host) {
@@ -882,7 +888,7 @@ function resolveRuleList(req, list, vals, index, isFilter, isEnableProxy, host) 
   };
   var getExactRule = function (relPath, regObj) {
     origMatcher = resolveVar(rule, vals, req);
-    origMatcher = replaceSubMatcher(origMatcher, regObj);
+    origMatcher = replaceSubMatcher(origMatcher, regObj, req);
     matcher = setProtocol(origMatcher, curUrl);
     result = extend(
       {
@@ -899,6 +905,7 @@ function resolveRuleList(req, list, vals, index, isFilter, isEnableProxy, host) 
     results.push(result);
   };
   var checkFilter = function () {
+    req._bodySubVals = undefined;
     if (notHttp && protoMgr.isFileProxy(rule.matcher)) {
       return false;
     }
@@ -931,7 +938,7 @@ function resolveRuleList(req, list, vals, index, isFilter, isEnableProxy, host) 
         regExp['0'] = curUrl;
         matcher = resolveVar(rule, vals, req);
         // 支持 $x 包含 `|` 的情形
-        matcher = setProtocol(replaceSubMatcher(matcher, regExp), curUrl);
+        matcher = setProtocol(replaceSubMatcher(matcher, regExp, req), curUrl);
         files = getFiles(matcher);
         result = extend({ url: matcher, files: files }, rule);
         result.matcher = matcher;
@@ -981,7 +988,7 @@ function resolveRuleList(req, list, vals, index, isFilter, isEnableProxy, host) 
             --index < 0
           ) {
             origMatcher = resolveVar(rule, vals, req);
-            origMatcher = replaceSubMatcher(origMatcher, regObj);
+            origMatcher = replaceSubMatcher(origMatcher, regObj, req);
             matcher = setProtocol(origMatcher, curUrl);
             files = getFiles(matcher);
             if (wildcard.hasQuery && filePath) {
@@ -1011,6 +1018,7 @@ function resolveRuleList(req, list, vals, index, isFilter, isEnableProxy, host) 
     ) {
       var len = pattern.length;
       origMatcher = resolveVar(rule, vals, req);
+      origMatcher = replaceSubMatcher(origMatcher, null, req);
       matcher = setProtocol(origMatcher, curUrl);
       files = getFiles(matcher);
       var hasQuery = pattern.indexOf('?') !== -1;
@@ -1037,7 +1045,7 @@ function resolveRuleList(req, list, vals, index, isFilter, isEnableProxy, host) 
 }
 
 function resolveProps(req, rules, vals, isIgnore) {
-  var list = getRuleList(req, rules, vals);
+  var list = this.getRuleList(req, rules, vals);
   var result = {};
   if (isIgnore) {
     list = list.filter(function(rule) {
@@ -1813,7 +1821,12 @@ function matchFilter(url, filter, req) {
       return false;
     }
     if (filter.bodyPattern) {
-      result = filter.bodyPattern.test(reqBody);
+      if (result = filter.bodyPattern.exec(reqBody)) {
+        req._bodySubVals = [reqBody];
+        for (var i = 1, len = result.length; i < len; i++) {
+          req._bodySubVals[i] = (result[i] || '');
+        }
+      }
     } else {
       reqBody = reqBody.toLowerCase();
       result =
@@ -2017,7 +2030,7 @@ proto.resolveHost = function (
 
 proto.lookupHost = function (req, callback) {
   req.curUrl = formatUrl(util.setProtocol(req.curUrl));
-  var options = url.parse(req.curUrl);
+  var options = parseUrl(req.curUrl);
   lookup(
     options.hostname,
     callback,
@@ -2043,7 +2056,7 @@ function getHostFromList(list, req, vals) {
   var host;
   for (var i = 0, len = list.length; i < len; i++) {
     var mgr = list[i];
-    var _host = mgr && getRule(req, mgr._rules.host, vals[i] || mgr._values);
+    var _host = mgr && this.getRule(req, mgr._rules.host, vals[i] || mgr._values);
     if (_host) {
       if (util.isImportant(_host)) {
         return _host;
@@ -2076,7 +2089,7 @@ proto.getHost = function (req, pluginRulesMgr, rulesFileMgr, headerRulesMgr) {
     list = [pluginRulesMgr, this, rulesFileMgr, headerRulesMgr];
     valList = [null, vals, req._scriptValues, vals];
   }
-  var host = getHostFromList(list, req, valList);
+  var host = getHostFromList.call(this, list, req, valList);
   if (!host || util.exactIgnore(filter, host)) {
     return;
   }
@@ -2089,8 +2102,8 @@ proto.getHost = function (req, pluginRulesMgr, rulesFileMgr, headerRulesMgr) {
 };
 
 proto.resolveFilter = function (req) {
-  var filter = resolveProps(req, this._rules.filter, this._values);
-  var ignore = resolveProps(req, this._rules.ignore, this._values, true);
+  var filter = resolveProps.call(this, req, this._rules.filter, this._values);
+  var ignore = resolveProps.call(this, req, this._rules.ignore, this._values, true);
   util.resolveFilter(ignore, filter);
   delete filter.filter;
   delete filter.ignore;
@@ -2099,7 +2112,7 @@ proto.resolveFilter = function (req) {
   return filter;
 };
 proto.resolveDisable = function (req) {
-  return resolveProps(req, this._rules.disable, this._values);
+  return resolveProps.call(this, req, this._rules.disable, this._values);
 };
 var pluginProtocols = [
   'enable',
@@ -2125,11 +2138,12 @@ function resolveRules(req, isReq, isRes) {
   if (req.isInternalUrl) {
     return {};
   }
+  var self = this;
   var rule;
-  var rules = this._rules;
+  var rules = self._rules;
   var _rules = {};
-  var vals = this._values;
-  var filter = this.resolveFilter(req);
+  var vals = self._values;
+  var filter = self.resolveFilter(req);
   var protos;
   if (req.isPluginReq) {
     protos = req._isProxyReq ? proxyProtocols : pluginProtocols;
@@ -2144,7 +2158,7 @@ function resolveRules(req, isReq, isRes) {
         name === 'rule' ||
         name === 'plugin' ||
         !filter[name]) &&
-      (rule = getRule(req, rules[name], vals))
+      (rule = self.getRule(req, rules[name], vals))
     ) {
       _rules[name] = rule;
     }
@@ -2153,7 +2167,7 @@ function resolveRules(req, isReq, isRes) {
   multiMatchs.forEach(function (name) {
     rule = _rules[name];
     if (rule) {
-      rule.list = getRuleList(req, rules[name], vals);
+      rule.list = self.getRuleList(req, rules[name], vals);
       util.filterRepeatPlugin(rule);
       if (name === 'rulesFile' || name === 'resScript') {
         var hasScript,
@@ -2178,6 +2192,19 @@ function resolveRules(req, isReq, isRes) {
   return _rules;
 }
 
+proto.getRule = function(req, list, vals, index, isFilter, host) {
+  if (!this._isGlobal || !req._disabledProxyRules) {
+    return getRule(req, list, vals, index, isFilter, host);
+  }
+};
+
+proto.getRuleList = function(req, list, vals, isEnableProxy) {
+  if (!this._isGlobal || !req._disabledProxyRules) {
+    return getRuleList(req, list, vals, isEnableProxy);
+  }
+  return [];
+};
+
 proto.resolveRules = function (req) {
   return resolveRules.call(this, req);
 };
@@ -2191,7 +2218,7 @@ proto.resolveResRules = function (req) {
 };
 
 proto.resolveEnable = function (req) {
-  return resolveProps(req, this._rules.enable, this._values);
+  return resolveProps.call(this, req, this._rules.enable, this._values);
 };
 
 function mergeRule(rules, list, name) {
@@ -2216,8 +2243,8 @@ proto.resolveProxyProps = function (req) {
   if (req.curUrl === req.fullUrl) {
     return;
   }
-  var enable = getRuleList(req, this._rules.enable, this._values, true);
-  var disable = getRuleList(req, this._rules.disable, this._values, true);
+  var enable = this.getRuleList(req, this._rules.enable, this._values, true);
+  var disable = this.getRuleList(req, this._rules.disable, this._values, true);
   if (!enable.length && !disable.length) {
     return;
   }
@@ -2254,12 +2281,12 @@ function resolveSingleRule(req, protocol, multi) {
   }
   var list = protocol === 'sniCallback' ? this._sniCallback : this._rules[protocol];
   if (multi) {
-    list = getRuleList(req, list, this._values).filter(function(rule) {
+    list = this.getRuleList(req, list, this._values).filter(function(rule) {
       return !util.exactIgnore(filter, rule);
     });
     return list.length ? list : null;
   }
-  var rule = getRule(req, list, this._values);
+  var rule = this.getRule(req, list, this._values);
   return rule && !util.exactIgnore(filter, rule) ? rule : null;
 }
 
@@ -2292,11 +2319,11 @@ proto.resolveInternalHost = function (req) {
 proto.hasReqScript = function (req) {
   return req.isPluginReq
     ? null
-    : getRule(req, this._rules.rulesFile, this._values);
+    : this.getRule(req, this._rules.rulesFile, this._values);
 };
 
 proto.resolveProxy = function resolveProxy(req, host) {
-  var proxy = getRule(req, this._rules.proxy, this._values, null, null, host);
+  var proxy = this.getRule(req, this._rules.proxy, this._values, null, null, host);
   var matcher = proxy && proxy.matcher;
   var name = matcher && matcher.substring(0, matcher.indexOf(':'));
   var filter = this.resolveFilter(req);
@@ -2326,15 +2353,15 @@ proto.resolveSNICallback = function (req) {
 };
 
 proto.resolveLocalRule = function (req) {
-  return getRule(req, this._rules._localRule);
+  return this.getRule(req, this._rules._localRule);
 };
 proto.resolveClientCert = function (req) {
-  return getRule(req, this._rules._clientCerts);
+  return this.getRule(req, this._rules._clientCerts);
 };
 proto.resolveBodyFilter = function (req) {
   return req.isPluginReq
     ? null
-    : getRule(
+    : this.getRule(
         req,
         req._bodyFilters || this._rules._bodyFilters,
         null,
