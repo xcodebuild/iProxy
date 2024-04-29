@@ -114,6 +114,7 @@ textarea {
 .visible {
   visibility: visible!important;
 }
+
 .box {
   display: -webkit-box;
   display: -moz-box;
@@ -146,6 +147,15 @@ textarea {
   text-align: center;
   font-style: italic;
   color: #ccc;
+}
+.w-empty-data {
+  position: absolute;
+  width: 100px;
+  text-align: center;
+  color: #aaa;
+  top: 50%;
+  left: 50%;
+  margin: -20px 0 0 -50px;
 }
 .w-expand-collapse {
   margin-left: 5px;
@@ -325,13 +335,24 @@ a {
 }
 
 .w-editor-dialog .modal-dialog {
-  width: 720px;
+  width: 960px;
 }
 
 .w-editor-dialog textarea {
-  width: 700px;
-  height: 320px;
+  width: 940px;
+  height: 520px;
   padding: 5px;
+  border-radius: 3px;
+  border: 1px solid #ccc;
+}
+
+.w-big-editor-dialog .modal-dialog {
+  width: 1060px;
+}
+
+.w-big-editor-dialog textarea {
+  width: 1040px;
+  height: 600px;
 }
 
 .w-win-dialog .modal-dialog {

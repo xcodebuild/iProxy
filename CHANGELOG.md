@@ -1,3 +1,81 @@
+# v2.9.70
+1. feat: 插件列表添加自定义右键菜单
+2. feat: 支持通过 `pattern jsAppend://[value|file|url] linePropslineProps://nomodule lineProps://module lineProps://defer lineProps://async lineProps://crossorigin`  设置标签属性
+
+# v2.9.69
+1. fix: https://github.com/avwo/whistle/issues/1064
+2. feat: 支持通过 `http://local.whistlejs.com/?dataUrl=encodeURIComponent(dataUrl)` 导入 `dataUrl` 返回的数据
+
+# v2.9.68
+1. feat: 新增 `enable://abortRes` 在响应阶段中断请求
+2. feat: 优化界面展示
+
+# v2.9.67
+1. feat: 新增 `enable://requestWithMatchedRules` 及 `enable://responseWithMatchedRules` 支持在请求头或响应头带上当前匹配的规则
+2. feat: 调整 Tools/Console 日志的缓存大小
+3. feat: Values 的编辑器添加快捷键 `Shift + Ctrl[Command] + F`、`Shift + Ctrl[Command] + I` 分别用来格式化和通过 JSONView 查看 JSON 数据
+4. feat: Whistle 默认会对 WebSocket 压缩包进行解压，有[用户反馈存在解压bug][https://github.com/avwo/whistle/issues/1048]，故新增 `wss://xxx disable://wsDecompress` 禁止解压数据包
+5. feat: WebSocket Frames 列表添加右键功能
+
+# v2.9.66
+1. feat: 支持通过正则表达式搜索日志
+2. feat: 支持通过 `disable://captureHttp disable://captureHttps`  关闭 http 或 https 的 TUNNEL 请求
+
+# v2.9.65
+1. feat: 支持 Rules 里面的 Values 和临时文件通过 Ctrl[Command] + 鼠标点击快速修改
+2. feat: 新增默认临时空白文件 `temp/blank`（支持自定义后缀 `temp/blank.xxx`）
+   > 可以通过在 Rules 新建文件 `protocol://temp/blank.xxx` 再通过Ctrl[Command] + 鼠标点击快速修改生成新的临时文件
+3. feat: Values 右键菜单新增 JSON / Inspect 查看 JSON 数据对象
+
+# v2.9.64
+1. feat: Mock 功能支持对临时文件添加注释
+2. feat: 优化 Rules & Values 的拖拽功能
+3. fix: https://github.com/avwo/whistle/issues/1040
+
+# v2.9.63
+1. feat: 支持 Cookie 的 `Partitioned` 属性（该属性需要跟 `Secure`、`SameSite=None` 一起使用）
+2. feat: Composer 添加 `CopyAsCURL` 按钮
+3. feat: Composer 添加 `ProxyRules` 选项，去选后可以禁用 Proxy (Whistle) 设置的所有规则（Proxy 里面的规则优先级高于 Composer Rules）
+
+# v2.9.62
+1. chore: 更新 CodeMirror 版本
+2. feat: Network Settings 支持导入导出
+3. feat: Rules & Values 支持通过 `b:keyword` 搜索内容
+4. feat: Composer 支持导入导出
+5. feat: 插件 Option 支持设置 `openInModal` 以对话框形式打开
+6. feat: Network 列表新增 `Back to the bottom` 按钮
+
+# v2.9.61
+1. fix: 在新版本 Node 可能存在 [pipe](https://wproxy.org/whistle/rules/pipe.html) 功能失效问题
+2. fix: https://github.com/avwo/whistle/issues/1017
+
+# v2.9.60
+1. fix: https://github.com/avwo/whistle/issues/1012
+
+# v2.9.59
+1. feat: 支持 https://github.com/avwo/whistle/issues/978
+2. feat: 客户端支持直接使用 WebView 预览抓包内容
+
+
+# v2.9.58
+1. feat: Network 右键菜单 Mock > Export，通过插件或拖拽导入 Mock 数据
+2. feat: 插件支持 `window.whistleBridge.download({name, value[, base64]})` 下载指定数据
+3. feat: 新增特殊路径 `/_WHISTLE_5b6af7b9884e1165_/`，Whistle 会自动将url 里面第一个此路径片段替换成 `/`
+
+# v2.9.57
+1. feat: Composer 添加修改请求参数按钮 `Params`
+2. feat: Composer 面板优化
+3. feat: Composer 添加 Cookies 按钮方便获取当前抓包记录里面对应域名的 Cookie
+4. feat: 支持通过启动参数 `uiExt` 往页面注入 js 或 html （把 Whistle 作为第三方 npm 包使用时可用）
+	``` js
+	uiExt?: {
+    required?: boolean;
+    htmlPrepend?: string;
+    htmlAppend?: string;
+    jsPrepend?: string;
+    jsAppend?: string;
+  };
+	```
 
 # v2.9.56
 1. feat: 支持通过 `Online / IPv6-only network` 强制 dns 获取 ipv6（命令行版本还可以通过 `-M ipv6Only` 开启）

@@ -54,6 +54,18 @@ proto.hasChanged = function () {
   });
 };
 
+proto.getGroupName = function(name) {
+  var i = this.list.indexOf(name);
+  if (i !== -1) {
+    for (; i >=0; i--) {
+      name = this.list[i];
+      if (util.isGroup(name)) {
+        return name;
+      }
+    }
+  }
+};
+
 proto._setBoolProp = function (name, prop, bool) {
   var item = this.get(name);
   if (item) {
@@ -154,7 +166,7 @@ proto.moveTo = function (fromName, toName, group, toTop) {
   var list = this.list;
   var fromIndex = list.indexOf(fromName);
   var toIndex = list.indexOf(toName);
-  if (fromIndex !== -1 && toIndex !== -1) {
+  if (fromIndex !== -1 && toIndex !== -1 && fromIndex !== toIndex) {
     if (group && util.isGroup(fromName)) {
       var data = this.data;
       var children = [fromName];
@@ -179,7 +191,7 @@ proto.moveTo = function (fromName, toName, group, toTop) {
       list.splice(fromIndex, len);
       children.unshift(toIndex, 0);
       list.splice.apply(list, children);
-    } else if (toTop || util.isGroup(fromName) || !util.isGroup(toName)) {
+    } else if (toTop || util.isGroup(fromName) || !util.isGroup(toName) || this.getGroupName(fromName) === toName) {
       list.splice(fromIndex, 1);
       list.splice(toIndex, 0, fromName);
     } else {
@@ -268,13 +280,48 @@ proto.setActive = function (name, active) {
   return item;
 };
 
-proto.getActive = function () {
+proto.getActiveObj = function() {
+  var obj = {};
   for (var i in this.data) {
     var item = this.data[i];
-    if (item.active && !util.isGroup(item.name)) {
-      return item;
+    if (util.isGroup(item.name)) {
+      if (item._isNewGroup) {
+        delete item._isNewGroup;
+        obj.groupItem = item;
+        if (obj.activeItem) {
+          return obj;
+        }
+      }
+    } else {
+      if (item.active) {
+        obj.activeItem = item;
+        if (obj.groupItem) {
+          return obj;
+        }
+      }
     }
   }
+  return obj;
+};
+
+proto.getActive = function (ensure) {
+  var first;
+  ensure = ensure === true;
+  for (var i in this.data) {
+    var item = this.data[i];
+    if (!util.isGroup(item.name)) {
+      if (item.active) {
+        return item;
+      }
+      if (ensure) {
+        first = first || item;
+      }
+    }
+  }
+  if (first) {
+    first.active = true;
+  }
+  return first;
 };
 
 proto.remove = function (name) {
@@ -354,38 +401,37 @@ proto.getSibling = function (name) {
  * selected[s, active, a]: 根据激活的过滤
  */
 proto.search = function (keyword, disabledType) {
-  this._type = '';
-  this._keyword = typeof keyword != 'string' ? '' : keyword.trim();
-  if (
-    !disabledType &&
-    this._keyword &&
-    /^(selected|s|active|a):(.*)$/.test(keyword)
-  ) {
+  keyword = typeof keyword === 'string' ? keyword.trim() : '';
+  if (keyword &&(disabledType ? /^(b|v):(.*)$/ : /^(selected|s|active|a|b|v):(.*)$/).test(keyword)) {
     this._type = RegExp.$1;
-    this._keyword = RegExp.$2.trim();
+    keyword = RegExp.$2.trim();
+  } else {
+    this._type = ''; // reset
   }
+  this._keyword = keyword && (util.toRegExp(keyword) || keyword.toLowerCase());
   this.filter();
-  return !this._keyword;
+  return !keyword;
 };
 
 proto.filter = function () {
   var keyword = this._keyword;
   var list = this.list;
-  var hasFilterType = !!this._type;
+  var filterBody = this._type === 'b' || this._type === 'v';
+  var filterSelected = !!this._type && !filterBody;
   var data = this.data;
-
-  if (!keyword) {
-    list.forEach(function (name) {
-      var item = data[name];
-      item.hide = hasFilterType && !item.selected;
-    });
-    return;
-  }
 
   list.forEach(function (name) {
     var item = data[name];
-    item.hide =
-      (hasFilterType && !item.selected) || (name || '').indexOf(keyword) == -1;
+    var hideSelected = filterSelected && !item.selected;
+    if (!keyword || hideSelected) {
+      item.hide = hideSelected;
+      return;
+    }
+    if (filterBody) {
+      item.hide = !item.value || util.checkKey(item.value, item.value.toLowerCase(), keyword);
+    } else {
+      item.hide = !name || util.checkKey(name, name.toLowerCase(), keyword);
+    }
   });
   return list;
 };

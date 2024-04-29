@@ -30,6 +30,10 @@
   color: #5bbd72;
   display: none;
 }
+.w-values-list a {
+  background: #f7f7f7;
+}
+
 .w-list-content {
   border-bottom: 1px solid #ccc;
   border-right: 1px solid #ccc;
@@ -74,6 +78,10 @@
   padding-left: 5px;
 }
 
+.w-list-data .w-list-group.w-list-group-active {
+  background: #e0e0e0;
+}
+
 .w-list-data .w-list-group:hover, .w-list-data .w-list-group:active {
   color: #000;
 }
@@ -108,4 +116,12 @@
 .w-list-group.w-group-empty {
   background-color: #F5F5F5;
   color: #888;
+}
+
+.w-has-selected-rules .CodeMirror {
+  border-top: 3px solid #75bb79;
+}
+
+.w-has-selected-rules.w-has-selected-disabled .CodeMirror {
+  border-top-color: #ccc;
 }
