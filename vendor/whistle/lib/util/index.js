@@ -262,7 +262,7 @@ var MAX_LEN = 1024 * 1024 * 5;
 function getLatestVersion(registry, cb) {
   if (registry && typeof registry !== 'string') {
     var name = registry.moduleName;
-    registry = registry.registry || 'https://registry.npmjs.org';
+    registry = registry || 'https://registry.npmjs.org';
     registry = registry.replace(/\/$/, '') + '/' + name;
   }
   if (!registry) {
