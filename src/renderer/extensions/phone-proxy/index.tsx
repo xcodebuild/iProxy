@@ -63,7 +63,7 @@ export class PhoneProxy extends Extension {
                 (async () => {
                     const _address = await this.coreAPI.getIp();
                     setAddress(_address);
-                    setCurrentInterface(get(_address, '0.interface'));
+                    setCurrentInterface(get(_address, '0.interface') as any);
                 })();
             }, []);
 

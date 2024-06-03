@@ -130,12 +130,12 @@ export const Editor = (props: Props) => {
                         });
                         // @ts-ignore
                         editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KEY_F, () => {
-                            editor.getAction('actions.find').run();
+                            editor.getAction('actions.find')!.run();
 
                             // dirty fix for #194
                             // I have no idea why search input dose not get focus at first time
                             setTimeout(() => {
-                                editor.getAction('actions.find').run();
+                                editor.getAction('actions.find')!.run();
                             }, 50);
                         });
                         // @ts-ignore
