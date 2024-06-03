@@ -261,29 +261,29 @@ exports.parseRawJson = evalJson;
 var MAX_LEN = 1024 * 1024 * 5;
 
 function getLatestVersion(registry, cb) {
-  if (registry && typeof registry !== 'string') {
-    var name = registry.moduleName;
-    registry = registry || 'https://registry.npmjs.org';
-    registry = registry.replace(/\/$/, '') + '/' + name;
-  }
-  if (!registry) {
-    return cb();
-  }
-  httpMgr.request(
-    {
-      url: registry,
-      maxLength: MAX_LEN
-    },
-    function (err, body, res) {
-      if (err || res.statusCode !== 200) {
-        body = null;
-      } else if (body) {
-        body = parseJSON(body);
-      }
-      body = body && body['dist-tags'];
-      cb(body && body['latest']);
-    }
-  );
+  // if (registry && typeof registry !== 'string') {
+  //   var name = registry.moduleName;
+  //   registry = registry || 'https://registry.npmjs.org';
+  //   registry = registry.replace(/\/$/, '') + '/' + name;
+  // }
+  // if (!registry) {
+  //   return cb();
+  // }
+  // httpMgr.request(
+  //   {
+  //     url: registry,
+  //     maxLength: MAX_LEN
+  //   },
+  //   function (err, body, res) {
+  //     if (err || res.statusCode !== 200) {
+  //       body = null;
+  //     } else if (body) {
+  //       body = parseJSON(body);
+  //     }
+  //     body = body && body['dist-tags'];
+  //     cb(body && body['latest']);
+  //   }
+  // );
 }
 
 exports.getRegistry = function(pkg) {
