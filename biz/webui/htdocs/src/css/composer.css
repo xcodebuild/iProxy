@@ -16,11 +16,11 @@
 }
 
 .w-composer-url .w-filter-hint {
-  width: calc(100% - 210px);
-  z-index: 1;
+  width: calc(100% - 218px);
+  z-index: 2;
   top: 30px;
   bottom: unset;
-  left: 105px;
+  left: 113px;
   overflow-x: hidden;
   overflow-y: auto;
 }
@@ -599,7 +599,7 @@ textarea.w-composer-rules {
   padding: 0 5px;
   overflow: auto;
   white-space: pre;
-  background-color: lightyellow;
+  background-color: #efefef;
 }
 
 .w-composer-history-footer {

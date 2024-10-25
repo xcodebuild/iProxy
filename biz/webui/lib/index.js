@@ -6,7 +6,6 @@ var https = require('https');
 var parseReqUrl = require('parseurl');
 var bodyParser = require('body-parser');
 var crypto = require('crypto');
-var cookie = require('cookie');
 var fs = require('fs');
 var zlib = require('zlib');
 var extend = require('extend');
@@ -39,6 +38,8 @@ var GUEST_PATHS = ['/cgi-bin/composer', '/cgi-bin/socket/data', '/cgi-bin/abort'
 var PLUGIN_PATH_RE = /^\/(whistle|plugin)\.([^/?#]+)(\/)?/;
 var STATIC_SRC_RE = /\.(?:ico|js|css|png)$/i;
 var UPLOAD_URLS = ['/cgi-bin/values/upload', '/cgi-bin/composer', '/cgi-bin/download'];
+var ALLOW_CROSS_URLS = ['/cgi-bin/top', '/cgi-bin/status', '/cgi-bin/server-info',
+    '/cgi-bin/rootca', '/cgi-bin/check-update', '/cgi-bin/log/set'];
 var proxyEvent, util, pluginMgr;
 var MAX_AGE = 60 * 60 * 24 * 3;
 var MENU_HTML = fs.readFileSync(path.join(__dirname, '../../../assets/menu.html'));
@@ -67,6 +68,26 @@ function shasum(str) {
   var shasum = crypto.createHash('sha1');
   shasum.update(str || '');
   return shasum.digest('hex');
+}
+
+function parseCookie(str) {
+  var result = {};
+  str && str.split(';').forEach(function(pair) {
+    var index = pair.indexOf('=');
+    if (index === -1) {
+      return;
+    }
+    var key = pair.substring(0, index).trim();
+    var val = pair.substring(index + 1).trim();
+    if (result[key] == null) {
+      try {
+        result[key] = decodeURIComponent(val);
+      } catch (e) {
+        result[key] = val;
+      }
+    }
+  });
+  return result;
 }
 
 function getLoginKey (req, res, auth) {
@@ -112,7 +133,7 @@ function verifyLogin(req, res, auth) {
     return true;
   }
   var authKey = auth.authKey;
-  var cookies = cookie.parse(req.headers.cookie || '');
+  var cookies = parseCookie(req.headers.cookie);
   var lkey = cookies[authKey];
   var correctKey = getLoginKey(req, res, auth);
   if (correctKey === lkey) {
@@ -125,12 +146,12 @@ function verifyLogin(req, res, auth) {
     queryAuth.pass = queryAuth.pass && shasum(queryAuth.pass);
   }
   if (equalAuth(headerAuth, auth) || equalAuth(queryAuth, auth)) {
-    var options = {
-      expires: new Date(Date.now() + (MAX_AGE * 1000)),
-      maxAge: MAX_AGE,
-      path: '/'
-    };
-    res.setHeader('Set-Cookie', cookie.serialize(authKey, correctKey, options));
+    res.setHeader('Set-Cookie', [
+      authKey + '=' + util.encodeURIComponent(correctKey),
+      'Max-Age=' + MAX_AGE,
+      'Path=/',
+      'Expires=' + new Date(Date.now() + (MAX_AGE * 1000)).toUTCString()
+    ].join('; '));
     return true;
   }
 }
@@ -270,20 +291,60 @@ app.use(function(req, res, next) {
   if (req.headers.host !== 'rootca.pro') {
     return next();
   }
-  var type = 'crt';
-  if (!req.path.indexOf('/cer')) {
-    type = 'cer';
+  var type = 'cer';
+  if (!req.path.indexOf('/crt')) {
+    type = 'crt';
   } else if (!req.path.indexOf('/pem')) {
     type = 'pem';
   }
   res.download(getRootCAFile(), 'rootCA.' + type);
 });
 
+function isAllowHost(host) {
+  var list = config.allowOrigin;
+  if (list) {
+    for (var i = 0, len = list.length; i < len; i++) {
+      var h = list[i];
+      if (typeof h === 'string' ? host === h : h.test(host)) {
+        return true;
+      }
+    }
+  }
+}
+
+function checkInternalPath(req) {
+  if (config.allowAllOrigin || ALLOW_CROSS_URLS.indexOf(req.path) !== -1) {
+    return true;
+  }
+  var host = req.headers['x-whistle-origin-host'];
+  return !host || isAllowHost(host);
+}
+
+function checkAllowOrigin(req) {
+  var host = req.headers.origin;
+  if (!host || typeof host !== 'string' ||
+    req.headers['sec-fetch-site'] === 'same-origin') {
+    return false;
+  }
+  if (config.allowAllOrigin) {
+    return true;
+  }
+  if (!config.allowOrigin) {
+    return false;
+  }
+  var index = host.indexOf('://');
+  if (index !== -1) {
+    host = host.substring(index + 3);
+  }
+  host = util.parseHost(host)[0];
+  return host && isAllowHost(host);
+}
+
 function cgiHandler(req, res) {
-  if (UP_PATH_REGEXP.test(req.path)) {
+  if (UP_PATH_REGEXP.test(req.path) || !checkInternalPath(req)) {
     return res.status(403).end('Forbidden');
   }
-  if (req.headers.origin) {
+  if (checkAllowOrigin(req)) {
     res.setHeader('access-control-allow-origin', req.headers.origin);
     res.setHeader('access-control-allow-credentials', true);
   }
