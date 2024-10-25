@@ -29,12 +29,16 @@ var httpsAgents = new LRU({ max: 360 });
 var socksAgents = new LRU({ max: 100 });
 var version = process.version.substring(1).split('.');
 var disableAgent = version[0] > 10;
+var useVerbatim = version[0] >= 17;
+var hasIPv6First = version[0] >= 22 && version[1] >= 1;
+var hasDnsOrder = typeof dns.setDefaultResultOrder === 'function';
 var uid =
   Date.now() + '-' + process.pid + '-' + Math.floor(Math.random() * 10000);
 var IPV4_RE = /^([\d.]+)(:\d{1,5})?$/;
 var IPV6_RE = /^\[([\w:]+)\](:\d{1,5})?$/;
 var noop = function () {};
 var DATA_KEY_RE = /^(clientip|clientid|tunneldata)([=.])([\w.-]+)$/i;
+var DNS_ORDERS = ['ipv4First', 'ipv4first', 'ipv6first', 'ipv6First', 'verbatim'];
 var LOCAL_UI_HOST_LIST = [
   'local.whistlejs.com',
   'local.wproxy.org',
@@ -60,7 +64,15 @@ var variableProperties = [
   'dnsCache',
   'allowDisableShadowRules'
 ];
+if (hasDnsOrder) {
+  if (hasIPv6First) {
+    config.verbatim = 2;
+  } else {
+    config.verbatim = 1;
+  }
+}
 
+config.defaultDnsOrder = useVerbatim ? 1 : 2;
 config.uid = uid;
 config.rejectUnauthorized = false;
 config.enableH2 = version[0] > 12; // 支持 HTTP2 要求的最低 Node 版本
@@ -125,6 +137,8 @@ config.PLUGIN_HOOKS = {
 
 var KEEP_ALIVE_MSECS = 10000;
 var CONN_TIMEOUT = 30000;
+var DNS_ORDERS_OPTS = ['', 'verbatim', 'ipv4first', hasIPv6First ? 'ipv6first' : ''];
+var DOMAIN_STAR_RE = /([*~]+)(\\.)?/g;
 
 config.CONN_TIMEOUT = CONN_TIMEOUT;
 
@@ -135,6 +149,18 @@ var getHostPort = common.getHostPort;
 
 config.getHomedir = getHomedir;
 config.getHomePath = getHomePath;
+
+function domainToRegExp(_, star, dot) {
+  var len = star.length;
+  var result = len > 1 ? '([^/?]*)' : '([^/?.]*)';
+  if (dot) {
+    result += '\\.';
+    if (len > 2) {
+      result = '(?:' + result + ')?';
+    }
+  }
+  return result;
+}
 
 function getDataDir(dirname) {
   var dir = path.join(getWhistlePath(), dirname || '.' + config.name);
@@ -296,6 +322,31 @@ function getAuths(_url) {
 }
 
 exports.getAuths = getAuths;
+
+function setDefaultResultOrder(order) {
+  order = DNS_ORDERS_OPTS.indexOf(order) === -1 ? DNS_ORDERS_OPTS[order] : order;
+  if (!order) {
+    return;
+  }
+  config.ipv4First = false;
+  config.ipv6First = false;
+  if (order[3] === '6') {
+    config.ipv6First = true;
+  } else if (order[3] === '4') {
+    config.ipv4First = true;
+  }
+  if (hasDnsOrder) {
+    try {
+      if (dns.getDefaultResultOrder() !== order) {
+        dns.setDefaultResultOrder(order);
+      }
+      config.dnsOrder = DNS_ORDERS_OPTS.indexOf(order);
+      return true;
+    } catch (e) {}
+  }
+}
+
+exports.setDefaultResultOrder = setDefaultResultOrder;
 
 exports.setAuth = function (auth) {
   if (auth) {
@@ -530,24 +581,13 @@ function createHash(str) {
   return shasum.digest('hex');
 }
 
-function readFileText(filepath, retry) {
-  try {
-    return fs.readFileSync(filepath, { encoding: 'utf8' }).trim();
-  } catch (e) {
-    if (!retry) {
-      return readFileText(filepath, true);
-    }
-  }
+function readFileText(filepath) {
+  var text = common.readFileTextSync(filepath);
+  return text && text.trim();
 }
 
-function readFileBuffer(filepath, required, retry) {
-  try {
-    return fs.readFileSync(filepath);
-  } catch (e) {
-    if (!retry) {
-      return required !== false ? fs.readFileSync(filepath) : readFileBuffer(filepath, required, true);
-    }
-  }
+function readFileBuffer(filepath, required) {
+  return common.readFileBufferSync(filepath, required === false);
 }
 
 function isPort(port) {
@@ -673,13 +713,37 @@ exports.extend = function (newConf) {
       }
     }
 
+    var allowOrigin = newConf.allowOrigin;
+    if (allowOrigin && typeof allowOrigin === 'string') {
+      allowOrigin = allowOrigin.trim().toLowerCase().split(/\s*[|,&]\s*/);
+      if (allowOrigin.indexOf('*') === -1) {
+        allowOrigin = allowOrigin.map(function(h) {
+          if (h.indexOf('*') === -1) {
+            return h;
+          }
+          h = common.escapeRegExp(h);
+          h = h.replace(DOMAIN_STAR_RE, domainToRegExp);
+          try {
+            return new RegExp('^' + h + '$');
+          } catch (e) {}
+        }).filter(function(h) {
+          return h;
+        });
+        if (allowOrigin.length) {
+          config.allowOrigin = allowOrigin;
+        }
+      } else {
+        config.allowAllOrigin = true;
+      }
+    }
+
     if (dns.getServers && Array.isArray(dnsServer)) {
       var newServers = [];
       dnsServer.forEach(function (ip) {
         ip = typeof ip === 'string' && ip.trim();
         if (/^ipv6$/i.test(ip)) {
           resolve6 = true;
-        } else if (ip === 'optional' || ip === 'default') {
+        } else if (ip === 'optional' || ip === 'default' || ip === 'fallback') {
           dnsOptional = true;
         } else if (net.isIP(ip)) {
           newServers.push(ip);
@@ -801,12 +865,16 @@ exports.extend = function (newConf) {
     config.allowMultipleChoice = newConf.allowMultipleChoice;
     if (typeof newConf.mode === 'string') {
       var mode = newConf.mode.trim().split(/\s*[|,&]\s*/);
+      var useResolve;
+      var dnsFallback;
       mode.forEach(function (m) {
         m = m.trim();
         if (
           /^(pureProxy|debug|ipv6Only|master|client|diagnose|disableAuthUI|captureData|headless|strict|proxyServer|encrypted|noGzip|disableUpdateTips|proxifier2?)$/.test(m)
         ) {
           config[m] = true;
+        } else if(m === 'ipv6only') {
+          config.ipv6Only = true;
         } else if (m === 'keepProxyUI') {
           config.keepProxyUI = true;
         } else if (m === 'agent') {
@@ -820,6 +888,8 @@ exports.extend = function (newConf) {
         } else if (m === 'nohost' || m === 'multienv' || m === 'multiEnv') {
           config[m] = true;
           config.multiEnv = true;
+        } else if (DNS_ORDERS.indexOf(m) !== -1) {
+          setDefaultResultOrder(m.toLowerCase());
         } else if (m === 'proxyOnly') {
           config.pureProxy = true;
         } else if (m === 'useMultipleRules' || m === 'enableMultipleRules') {
@@ -920,9 +990,17 @@ exports.extend = function (newConf) {
             config.tdKey = key;
             break;
           }
+        } else if (['dnsResolve', 'dnsResolve4', 'dnsResolve6'].indexOf(m) !== -1) {
+          useResolve = true;
+          config[m] = true;
+        } else if (m === 'dnsFallback') {
+          dnsFallback = true;
         }
       });
 
+      if (useResolve && dnsFallback) {
+        config.dnsFallback = true;
+      }
       if (config.headless) {
         if (!config.pluginsMode) {
           config.noGlobalPlugins = true;

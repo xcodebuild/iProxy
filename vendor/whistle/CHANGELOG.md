@@ -1,3 +1,66 @@
+# v2.9.86
+1. feat: JSON View 右键菜单 `Inspect Value` 查看当前 key 对应的 Value 对象
+2. feat: JSON Dialog 添加前进和后退键查看历史记录
+3. feat: 通过 Whistle 构造的请求会在 Network 的 Order 里面加特殊标识
+
+# v2.9.85
+1. feat: 支持显示 sse 内容（默认只对非 gzip 及 content-length 头小于 2m 的请求生效，其它类型请求可以通过 `enable://captureStream` 强制开启）
+2. fix: https://github.com/avwo/whistle-client/issues/60
+3. fix: https://github.com/avwo/whistle/issues/1145
+
+# v2.9.84
+1. feat: 证书默认格式改成 cer 以适配更多机型（涉及：短链接，二维码，点击下载）
+2. fix: 某些浏览器没有发送 `sec-fetch-site` 导致内部请求误判为跨域请求问题
+
+# v2.9.83
+1. fix: https://github.com/nodejs/node/issues/52681
+2. fix: https://github.com/avwo/whistle/issues/1137
+3. feat: 新增参数 `--allowOrigin` 用于设置允许哪些第三方页面访问 Whistle 的内部接口
+4. feat: 插件的 rules.txt 文件支持引入 3 个远程规则 `@path`，之前版本只支持1个
+
+# v2.9.82
+1. feat: Overview、Inpsectors 支持自定义右键菜单
+2. feat: 支持通过 `-M` `dnsResolve`、`dnsResolve4`、`dnsResolve6` 改 dns 方法
+3. refactor: 优化界面，`dns.lookup` 失败使用 `dns.resolve` 或 `dns.resolve6` 重试
+
+# v2.9.81
+1. feat: 支持设置 URL 列不显示请求参数
+2. feat: 域名为 IP 的 HTTPS 请求不解包
+
+# v2.9.80
+1. fix: 远程部署可能出现 `captureError` 问题
+2. feat: 优化界面
+
+# v2.9.79
+1. feat: 优化 Dark 模式样式，并重新调整为默认不跟随系统的 Dark 模式
+2. feat: 根证书过期后，可以通过 `w2 ca` 更新根证书
+
+# v2.9.78
+1. feat: 保留无法识别的 `accept-encoding` 请求头
+2. feat: Rules 里面的规则如果未发生改变，点击 Save 也可以启用规则
+3. feat: `statusCode://401` 默认会弹出输入用户名和密码的登录框，可以通过 `disable://userLogin` 或 `lineProps://disableUserLogin` 去掉登录框
+
+# v2.9.77
+1. feat: `locationHref://url` 和 `redirect://url` 自动去重
+2. feat: 支持通过 `jsPrepend://` 设置 `window.__WHISTLE_PATH_PREFIX__ = '/path/to';`（可以配置规则或集成在插件） 修改 Whistle 内部路径 `/.whistle-path.5b6af7b9884e1165/` 改成 `${window.__WHISTLE_PATH_PREFIX__}/.whistle-path.5b6af7b9884e1165/`，方便通过 ngnix 转发（ngnix 可以把 `/path/to` 路径去掉再发送给 Whistle）
+
+# v2.9.76
+1. refactor: 删除所有 q 模块，解决安装告警问题
+
+# v2.9.75
+1. refactor: 优化 sse 请求的 `resReplace` 逻辑
+2. fix: 界面 `Enable HTTP/2` 报错问题
+3. feat: 新增 `locationHref://url` 和 `locationHref://js:url` 协议，相当于在 html 页面或 js 文件返回 `window.location.href = url`
+
+# v2.9.74
+1.fix: https://github.com/avwo/whistle/issues/1098
+
+# v2.9.73
+1. feat: 新增启动参数 `-M ipv4first|ipv6first` 用于设置 [dns.lookup的 options.order 参数](https://nodejs.org/docs/latest/api/dns.html#dnslookuphostname-options-callback)
+2. feat: `localhost` 的 dns.lookup 默认使用 `ipv4first`
+3. feat: Online 支持设置 `Verbatim`、`IPv4-first`、`IPv6-first`
+4. feat: 支持 `delete://query.xxx` 删除请求 url 里面的参数
+
 # v2.9.72
 1. fix: socks 代理无法获取 clientIp 及 IPv6 转发问题
 

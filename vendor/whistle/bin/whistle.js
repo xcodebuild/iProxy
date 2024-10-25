@@ -18,7 +18,7 @@ function handleEnd(err, options, restart) {
   if (!options) {
     return;
   }
-  var host = options.host + ':' + options.port;
+  var host = util.joinIpPort(options.host, options.port);
   var argv = [host];
   if (options.bypass) {
     argv.push('-x', options.bypass);
@@ -33,7 +33,8 @@ function showStartupInfo(err, options, debugMode, restart) {
   }
   if (/listen EADDRINUSE/.test(err)) {
     options = util.formatOptions(options);
-    error('[!] Failed to bind proxy port ' + (options.host ? options.host + ':' : '') + (options.port || config.port) + ': The port is already in use');
+    var port = options.port || config.port;
+    error('[!] Failed to bind proxy port ' + (options.host ? util.joinIpPort(options.host, port) : port) + ': The port is already in use');
     info('[i] Please check if ' + config.name + ' is already running, you can ' + (debugMode ? 'stop whistle with `w2 stop` first' : 'restart whistle with `w2 restart`'));
     info('    or if another application is using the port, you can change the port with ' + (debugMode ? '`w2 run -p newPort`\n' : '`w2 start -p newPort`\n'));
   } else if (err.code == 'EACCES' || err.code == 'EPERM') {
@@ -140,6 +141,7 @@ program
   .option('--socksPort [socksPort]', 'set the socksv5 server port', String, undefined)
   .option('--httpPort [httpPort]', 'set the http server port', String, undefined)
   .option('--httpsPort [httpsPort]', 'set the https server port', String, undefined)
+  .option('--allowOrigin [originList]', 'list of cross origin allowed to access webui (as: a.b.c,x.y.z or *)', String, undefined)
   .option('--no-global-plugins', 'do not load any globally installed plugins')
   .option('--no-prev-options', 'do not reuse the previous options when restarting')
   .option('--inspect [[host:]port]', 'activate inspector on host:port (127.0.0.1:9229 by default)')

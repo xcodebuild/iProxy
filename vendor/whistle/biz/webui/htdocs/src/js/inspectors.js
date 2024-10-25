@@ -1,6 +1,5 @@
 require('./base-css.js');
 var React = require('react');
-var ExpandCollapse = require('./expand-collapse');
 var util = require('./util');
 var Inspector = require('./inspector');
 var Frames = require('./frames');
@@ -8,10 +7,12 @@ var LazyInit = require('./lazy-init');
 var dataCenter = require('./data-center');
 var events = require('./events');
 var TabMgr = require('./tab-mgr');
+var ContextMenu = require('./context-menu');
+var Properties = require('./properties');
 
 var Inspectors = React.createClass({
   getInitialState: function () {
-    return { activeName: 'Request' };
+    return { activeName: 'Request', urlModal: { Url: '' } };
   },
   shouldComponentUpdate: function (nextProps) {
     var hide = util.getBoolean(this.props.hide);
@@ -38,11 +39,12 @@ var Inspectors = React.createClass({
     var self = this;
     var props = self.props;
     var modal = props.modal;
-    var url = modal && modal.url;
+    var urlModal = self.state.urlModal;
     var hideFrames = !self.isActive('Frames');
     var hide = util.getBoolean(props.hide);
     var tabs = dataCenter.getTabs();
     var active = this.state.activeName;
+    urlModal.Url = modal && modal.url;
 
     return (
       <div
@@ -50,12 +52,7 @@ var Inspectors = React.createClass({
           'fill orient-vertical-box w-detail-inspectors' + (hide ? ' hide' : '')
         }
       >
-        <div className="box w-detail-inspectors-url" title={url}>
-          <label>Url</label>
-          <div className="fill w-user-select-none">
-            <ExpandCollapse text={url} />
-          </div>
-        </div>
+        <Properties className="w-detail-inspectors-url" modal={urlModal} />
         <div className="box w-detail-inspectors-title w-detail-inspectors-tabs">
           <button
             type="button"
@@ -103,6 +100,7 @@ var Inspectors = React.createClass({
           tabs={tabs}
           className="w-custom-tab-panel"
         />
+        <ContextMenu ref="contextMenu" />
       </div>
     );
   }

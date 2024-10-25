@@ -15,7 +15,6 @@ var iconv = require('iconv-lite');
 var zlib = require('zlib');
 var dns = require('dns');
 var PipeStream = require('pipestream');
-var Q = require('q');
 var Buffer = require('safe-buffer').Buffer;
 var protoMgr = require('../rules/protocols');
 var protocols = protoMgr.protocols;
@@ -37,7 +36,6 @@ var pendingFiles = {};
 var localIpCache = new LRU({ max: 120 });
 var CRLF_RE = /\r\n|\r|\n/g;
 var SEARCH_RE = /[?#].*$/;
-var UTF8_OPTIONS = { encoding: 'utf8' };
 var LOCALHOST = '127.0.0.1';
 var aliasProtocols = protoMgr.aliasProtocols;
 var CONTEXT = vm.createContext();
@@ -129,6 +127,7 @@ var hasBody = common.hasBody;
 var hasProtocol = common.hasProtocol;
 var removeProtocol = common.removeProtocol;
 var isUrl = common.isUrl;
+var joinIpPort = common.joinIpPort;
 var workerIndex = process.env && process.env.workerIndex;
 var INTERNAL_ID = process.pid + '-' + Math.random();
 var pluginMgr;
@@ -142,9 +141,12 @@ exports.removeProtocol = removeProtocol;
 exports.setProtocol = common.setProtocol;
 exports.getProtocol = common.getProtocol;
 exports.replaceProtocol = common.replaceProtocol;
+exports.isTunnelHost = common.isTunnelHost;
+exports.joinIpPort = joinIpPort;
 exports.isWebSocket = common.isWebSocket;
 exports.wrapRuleValue = common.wrapRuleValue;
 exports.createTransform = common.createTransform;
+exports.readFileSync = common.readFileTextSync;
 exports.isUrl = isUrl;
 exports.workerIndex = workerIndex;
 exports.proc = proc;
@@ -306,16 +308,28 @@ exports.setEstablished = function (socket) {
   socket.write(ESTABLISHED_CTN);
 };
 
-function changePort(url, port) {
-  var index = url.indexOf('/', url.indexOf('://') + 3);
+var PORT_RE = /:\d*$/;
+
+exports.changePort = function(url, port) {
+  var protocol = '';
+  var index = url.indexOf('://');
+  if (index !== -1) {
+    index += 3;
+    protocol = url.substring(0, index);
+    url = url.substring(index);
+  }
+  index = url.indexOf('/');
   if (index != -1) {
-    var host = url.substring(0, index).replace(/:\d*$/, '');
+    var host = url.substring(0, index);
+    if (net.isIPv6(host)) {
+      host = '[' + host + ']';
+    } else {
+      host = host.replace(PORT_RE, '');
+    }
     url = host + ':' + port + url.substring(index);
   }
-  return url;
-}
-
-exports.changePort = changePort;
+  return protocol + url;
+};
 
 function handleStatusCode(statusCode, headers) {
   if (statusCode == 401) {
@@ -438,6 +452,12 @@ function stat(file, callback, force) {
   });
 }
 
+function spreadPromise(promise, callback) {
+  promise.then(function(list) {
+    callback.apply(null, list);
+  });
+}
+
 function getFileWriter(file, callback, force) {
   if (!file) {
     return callback();
@@ -476,19 +496,19 @@ function getFileWriters(files, callback, force) {
     files = [files];
   }
 
-  Q.all(
+  spreadPromise(Promise.all(
     files.map(function (file) {
-      var defer = Q.defer();
-      getFileWriter(
-        file,
-        function (writer) {
-          defer.resolve(writer);
-        },
-        force
-      );
-      return defer.promise;
+      return new Promise(function(resolve) {
+        getFileWriter(
+          file,
+          function (writer) {
+            resolve(writer);
+          },
+          force
+        );
+      });
     })
-  ).spread(callback);
+  ), callback);
 }
 
 exports.getFileWriters = getFileWriters;
@@ -601,6 +621,8 @@ function isEnable(req, name) {
 }
 
 exports.isEnable = isEnable;
+
+exports.formatUrl = common.formatUrl;
 
 exports.isKeepClientId = function(req, proxyUrl) {
   if (isEnable(req, 'keepClientId')) {
@@ -887,13 +909,16 @@ function isLocalHost(host) {
 exports.isLocalHost = isLocalHost;
 
 function parseHost(host) {
+  var index;
   if (host[0] === '[') {
-    var index = host.indexOf(']');
-    host = [host.substring(1, index), host.substring(index + 2)];
-  } else {
-    host = host.split(':');
+    index = host.indexOf(']');
+    return [host.substring(1, index), host.substring(index + 2)];
   }
-  return host;
+  index = host.indexOf(':');
+  if (index === -1 || host.indexOf(':', index + 1) !== -1) {
+    return [host, ''];
+  }
+  return [host.substring(0, index), host.substring(index + 1)];
 }
 
 exports.parseHost = parseHost;
@@ -920,6 +945,18 @@ exports.encodeNonLatin1Char = function (str) {
 };
 
 exports.encodeURIComponent = safeEncodeURIComponent;
+
+function compareUrl(url, fullUrl) {
+  url = common.getAbsUrl(url, fullUrl);
+  if (url === fullUrl) {
+    return true;
+  }
+  try {
+    return url === decodeURIComponent(fullUrl);
+  } catch (e) {}
+}
+
+exports.compareUrl = compareUrl;
 
 function getPath(url, noProtocol) {
   if (url) {
@@ -1194,14 +1231,6 @@ function parsePureJSON(data, isValue) {
 
 exports.parseJSON = parseJSON;
 
-function readFileSync(file) {
-  try {
-    return fs.readFileSync(file, UTF8_OPTIONS);
-  } catch (e) {}
-}
-
-exports.readFileSync = readFileSync;
-
 function trim(text) {
   return text && text.trim();
 }
@@ -1248,22 +1277,13 @@ exports.parseRuleJson = function(rules, callback, req) {
   if (!Array.isArray(rules)) {
     rules = [rules];
   }
-  Q.all(
+  spreadPromise(Promise.all(
     rules.map(function (rule) {
-      var defer = Q.defer();
-      readRuleList(
-        rule,
-        function (data) {
-          defer.resolve(data);
-        },
-        true,
-        null,
-        null,
-        req
-      );
-      return defer.promise;
+      return new Promise(function(resolve) {
+        readRuleList(rule, resolve, true, null, null, req);
+      });
     })
-  ).spread(callback);
+  ), callback);
 };
 
 function getTempFilePath(filePath, rule) {
@@ -1487,23 +1507,13 @@ exports.getRuleValue = function(rules, callback, noBody, charset, isHtml, req) {
   if (!Array.isArray(rules)) {
     rules = [rules];
   }
-
-  Q.all(
+  spreadPromise(Promise.all(
     rules.map(function (rule) {
-      var defer = Q.defer();
-      readRuleList(
-        rule,
-        function (data) {
-          defer.resolve(data);
-        },
-        false,
-        charset,
-        isHtml,
-        req
-      );
-      return defer.promise;
+      return new Promise(function(resolve) {
+        readRuleList(rule, resolve, false, charset, isHtml, req);
+      });
     })
-  ).spread(callback);
+  ), callback);
 };
 
 function decodePath(path) {
@@ -1559,16 +1569,25 @@ function getValue(rule) {
   return rule.value || rule.path;
 }
 
-function getMatcher(rule, raw) {
-  rule = rule && (getValue(rule) || rule.matcher);
-  if (rule && raw !== true) {
-    rule = rule.trim();
+function trimUrl(url) {
+  if (!url) {
+    return url;
   }
-  return rule;
+  var index = url.indexOf('://');
+  if (index === -1) {
+    return url.trim();
+  }
+  index += 3;
+  var protocol = url.substring(0, index);
+  return protocol + url.substring(index).trim();
+}
+
+function getMatcher(rule) {
+  return trimUrl(rule && (getValue(rule) || rule.matcher));
 }
 
 function getUrl(rule) {
-  return rule && (getValue(rule) || rule.url);
+  return trimUrl(rule && (getValue(rule) || rule.url));
 }
 
 exports.rule = {
@@ -1581,16 +1600,12 @@ function getMatcherValue(rule) {
   return rule && removeProtocol(rule, true);
 }
 
-function getUrlValue(rule, raw) {
-  rule = getUrl(rule);
-  if (rule && raw !== true) {
-    rule = rule.trim();
-  }
-  return rule && removeProtocol(rule, true);
-}
-
 exports.getMatcherValue = getMatcherValue;
-exports.getUrlValue = getUrlValue;
+
+exports.getUrlValue = function(rule) {
+  rule = getUrl(rule);
+  return rule && removeProtocol(rule, true);
+};
 
 function _getRawType(type) {
   return typeof type === 'string' ? type.split(';')[0].toLowerCase() : '';
@@ -1689,8 +1704,6 @@ function removeUnsupportsHeaders(headers, supportsDeflate) {
 
   if ((acceptEncoding = acceptEncoding.join(', '))) {
     headers['accept-encoding'] = acceptEncoding;
-  } else {
-    delete headers['accept-encoding'];
   }
 }
 
@@ -2505,7 +2518,7 @@ exports.handleHeaderReplace = handleHeaderReplace;
 
 var HTML_RE = /html/i;
 
-function transformReq(req, res, port, host, html) {
+exports.transformReq = function(req, res, port, host, html) {
   var options = parseUrl(getFullUrl(req));
   var headers = req.headers;
   options.headers = headers;
@@ -2513,6 +2526,11 @@ function transformReq(req, res, port, host, html) {
   options.agent = false;
   options.protocol = null;
   options.host = host || LOCALHOST;
+  if (req.fromComposer) {
+    headers[config.REQ_FROM_HEADER] = 'W2COMPOSER';
+  } else if (req.fromInternalPath) {
+    headers[config.REQ_FROM_HEADER] = 'W2INTERNAL_PATH';
+  }
   if (port > 0) {
     options.port = port;
   }
@@ -2574,8 +2592,7 @@ function transformReq(req, res, port, host, html) {
   });
   req.pipe(client);
   return client;
-}
-exports.transformReq = transformReq;
+};
 
 function trimStr(str) {
   if (typeof str !== 'string') {
@@ -2606,6 +2623,9 @@ exports.checkIfAddInterceptPolicy = checkIfAddInterceptPolicy;
 function getCgiUrl(url) {
   if (!isString(url) || !(url = url.trim())) {
     return;
+  }
+  if (url[0] === '.' && url[1] === '/') {
+    return url.substring(2);
   }
   return url[0] === '/' ? url.substring(1) : url;
 }
@@ -2875,7 +2895,7 @@ var HEADER_RE = /^headers\.(.+)$/;
 var REQ_COOKIE_RE = /^req\.?C(?:ookies?)?\.(.+)$/i;
 var RES_COOKIE_RE = /^res\.?C(?:ookies?)?\.(.+)$/i;
 var COOKIE_RE = /^cookies?\.(.+)$/i;
-var QUERY_RE = /^(?:query|urlParams?)\.(.+)$/i;
+var QUERY_RE = /^(?:query|params|urlParams?)\.(.+)$/i;
 
 function parseDelQuery(req) {
   var query;
@@ -2884,7 +2904,7 @@ function parseDelQuery(req) {
     Object.keys(deleteRule).forEach(function (prop) {
       if (QUERY_RE.test(prop)) {
         query = query || {};
-        query[RegExp.$1.toLowerCase()] = 1;
+        query[RegExp.$1] = 1;
       }
     });
   }
@@ -2892,6 +2912,25 @@ function parseDelQuery(req) {
 }
 
 exports.parseDelQuery = parseDelQuery;
+
+exports.deleteQuery = function(url, props) {
+  if (!props) {
+    return url;
+  }
+  var index = url.indexOf('?');
+  if (index === -1) {
+    return url;
+  }
+  var query = url.substring(index + 1);
+  if (!query) {
+    return url;
+  }
+  query = query.split('&').filter(function(item) {
+    var i = item.indexOf('=');
+    return !props[i === -1 ? item : item.substring(0, i)];
+  }).join('&');
+  return url.substring(0, query ? index + 1 : index) + query;
+};
 
 function parseDelReqCookies(req) {
   var reqCookies;
@@ -2946,43 +2985,85 @@ function parseDelResCookies(req) {
   return resCookies;
 }
 
-function parseDelProps(req) {
+exports.parseDelProps = function(req) {
   var deleteRule = req['delete'];
-  var reqHeaders = {};
-  var resHeaders = {};
-  var trailers = {};
+  var resHeaders;
+  var trailers;
 
   if (deleteRule) {
     Object.keys(deleteRule).forEach(function (prop) {
-      if (REQ_HEADER_RE.test(prop)) {
-        reqHeaders[RegExp.$1.toLowerCase()] = 1;
-      } else if (RES_HEADER_RE.test(prop)) {
+      if (RES_HEADER_RE.test(prop)) {
+        resHeaders = resHeaders || {};
         resHeaders[RegExp.$1.toLowerCase()] = 1;
       } else if (HEADER_RE.test(prop)) {
-        prop = RegExp.$1.toLowerCase();
-        reqHeaders[prop] = 1;
-        resHeaders[prop] = 1;
+        resHeaders = resHeaders || {};
+        resHeaders[RegExp.$1.toLowerCase()] = 1;
       } else if (TRAILER_RE.test(prop)) {
+        trailers = trailers || {};
         trailers[RegExp.$1.toLowerCase()] = 1;
       }
     });
   }
   return {
-    reqHeaders: reqHeaders,
     resHeaders: resHeaders,
     trailers: trailers
   };
+};
+
+function parseDelResHeaders(req) {
+  var deleteRule = req['delete'];
+  var result;
+
+  if (deleteRule) {
+    Object.keys(deleteRule).forEach(function (prop) {
+      if (RES_HEADER_RE.test(prop)) {
+        result = result || {};
+        result[RegExp.$1.toLowerCase()] = 1;
+      } else if (HEADER_RE.test(prop)) {
+        result = result || {};
+        result[RegExp.$1.toLowerCase()] = 1;
+      }
+    });
+  }
+  return result;
+}
+
+exports.deleteResHeaders = function(req, headers) {
+  var props = parseDelResHeaders(req);
+  if (props) {
+    Object.keys(props).forEach(function (name) {
+      delete headers[name];
+    });
+  }
+};
+
+function parseDelReqHeaders(req) {
+  var result;
+  var deleteRule = req['delete'];
+  if (deleteRule) {
+    Object.keys(deleteRule).forEach(function (prop) {
+      if (REQ_HEADER_RE.test(prop)) {
+        result = result || {};
+        result[RegExp.$1.toLowerCase()] = 1;
+      } else if (HEADER_RE.test(prop)) {
+        result = result || {};
+        result[RegExp.$1.toLowerCase()] = 1;
+      }
+    });
+  }
+  return result;
 }
 
 exports.deleteReqHeaders = function (req) {
-  var delReqHeaders = parseDelProps(req).reqHeaders;
-  var headers = req.headers;
-  Object.keys(delReqHeaders).forEach(function (name) {
-    delete headers[name];
-  });
+  var props = parseDelReqHeaders(req);
+  if (props) {
+    var headers = req.headers;
+    Object.keys(props).forEach(function (name) {
+      delete headers[name];
+    });
+  }
 };
 
-exports.parseDelProps = parseDelProps;
 
 function parseOrigin(origin) {
   if (!isString(origin)) {
@@ -3084,7 +3165,7 @@ exports.disableReqProps = function (req) {
     delete headers['user-agent'];
   }
 
-  if (disable.gzip) {
+  if (disable.gzip || isEnable(req, 'captureStream')) {
     delete headers['accept-encoding'];
   }
 
@@ -3271,15 +3352,7 @@ exports.setResCookies = function (data, cookies, req) {
   setHeader(data, 'set-cookie', result);
 };
 
-var SPEC_CHAR_RE = /[|\\{}()[\]^$+?.]/g;
-var SPEC_STAR_RE = /[|\\{}()[\]^$+?*.]/g;
-
-exports.escapeRegExp = function (str, withStar) {
-  if (!str) {
-    return '';
-  }
-  return str.replace(withStar ? SPEC_STAR_RE : SPEC_CHAR_RE, '\\$&');
-};
+exports.escapeRegExp = common.escapeRegExp;
 
 exports.checkTlsError = function (err) {
   if (!err) {
@@ -3317,18 +3390,8 @@ exports.setProxyHost = function (req, options, reserve) {
     opts.port = phost.port;
   }
   opts.headers = opts.headers || {};
-  config.setHeader(opts.headers, 'host', opts.host + ':' + opts.port);
+  config.setHeader(opts.headers, 'host', joinIpPort(opts.host, opts.port));
   return opts;
-};
-
-exports.getHostIp = function (ip, port) {
-  if (!port) {
-    return ip;
-  }
-  if (net.isIP(ip) === 6) {
-    ip = '[' + ip + ']';
-  }
-  return ip + ':' + port;
 };
 
 function getMethod(method) {
@@ -3400,12 +3463,13 @@ exports.setResponseFor = function (rules, headers, req, serverIp, phost) {
 var CONFIG_VAR_RE = /\${(port|version)}/gi;
 var PLUGIN_RULES_URL_RE = /^whistle\.([a-z\d_-]+)(?:$|\/)/i;
 var PLUGIN_KEY_RE =/^\$(?:whistle\.)?([a-z\d_-]+)[/:]([\S\s]+)$/;
+var REL_PATH_RE = /^[\w.-]+(?:[\\/]|$)/;
 
 function setConfigVarFn(_, name) {
   return config[name.toLowerCase()];
 }
 
-exports.getRemoteRules = function (apo, rulesUrl) {
+exports.getRemoteRules = function (apo, rulesUrl, root) {
   var headers = config.runtimeHeaders;
   var pluginName;
   if (PLUGIN_RULES_URL_RE.test(rulesUrl)) {
@@ -3419,6 +3483,9 @@ exports.getRemoteRules = function (apo, rulesUrl) {
   }
   if (apo) {
     rulesUrl = rulesUrl.replace(CONFIG_VAR_RE, setConfigVarFn);
+  }
+  if (root && !pluginName && REL_PATH_RE.test(rulesUrl)) {
+    rulesUrl = join(root, rulesUrl);
   }
   return httpMgr.add(rulesUrl, headers, pluginName);
 };
@@ -3620,18 +3687,17 @@ exports.getBoundIp = function (host, cb) {
   }
   var boundIpDefer = boundIpDeferMap[host];
   if (boundIpDefer) {
-    return boundIpDefer.done(cb);
+    return boundIpDefer.then(cb);
   }
-  var defer = Q.defer();
-  boundIpDefer = defer.promise;
-  boundIpDeferMap[host] = boundIpDefer;
-  boundIpDefer.done(cb);
-  dns.lookup(host, function (err, ip) {
-    if (err) {
-      throw err;
-    }
-    defer.resolve(ip);
+  boundIpDeferMap[host] = boundIpDefer = new Promise(function(resolve) {
+    dns.lookup(host, function (err, ip) {
+      if (err) {
+        throw err;
+      }
+      resolve(ip);
+    });
   });
+  boundIpDefer.then(cb);
 };
 
 function getPluginConfig(conf, name) {
@@ -3734,19 +3800,36 @@ exports.setClientCert = function (options, key, cert, isPfx, cacheKey) {
   }
 };
 
-exports.getStatusCodeFromRule = function (rules) {
+function isDisableUserLogin(rule, req) {
+  if (rule.lineProps.enableUserLogin || (req && req.enable && req.enable.userLogin)) {
+    return false;
+  }
+  return rule.lineProps.disableUserLogin || (req && req.disable && req.disable.userLogin);
+}
+
+exports.isDisableUserLogin = isDisableUserLogin;
+
+exports.getStatusCodeFromRule = function (rules, req) {
   var rule = rules.rule;
   var isSpec = rule && rule.isSpec;
   if (!isSpec) {
     return;
   }
-  rule = getMatcherValue(rule) || 200;
-  var result = { statusCode: rule, headers: {} };
-  if (isSpec === 2) {
+  var disableUserLogin = isDisableUserLogin(rule, req);
+  rule = getMatcherValue(rule) || '';
+  var isRedirect = isSpec === 2;
+  if (req && isRedirect && rule && compareUrl(rule, req.fullUrl)) {
+    req.isWebProtocol = true;
+    req.options = parseUrl(req.fullUrl);
+    return;
+  }
+  var code = rule || 200;
+  var result = { statusCode: code, headers: {} };
+  if (isRedirect) {
     result.statusCode = 302;
     result.headers.location = rule;
-  } else {
-    handleStatusCode(rule, result.headers);
+  } else  if (!disableUserLogin) {
+    handleStatusCode(code, result.headers);
   }
   return result;
 };
@@ -4060,4 +4143,10 @@ exports.needAbortRes = function(req) {
     return true;
   }
   return req.isTunnel && disable.tunnel;
+};
+
+var SSE_RE = /^\s*text\/event-stream\s*;?/i;
+
+exports.isSSE = function(res) {
+  return SSE_RE.test(res.headers['content-type']);
 };

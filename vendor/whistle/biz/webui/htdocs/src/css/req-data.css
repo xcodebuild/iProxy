@@ -8,6 +8,13 @@
 }
 .w-req-data-content .order {
   width: 50px;
+  position: relative;
+}
+.w-req-data-content .order .glyphicon-send {
+  font-size: 6px;
+  position: absolute;
+  top: 2px;
+  left: 1px;
 }
 .w-req-data-content .date {
   width: 150px;
@@ -128,7 +135,7 @@
 }
 .w-req-data-list tr {
   cursor: default;
-  background: #fff;
+  background-color: #fff;
 }
 .w-req-data-list tr.w-selected th,
 .w-req-data-list tr.w-selected td {
@@ -267,7 +274,7 @@
 .tree-node:hover,
 .tree-node.w-selected {
   background-color: darkseagreen;
-  color: white;
+  color: #fff;
 }
 
 .highlight {

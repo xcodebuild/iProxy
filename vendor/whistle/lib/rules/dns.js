@@ -7,13 +7,18 @@ var dnsCacheTime = parseInt(config.dnsCache, 10);
 var dnsServer = config.dnsServer;
 var dnsOverHttps = config.dnsOverHttps;
 var resolve6 = config.resolve6;
+var dnsResolve = config.dnsResolve;
+var dnsResolve4= config.dnsResolve4;
+var dnsResolve6 = config.dnsResolve6;
 var dnsOptional = config.dnsOptional;
+var dnsFallback = config.dnsFallback;
 var dnsCache = {};
 var callbacks = {};
 var TIMEOUT = 10000;
 var CACHE_TIME = dnsCacheTime >= 0 ? dnsCacheTime : 60000;
 var MAX_CACHE_TIME = Math.max(CACHE_TIME * 3, 600000);
 var IPV6_OPTIONS = {family: 6};
+var IPV4_FIRST = {verbatim: false};
 
 if (dnsOverHttps) {
   dnsOverHttps += (dnsOverHttps.indexOf('?') === -1 ? '?' : '&') + 'name=';
@@ -72,21 +77,31 @@ function lookupDNS(hostname, callback) {
   }
   var done;
   var timer;
-  var optional = dnsOptional;
-  var handleDns = function (fn) {
+  var optional = dnsOptional || dnsFallback;
+  var handleDns = function (fn, retry) {
     timer = setTimeout(function () {
       execCallback(new Error('Timeout'));
     }, TIMEOUT);
     if (!fn) {
       if (dnsServer) {
         fn = resolve6 ? 'resolve6' : 'resolve4';
+      } else if (dnsResolve) {
+        fn = 'resolve';
+      } else if (dnsResolve4) {
+        fn = 'resolve4';
+      } else if (dnsResolve6) {
+        fn = 'resolve6';
       } else {
         fn = 'lookup';
       }
     }
+    var useLookup;
     var handleCallback = function (err, ip, type) {
       clearTimeout(timer);
       if (err) {
+        if (!retry && useLookup) {
+          return handleDns(config.ipv6Only ? 'resolve6' : 'resolve', true);
+        }
         execCallback(err);
       } else {
         ip = Array.isArray(ip) ? ip[0] : ip;
@@ -99,12 +114,18 @@ function lookupDNS(hostname, callback) {
     };
     try {
       if (dnsOverHttps) {
-        lookDnsOverHttps(hostname,  handleCallback);
-      } else if (config.ipv6Only && fn === 'lookup') {
-        dns[fn](hostname, IPV6_OPTIONS, handleCallback);
-      } else {
-        dns[fn](hostname, handleCallback);
+        return lookDnsOverHttps(hostname,  handleCallback);
       }
+      if (fn === 'lookup') {
+        useLookup = true;
+        if (config.ipv6Only) {
+          return dns[fn](hostname, IPV6_OPTIONS, handleCallback);
+        }
+        if (!config.ipv6First && hostname === 'localhost') {
+          return dns[fn](hostname, IPV4_FIRST, handleCallback);
+        }
+      }
+      dns[fn](hostname, handleCallback);
     } catch (err) {
       //如果断网，可能直接抛异常，https代理没有用到error-handler
       execCallback(err);
@@ -117,11 +138,12 @@ function lookupDNS(hostname, callback) {
         ip: ip,
         hostname: hostname,
         ipv6Only: config.ipv6Only,
+        order: config.dnsOrder,
         time: Date.now()
       };
     } else if (optional) {
       optional = false;
-      return handleDns('lookup');
+      return handleDns('lookup', true);
     }
     if (done) {
       return;
@@ -141,7 +163,7 @@ function getDefaultIp(type) {
 }
 
 function checkCacheData(host) {
-  return host && (config.ipv6Only ? host.ipv6Only : !host.ipv6Only) ? host: null;
+  return host && (config.ipv6Only ? host.ipv6Only : !host.ipv6Only) && (config.dnsOrder === host.order) ? host: null;
 }
 
 module.exports = function lookup(hostname, callback, allowDnsCache) {

@@ -2,7 +2,7 @@
 
 下载根证书，开启捕获HTTPS请求：
 
-![Https](https://user-images.githubusercontent.com/11450939/83850712-e384cc80-a743-11ea-9cf4-c5c3f4cbf0c8.png)
+![Https](https://github.com/avwo/whistle/assets/11450939/4a2730b3-59a8-4961-a83a-7fc7a0510885)
 
 ## 安装根证书
 > 证书按下面步骤安装后，如果还出现安全提醒，这个主要原因是之前你访问过该页面，导致长连接已建立，可以等段时间再访问、或重新打开浏览器，或重启下whistle： `w2 restart`
@@ -77,11 +77,13 @@
     ```
     这主要是因为android 6.0之后的版本默认配置发生了变化，[更多请看Android开发文档](https://developer.android.com/training/articles/security-config#base-config)。
 
+    小米等支持 Magisk 模块的手机还可以尝试链接中的方式绕开 `ssl pinning`：https://blog.csdn.net/chiehfeng/article/details/134033846 
+
 ## 开启拦截HTTPS
 
 图中的打开的对话框有个checkbox：
 
-1.`Capture HTTPS CONNECTS`：开启Https拦截功能，只有勾上这个checkbox及装好根证书，whistle才能看到HTTPS、Websocket的请求
+1.`Enable HTTPS`：开启Https拦截功能，只有勾上这个checkbox及装好根证书，whistle才能看到HTTPS、Websocket的请求
 2. 也可以通过配置来开启对部分请求的Https拦截功能
   ```plain
   www.test.com enable://intercept

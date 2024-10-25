@@ -18,8 +18,9 @@ var NOT_EMPTY_RE = /[^\s]/;
 var Settings = React.createClass({
   getInitialState: function () {
     var dragger = columns.getDragger();
+    var urlType = storage.get('urlType');
     dragger.onDrop = dragger.onDrop.bind(this);
-    return $.extend(this.getNetworkSettings(), { dragger: dragger });
+    return $.extend(this.getNetworkSettings(), { dragger: dragger, urlType: urlType === '-' ? '-' : '' });
   },
   getNetworkSettings: function () {
     return $.extend(dataCenter.getFilterText(), {
@@ -34,6 +35,8 @@ var Settings = React.createClass({
     var self = this;
     win.confirm('Are you sure to reset the columns of network table?', function(sure) {
       if (sure) {
+        self.setState({ urlType: '' });
+        storage.set('urlType', '');
         columns.reset();
         self.onColumnsResort();
       }
@@ -317,6 +320,11 @@ var Settings = React.createClass({
       value: JSON.stringify(settings, null, '  ')
     });
   },
+  onUrlType: function(e) {
+    var urlType = e.target.value;
+    storage.set('urlType', urlType);
+    this.setState({ urlType: urlType });
+  },
   render: function () {
     var self = this;
     var state = self.state;
@@ -342,8 +350,9 @@ var Settings = React.createClass({
                   checked={!state.disabledExcludeText}
                   data-name="excludeFilter"
                   type="checkbox"
+                  className="w-va-mdl"
                 />
-                Exclude Filter
+                <span className="w-va-mdl">Exclude Filter</span>
               </label>
               <a
                 className="w-help-menu"
@@ -371,8 +380,9 @@ var Settings = React.createClass({
                   checked={!state.disabledFilterText}
                   data-name="filter"
                   type="checkbox"
+                  className="w-va-mdl"
                 />
-                Include Filter
+                <span className="w-va-mdl">Include Filter</span>
               </label>
               <a
                 className="w-help-menu"
@@ -433,6 +443,17 @@ var Settings = React.createClass({
                   ) : (
                     title
                   )}
+                  {
+                    name === 'path' ?
+                    <select
+                      className="w-query-select"
+                      value={state.urlType || ''}
+                      onChange={self.onUrlType}
+                    >
+                      <option value="">+Query</option>
+                      <option value="-">-Query</option>
+                    </select> : null
+                  }
                   {canEdit ? (
                     <span
                       onClick={self.editCustomCol}
@@ -466,20 +487,27 @@ var Settings = React.createClass({
               checked={dataCenter.isOnlyViewOwnData()}
               data-name="viewOwn"
               type="checkbox"
+              className="w-va-mdl"
             />
-            Only view the requests of own computer (IP: {dataCenter.clientIp})
+            <span className="w-va-mdl">
+              Only view the requests of own computer (IP: {dataCenter.clientIp})
+            </span>
           </label>
           <label className="w-network-settings-own">
-            <input checked={viewAllInNewWindow} data-name="viewAllInNewWindow" type="checkbox" />
+            <input checked={viewAllInNewWindow} data-name="viewAllInNewWindow" type="checkbox" className="w-va-mdl" />
+            <span className="w-va-mdl">
             ViewAll in a new window
+            </span>
           </label>
           <label className="w-network-settings-own">
-            <input checked={isTreeView} data-name="treeView" type="checkbox" />
+            <input checked={isTreeView} data-name="treeView" type="checkbox"className="w-va-mdl" />
             <span
-              className="glyphicon glyphicon-tree-conifer"
+              className="glyphicon glyphicon-tree-conifer w-va-mdl"
               style={{ marginRight: 2 }}
             ></span>
+            <span className="w-va-mdl">
             Show Tree View (Ctrl[Command] + B)
+            </span>
           </label>
           {isTreeView ? (
             <label style={{textIndent: 20}} className="w-network-settings-own">
@@ -487,8 +515,11 @@ var Settings = React.createClass({
                 checked={storage.get('disabledHNR') !== '1'}
                 data-name="disabledHNR"
                 type="checkbox"
+                className="w-va-mdl"
               />
+              <span className="w-va-mdl">
               Highlight new requests
+              </span>
             </label>
           ) : null}
         </div>
