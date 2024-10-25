@@ -58,7 +58,7 @@ jobs:
             GH_TOKEN: ${{ secrets.github_token }}
 
         - name: upload app
-          uses: actions/upload-artifact@v2
+          uses: actions/upload-artifact@v4
           with:
             name: iProxyNightly-${{ runner.OS }}
             path: |
