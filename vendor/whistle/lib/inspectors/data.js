@@ -10,6 +10,7 @@ var MAX_REQ_BODY_SIZE = (config.strict ? 256 : 2048) * 1024;
 var MAX_RES_BODY_SIZE = (config.strict ? 256 : 2048) * 1024;
 var BIG_DATA_SIZE = 1024 * 1024 * 10;
 var LOCALHOST = '127.0.0.1';
+var SSE_RE = /^\s*text\/event-stream/i;
 
 function getZipType(options) {
   return options.headers && options.headers['content-encoding'];
@@ -77,6 +78,7 @@ function emitDataEvents(req, res, proxy) {
   var cleared;
   var data = {
     useH2: req.isH2,
+    h2Id: req._alpn,
     fc: req.fromComposer ? 1 : undefined,
     isPR: req.isPluginReq ? 1 : undefined,
     _clientId: req._clientId,
@@ -151,27 +153,34 @@ function emitDataEvents(req, res, proxy) {
     resData.trailers = trailers;
     resData.rawTrailerNames = rawTrailerNames;
   };
-  var reqDone, resDone;
+  var reqDone;
+  var resDone;
+  var captureReqStream;
+  var maxReqSize;
+  var reqInfo;
+  var updateReqInfo = function() {
+    if (reqInfo && !captureReqStream) {
+      captureReqStream = !disable.captureStream && (resDone || enable.captureStream) && !getZipType(reqInfo);
+      maxReqSize = useBigData ? BIG_DATA_SIZE : (captureReqStream ? MAX_REQ_BODY_SIZE : MAX_SIZE);
+      if (captureReqStream && reqBody && !reqData.body) {
+        reqData.body = reqBody;
+      }
+    }
+  };
 
   var handleReqBody = function (stream, info) {
     if (reqDone) {
       return;
     }
     reqDone = true;
-    info =
-      info || (req._needGunzip ? { method: req.method, headers: '' } : req);
-    if (!cleared && util.hasRequestBody(info)) {
+    reqInfo = info || (req._needGunzip ? { method: req.method, headers: '' } : req);
+    if (!cleared && util.hasRequestBody(reqInfo)) {
       reqBody = null;
     }
     reqData.size = 0;
-    var isUnzip = !getZipType(info);
+    updateReqInfo();
     var write = stream.write;
     var end = stream.end;
-    var MAX_REQ_BODY = useBigData
-      ? BIG_DATA_SIZE
-      : (isUnzip
-      ? MAX_REQ_BODY_SIZE
-      : MAX_SIZE);
     stream.write = function (chunk) {
       if (chunk) {
         if (reqBody || reqBody === null) {
@@ -179,10 +188,10 @@ function emitDataEvents(req, res, proxy) {
             reqBody = '';
           } else {
             reqBody = reqBody ? Buffer.concat([reqBody, chunk]) : chunk;
-            if (isUnzip) {
+            if (captureReqStream) {
               reqData.body = reqBody;
             }
-            if (reqBody.length > MAX_REQ_BODY) {
+            if (reqBody.length > maxReqSize) {
               reqBody = false;
             }
           }
@@ -201,7 +210,7 @@ function emitDataEvents(req, res, proxy) {
       if (useFrames) {
         reqBody = '';
       }
-      unzipBody(info, reqBody, function (err, body) {
+      unzipBody(reqInfo, reqBody, function (err, body) {
         data.requestTime = requestTime;
         if (endTime) {
           data.endTime = endTime;
@@ -220,17 +229,13 @@ function emitDataEvents(req, res, proxy) {
       return;
     }
     resDone = true;
-    info =
-      info ||
-      (res._needGunzip ? { statusCode: res.statusCode, headers: '' } : res);
-    var isUnzip = !getZipType(info);
-    var MAX_RES_BODY = useBigData
-      ? BIG_DATA_SIZE
-      : (isUnzip
-      ? MAX_RES_BODY_SIZE
-      : MAX_SIZE);
+    info = info || (res._needGunzip ? { statusCode: res.statusCode, headers: '' } : res);
+    var captureStream = !disable.captureStream && (requestTime == null || enable.captureStream ||
+      (info.headers && SSE_RE.test(info.headers['content-type']))) && !getZipType(info);
+    var maxResSize = useBigData ? BIG_DATA_SIZE : (captureStream ? MAX_RES_BODY_SIZE : MAX_SIZE);
+    captureStream && updateReqInfo();
     if (!cleared && util.hasBody(info, req) && checkType(info)) {
-      if (info.headers['content-length'] > MAX_RES_BODY && !util.isEnable(req, 'captureStream')) {
+      if (info.headers['content-length'] > maxResSize && !captureStream) {
         resBody = false;
       } else {
         resBody = null;
@@ -246,10 +251,10 @@ function emitDataEvents(req, res, proxy) {
             resBody = '';
           } else {
             resBody = resBody ? Buffer.concat([resBody, chunk]) : chunk;
-            if (isUnzip) {
+            if (captureStream) {
               resData.body = resBody;
             }
-            if (resBody.length > MAX_RES_BODY) {
+            if (resBody.length > maxResSize) {
               resBody = false;
             }
           }
@@ -322,14 +327,18 @@ function emitDataEvents(req, res, proxy) {
 
   function handleError(err) {
     req._hasError = true;
-    if (endTime || data.endTime || (data.responseTime && !err)) {
+    if (!data || endTime || data.endTime || (data.responseTime && !err)) {
       return;
     }
     !endTime && setEndTime();
     delete data.abort;
     if (err && err.message !== 'Aborted') {
       data.resError = true;
-      resData.body = util.getErrorStack(err);
+      if (resData.body) {
+        data.errMsg = util.getErrorStack(err);
+      } else {
+        resData.body = util.getErrorStack(err);
+      }
       util.emitError(reqEmitter, data);
       setResStatus(502);
     } else {
@@ -338,6 +347,8 @@ function emitDataEvents(req, res, proxy) {
         reqData.body = 'aborted';
       } else if (!resData.body) {
         resData.body = 'aborted';
+      } else {
+        data.errMsg = 'aborted';
       }
       if (req.__resHeaders) {
         _res.headers = req.__resHeaders;

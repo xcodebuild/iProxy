@@ -19,6 +19,8 @@ var TIMEOUT = 36000;
 var REQ_TIMEOUT = 16000;
 var CONCURRENT = 3;
 var CLOSED_ERR = new Error('closed');
+var MSM = 1000;
+var PMCS = 2000;
 
 function onClose(stream, callback) {
   stream.on('error', callback);
@@ -230,7 +232,8 @@ function getClient(req, socket, name, callback) {
   var client = http2.connect(
     origin, {
       settings: H2_SETTINGS,
-      maxSessionMemory: 128,
+      maxSessionMemory: MSM,
+      peerMaxConcurrentStreams: PMCS,
       rejectUnauthorized: config.rejectUnauthorized,
       createConnection: function () {
         return socket;
@@ -324,7 +327,6 @@ function requestH2(client, req, res, callback) {
 }
 
 function bindListner(server, listener) {
-  server.timeout = config.timeout;
   if (typeof listener === 'function') {
     server.on('request', listener);
   } else if (listener) {
@@ -338,21 +340,25 @@ function bindListner(server, listener) {
 exports.getServer = function (options, listener) {
   var server;
   if (options.allowHTTP1 && http2) {
-    options.maxSessionMemory = 128;
+    options.maxSessionMemory = MSM;
+    options.peerMaxConcurrentStreams = PMCS;
     options.settings = H2_SVR_SETTINGS;
     server = http2.createSecureServer(options);
   } else {
     server = https.createServer(options);
   }
+  server.requestTimeout = 0;
   return bindListner(server, listener);
 };
 
 exports.getHttpServer = function (_, listener) {
   var server = http2.createServer({
-    maxSessionMemory: 128,
+    maxSessionMemory: MSM,
+    peerMaxConcurrentStreams: PMCS,
     settings: H2_SVR_SETTINGS,
     allowHTTP1: true
   });
+  server.requestTimeout = 0;
   return bindListner(server, listener);
 };
 
@@ -373,15 +379,18 @@ exports.request = function (req, res, callback) {
     return callback();
   }
   var key = getKey(options);
-  var name = req.clientIp + '\n' + key;
+  var reqId = req.disable.keepH2Session ? '' : req._h2ReqId;
+  var name = (reqId || req.clientIp) + '\n' + key;
   var client = clients[name];
   if (client) {
-    if (client.curIndex) {
-      name = name + '\n' + client.curIndex;
-      client.curIndex = ++client.curIndex % CONCURRENT;
-      client = clients[name];
-    } else {
-      client.curIndex = 1;
+    if (!reqId) {
+      if (client.curIndex) {
+        name = name + '\n' + client.curIndex;
+        client.curIndex = ++client.curIndex % CONCURRENT;
+        client = clients[name];
+      } else {
+        client.curIndex = 1;
+      }
     }
     if (client) {
       client._updateTime = Date.now();

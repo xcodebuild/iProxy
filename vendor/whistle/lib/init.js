@@ -203,6 +203,14 @@ module.exports = function (req, res, next) {
   util.addTunnelData(socket, headers);
   var alpn = headers[config.ALPN_PROTOCOL_HEADER];
   if (alpn) {
+    var index = typeof alpn === 'string' ? alpn.indexOf('.') : -1;
+    if (index > 0) {
+      req._alpn = alpn;
+      req._h2ReqId = alpn.substring(index + 1);
+      alpn = alpn.substring(0, index);
+      // 如果保留 h2 session，则删除默认的 Timeout 逻辑
+      req.setTimeout(0);
+    }
     if (alpn === 'httpH2') {
       req.isH2 = !req.isHttps;
     } else if (alpn === 'httpsH2') {
