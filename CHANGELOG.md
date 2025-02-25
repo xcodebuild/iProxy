@@ -1,3 +1,39 @@
+# v2.9.94
+1. fix: https://github.com/avwo/whistle/pull/1192
+
+# v2.9.93
+1. feat: 重放请求时保留 http2 session
+2. feat: 添加命令行参数 `--enable-https`：`w2 ca --enable-https`
+3. feat: Composer 添加 QUERY 方法
+4. feat: locationHref 支持通过设置 locationHref://replace:url 改用 location.replace
+5. fix: https://github.com/avwo/whistle/pull/1192
+
+# v2.9.92
+1. feat: 优化响应超时机制，关闭 `requestTimeout`
+
+# v2.9.91
+1. fix: https://github.com/avwo/whistle/issues/1183
+2. fix: https://github.com/avwo/whistle/issues/1173
+3. fix: https://github.com/avwo/whistle/issues/1081
+
+# v2.9.90
+1. feat: 支持 [whistle-client](https://github.com/avwo/whistle-client) 搜索功能
+
+# v2.9.89
+1. feat: Composer 支持导入 CURL 文本
+2. feat: 优化 Composer
+
+# v2.9.88
+1. perf: 优化 `enable://captureStream`
+2. feat: Composer 支持通过右键发送按钮选择发送文件
+3. fix: 某些情况下解析配置规则里面的数据对象有误（v2.9.87版本引入）
+
+# v2.9.87
+1. feat: `delete://reqType||resType|reqCharset|resCharset`
+2. feat: `delete://resBody.xxx` 删除响应的 JSON 数据可以 key
+3. feat: `delete://reqBody.xxx` 删除请求内容为表单或 JSON 的 JSON 数据对应 key
+4. feat: Network 支持通过 `/` 快速聚集到搜索框
+
 # v2.9.86
 1. feat: JSON View 右键菜单 `Inspect Value` 查看当前 key 对应的 Value 对象
 2. feat: JSON Dialog 添加前进和后退键查看历史记录
