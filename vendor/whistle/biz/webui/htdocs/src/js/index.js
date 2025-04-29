@@ -35,7 +35,8 @@ var MockDialog = require('./mock-dialog');
 var IframeDialog = require('./iframe-dialog');
 var win = require('./win');
 
-var TEMP_LINK_RE = /^(?:[\w-]+:\/\/)?temp\/([\da-z]{64}|blank)(?:\.[\w-]+)?$/;
+var TEMP_LINK_RE = /^(?:[\w-]+:\/\/)?temp(?:\/([\da-z]{64}|blank))?(?:\.[\w-]+)?$/;
+var FILE_PATH_RE = /^(?:[\w-]+:\/\/)?((?:[a-z]:[\\/]|\/).+)$/i;
 var H2_RE = /http\/2\.0/i;
 var JSON_RE = /^\s*(?:[\{｛][\w\W]+[\}｝]|\[[\w\W]+\])\s*$/;
 var DEFAULT = 'Default';
@@ -60,13 +61,23 @@ var hideMenus = !!(query.hideMenus || query.hideMenu);
 var hideLeftMenu;
 var showTreeView;
 var dataUrl;
+var TEXT_SUFFIX_RE = /[\w-]\.(?:txt|csv|tsv|json|xml|yaml|yml|ini|conf|log|html|htm|css|js|py|java|c|cpp|h|sh|php|sql|md|markdown|rtf|tex|bib|vcf)$/i;
 
-function isUrl(url) {
-  return /^https?:\/\/[^/]/i.test(url);
+function getString(url) {
+  return typeof url === 'string' ? url.trim() : '';
+}
+
+function isTextFile(url) {
+  if (!TEXT_SUFFIX_RE.test(url)) {
+    return false;
+  }
+  var PATH_RE = dataCenter.isWin ? /^(?:[\w-]+:\/\/)?[a-z]:[\\/]/i : /^(?:[\w-]+:\/\/)?\//i;
+  return PATH_RE.test(url);
 }
 
 window.setWhistleDataUrl = function(url) {
-  if (isUrl(url)) {
+  url = getString(url);
+  if (url) {
     if (dataCenter.handleDataUrl) {
       dataCenter.handleDataUrl(url);
     } else {
@@ -138,9 +149,13 @@ var RULES_ACTIONS = [
     id: 'exportAllRules'
   },
   {
-    name: 'Import',
+    name: 'Import Local',
     icon: 'import',
-    id: 'importRules'
+    id: 'importLocalRules'
+  },
+  {
+    name: 'Import Remote',
+    id: 'importRemoteRules'
   }
 ];
 var VALUES_ACTIONS = [
@@ -156,9 +171,27 @@ var VALUES_ACTIONS = [
     id: 'exportAllValues'
   },
   {
-    name: 'Import',
+    name: 'Import Local',
     icon: 'import',
-    id: 'importValues'
+    id: 'importLocalValues'
+  },
+  {
+    name: 'Import Remote',
+    id: 'importRemoteValues'
+  }
+];
+var IMPORT_OPTIONS = [
+  {
+    name: 'Local',
+    icon: 'file',
+    id: 'importLocal',
+    title: 'Ctrl[Command] + I'
+  },
+  {
+    name: 'Remote',
+    icon: 'link',
+    id: 'importRemote',
+    title: 'Ctrl[Command] + Shift + I'
   }
 ];
 var REMOVE_OPTIONS = [
@@ -199,18 +232,6 @@ function checkJson(item) {
   }
 }
 
-function checkConflict(data, modal) {
-  var keys = Object.keys(data);
-  for (var i = 0, len = keys.length; i < len; i++) {
-    var name = keys[i];
-    var item = modal.get(name);
-    if (item && item.value !== data[name]) {
-      return true;
-    }
-  }
-  return false;
-}
-
 function getJsonForm(data, name) {
   var form = new FormData();
   var file = new File([JSON.stringify(data)], 'data.json', { type: 'application/json' });
@@ -224,10 +245,6 @@ function checkUrl(url) {
     message.error('The url cannot be empty.');
     return;
   }
-  if (!isUrl(url)) {
-    message.error('Please input the correct url.');
-    return;
-  }
   return url;
 }
 
@@ -239,13 +256,14 @@ function getRemoteData(url, callback) {
       return callback(true);
     }
     if (data.ec !== 0) {
-      message.error(data.em);
+      message.error(data.em || 'Error');
       return callback(true);
     }
     try {
-      data = data.body && JSON.parse(data.body);
+      var value = data.body || data.value;
+      data = value && JSON.parse(value);
       if (!data || !Object.keys(data).length) {
-        message.info('No body data.');
+        message.info('Empty.');
       } else {
         return callback(false, data);
       }
@@ -437,7 +455,6 @@ var Index = React.createClass({
       pluginsMode: !!server.pluginsMode,
       rulesOnlyMode: !!server.rulesOnlyMode,
       multiEnv: server.multiEnv,
-      isWin: server.isWin,
       ndr: server.ndr,
       ndp: server.ndp,
       drb: server.drb,
@@ -651,22 +668,17 @@ var Index = React.createClass({
       {
         name: 'GitHub',
         href: 'https://github.com/avwo/whistle',
-        icon: false
-      },
-      {
-        name: 'Docs',
-        href: 'https://avwo.github.io/whistle/',
-        icon: false
+        icon: 'github'
       },
       {
         name: 'Update',
         href: 'https://avwo.github.io/whistle/update.html',
-        icon: false
+        icon: 'refresh'
       },
       {
         name: 'Issue',
         href: 'https://github.com/avwo/whistle/issues/new',
-        icon: false
+        icon: 'pencil'
       }
     ];
     protocols.setPlugins(state);
@@ -751,6 +763,13 @@ var Index = React.createClass({
     self.syncData(plugin, function() {
       self.refs.syncDialog.syncValues(plugin);
     });
+  },
+  showKVDialog: function(data, isValues) {
+    if (data) {
+      this.refs.syncDialog.showKVDialog(data, this.state.rules, this.state.values, isValues);
+    }
+    ReactDOM.findDOMNode(this.refs.importRules).value = '';
+    ReactDOM.findDOMNode(this.refs.importValues).value = '';
   },
   createPluginsOptions: function (plugins) {
     plugins = plugins || {};
@@ -946,6 +965,10 @@ var Index = React.createClass({
         self.refs.rulesDialog.show(data.rules, data.values);
       }
     });
+    events.on('changeRecordState', function (_, type) {
+      self.setState({ record: type }, self.updateList);
+    });
+    events.on('showHttpsSettingsDialog', self.showHttpsSettingsDialog);
 
     if (isClient) {
       var findEditor = function(keyword, prev) {
@@ -974,6 +997,8 @@ var Index = React.createClass({
     events.on('disablePlugin', function(_, plugin, disabled) {
       self.setPluginState(util.getSimplePluginName(plugin), disabled);
     });
+
+    events.on('showCustomCerts', self.showCustomCertsInfo);
 
     events.on('setComposerData', function(_, data) {
       if (!data || self.state.rulesMode) {
@@ -1219,6 +1244,9 @@ var Index = React.createClass({
         if ($('.w-files-dialog.in').length) {
           return events.trigger('uploadFile', file);
         }
+        if ($('.w-show-upload-temp-file.in').length) {
+          return events.trigger('uploadTempFile', file);
+        }
         var data;
         var name = self.state.name;
         var target = $(e.target);
@@ -1396,6 +1424,7 @@ var Index = React.createClass({
           elem.hasClass('cm-string') ||
           elem.hasClass('cm-js-at') ||
           TEMP_LINK_RE.test(text = elem.text()) ||
+          isTextFile(text) ||
           getKey(text)
         ) {
           elem.addClass('w-is-link');
@@ -1429,7 +1458,7 @@ var Index = React.createClass({
           window.open(text);
           return;
         }
-        if (TEMP_LINK_RE.test(text)) {
+        if (TEMP_LINK_RE.test(text) || (isTextFile(text) && FILE_PATH_RE.test(text))) {
           var tempFile = RegExp.$1;
           return events.trigger('showEditorDialog', [{
             ruleName: self.getActiveRuleName(),
@@ -1633,15 +1662,40 @@ var Index = React.createClass({
     events.on('exportValues', self.exportData);
     events.on('importRules', self.importRules);
     events.on('importValues', self.importValues);
-    events.on('uploadRules', function (e, data) {
+    events.on('handleImportRules', function(_, data) {
+      self.handleImportRules(data);
+    });
+    events.on('handleImportValues', function(_, data) {
+      self.handleImportValues(data);
+    });
+    events.on('uploadRules', function (_, data) {
       var form = getJsonForm(data);
       form.append('replaceAll', '1');
-      self._uploadRules(form, true);
+      dataCenter.upload.importRules(form, function (data, xhr) {
+        if (!data) {
+          util.showSystemError(xhr);
+        } else if (data.ec === 0) {
+          self.reloadRules(data);
+          message.success('Rules imported successfully.');
+        } else {
+          win.alert(data.em);
+        }
+      });
     });
-    events.on('uploadValues', function (e, data) {
+    events.on('uploadValues', function (_, data) {
       var form = getJsonForm(data, 'values');
       form.append('replaceAll', '1');
-      self._uploadValues(form, true);
+      dataCenter.upload.importValues(form, function (data, xhr) {
+        if (!data) {
+          util.showSystemError(xhr);
+        }
+        if (data.ec === 0) {
+          self.reloadValues(data);
+          message.success('Values imported successfully.');
+        } else {
+          win.alert(data.em);
+        }
+      });
     });
     var timeout;
     var hidden = document.hidden;
@@ -1781,7 +1835,8 @@ var Index = React.createClass({
     return true;
   },
   handleDataUrl: function(url) {
-    if (!isUrl(url)) {
+    url = getString(url);
+    if (!url) {
       return;
     }
     var self = this;
@@ -2090,6 +2145,10 @@ var Index = React.createClass({
       this.importSessions(e);
     } else if (item.id === 'toggleView') {
       this.toggleTreeView();
+    } else if (item.id === 'importLocal') {
+      this.importData();
+    } else if (item.id === 'importRemote') {
+      this.importData({shiftKey: true});
     }
     this.hideNetworkOptions();
   },
@@ -2105,6 +2164,9 @@ var Index = React.createClass({
       this.importValues(e);
       break;
     }
+    this.setState({
+      showImportOptions: false
+    });
   },
   exportData: function (e, curItem) {
     switch (this.state.name) {
@@ -2239,72 +2301,11 @@ var Index = React.createClass({
       }
     });
   },
-  _uploadRules: function (data, showResult) {
-    var self = this;
-    dataCenter.upload.importRules(data, function (data, xhr) {
-      if (!data) {
-        util.showSystemError(xhr);
-      } else if (data.ec === 0) {
-        self.reloadRules(data);
-        showResult && message.success('Successful synchronization Rules.');
-      } else {
-        win.alert(data.em);
-      }
-    });
-  },
-  _uploadValues: function (data, showResult) {
-    var self = this;
-    dataCenter.upload.importValues(data, function (data, xhr) {
-      if (!data) {
-        util.showSystemError(xhr);
-      }
-      if (data.ec === 0) {
-        self.reloadValues(data);
-        showResult && message.success('Successful synchronization Values.');
-      } else {
-        win.alert(data.em);
-      }
-    });
-  },
   handleImportRules: function(data) {
-    if (!data) {
-      return;
-    }
-    this.rulesForm = getJsonForm(data);
-    if (checkConflict(data, this.state.rules)) {
-      this.refs.confirmImportRules.show();
-    } else {
-      this.uploadRules();
-    }
+    this.showKVDialog(data);
   },
   handleImportValues: function(data) {
-    if (!data) {
-      return;
-    }
-    this.valuesForm = getJsonForm(data, 'values');
-    this.refs.confirmImportValues.show();
-  },
-  uploadRules: function (e) {
-    var form = this.rulesForm;
-    self.rulesForm = null;
-    if (form) {
-      if (!e || $(e.target).hasClass('btn-danger')) {
-        form.append('replaceAll', '1');
-      }
-      this._uploadRules(form);
-      ReactDOM.findDOMNode(this.refs.importRules).value = '';
-    }
-  },
-  uploadValues: function (e) {
-    var form = this.valuesForm;
-    self.valuesForm = null;
-    if (form) {
-      if (!e || $(e.target).hasClass('btn-danger')) {
-        form.append('replaceAll', '1');
-      }
-      this._uploadValues(form);
-      ReactDOM.findDOMNode(this.refs.importValues).value = '';
-    }
+    this.showKVDialog(data, true);
   },
   uploadRulesForm: function () {
     var form = new FormData(
@@ -2324,8 +2325,11 @@ var Index = React.createClass({
       case 'exportRules':
         this.refs.selectRulesDialog.show();
         break;
-      case 'importRules':
-        this.importRules(e);
+      case 'importLocalRules':
+        this.importRules();
+        break;
+      case 'importRemoteRules':
+        this.importRules({ shiftKey: true });
         break;
       }
     } else {
@@ -2354,8 +2358,11 @@ var Index = React.createClass({
       case 'exportValues':
         self.refs.selectValuesDialog.show();
         break;
-      case 'importValues':
-        this.importValues(e);
+      case 'importLocalValues':
+        this.importValues();
+        break;
+      case 'importRemoteValues':
+        this.importValues({ shiftKey: true });
         break;
       }
     } else {
@@ -2406,9 +2413,15 @@ var Index = React.createClass({
   },
   hideNetworkOptions: function () {
     this.setState({
+      showImportOptions: false,
       showRemoveOptions: false,
       showAbortOptions: false,
       showNetworkOptions: false
+    });
+  },
+  showImportOptions: function () {
+    this.setState({
+      showImportOptions: true
     });
   },
   showRemoveOptions: function () {
@@ -2432,6 +2445,11 @@ var Index = React.createClass({
   hideCreateOptions: function () {
     this.setState({
       showCreateOptions: false
+    });
+  },
+  hideImportOptions: function () {
+    this.setState({
+      showImportOptions: false
     });
   },
   hideRemoveOptions: function () {
@@ -2690,6 +2708,9 @@ var Index = React.createClass({
       function (data, xhr) {
         if (data && data.ec === 0) {
           self.state.interceptHttpsConnects = checked;
+          dataCenter.isCapture = checked ? 1 : 0;
+          events.trigger('reqTabsChange');
+          events.trigger('resTabsChange');
         } else {
           util.showSystemError(xhr);
         }
@@ -3548,12 +3569,8 @@ var Index = React.createClass({
       }
     );
   },
-  reinstallAllPlugins: function () {
-    if (dataCenter.enablePluginMgr) {
-      events.trigger('installPlugins');
-    } else {
-      events.trigger('updateAllPlugins', 'reinstallAllPlugins');
-    }
+  installPlugins: function () {
+    events.trigger('installPlugins');
   },
   chooseFileType: function (e) {
     var value = e.target.value;
@@ -4011,7 +4028,7 @@ var Index = React.createClass({
     var showHelpOptions = state.showHelpOptions;
     var modal = state.network;
     var isTreeView = modal.isTreeView;
-    var networkType = isTreeView ? 'tree-conifer' : 'globe';
+    var networkType = (isTreeView ? 'tree-conifer' : 'globe') + (state.record ? ' w-disabled' : '');
     if (rulesOptions[0].name === DEFAULT) {
       rulesOptions.forEach(function (item, i) {
         item.icon = !i || !state.multiEnv ? 'checkbox' : 'edit';
@@ -4081,6 +4098,7 @@ var Index = React.createClass({
     var pendingRules = state.pendingRules;
     var pendingValues = state.pendingValues;
     var accountRules = state.accountRules;
+    var hasAccount = state.hasAccount;
     var mustHideLeftMenu = hideLeftMenu && !state.forceShowLeftMenu;
     var pluginsOnlyMode = pluginsMode && rulesMode;
     var showAccount = state.showAccount;
@@ -4116,6 +4134,7 @@ var Index = React.createClass({
         className={
           'main orient-vertical-box' + (showLeftMenu ? ' w-show-left-menu' : '')
           + (showAccount ? ' w-show-account' : '')
+          + (hasAccount ? ' w-has-account' : '')
           + (isEditor && !rulesOnlyMode ? ' w-show-editor' : '') + (isRules ? ' w-show-rules' : '')
           + (rulesOnlyMode || rulesMode ? ' w-show-rules-mode' : '')
         }
@@ -4289,19 +4308,16 @@ var Index = React.createClass({
               title={
                 disabledAllRules ? 'Enable all rules' : 'Disable all rules'
               }
-              style={{
-                display: isRules ? '' : 'none',
-                color: disabledAllRules ? '#f66' : undefined
-              }}
+              style={{ display: isRules ? '' : 'none' }}
               draggable="false"
             >
               <span
-                className={
-                  'glyphicon glyphicon-' +
-                  (disabledAllRules ? 'play-circle' : 'off')
-                }
+               className="glyphicon glyphicon-stop"
+               style={{
+                 color: disabledAllRules ? '#ccc' : 'rgb(255, 102, 102)'
+               }}
               />
-              {disabledAllRules ? 'ON' : 'OFF'}
+              ON
             </a>
           )}
           {!state.ndp && (
@@ -4313,24 +4329,21 @@ var Index = React.createClass({
                   ? 'Enable all plugins'
                   : 'Disable all plugins'
               }
-              style={{
-                display: isPlugins ? '' : 'none',
-                color: disabledAllPlugins ? '#f66' : undefined
-              }}
+              style={{ display: isPlugins ? '' : 'none' }}
               draggable="false"
             >
               <span
-                className={
-                  'glyphicon glyphicon-' +
-                  (disabledAllPlugins ? 'play-circle' : 'off')
-                }
+                className="glyphicon glyphicon-stop"
+                style={{
+                  color: disabledAllPlugins ? '#ccc' : 'rgb(255, 102, 102)'
+                }}
               />
-              {disabledAllPlugins ? 'ON' : 'OFF'}
+              ON
             </a>
           )}
           <UpdateAllBtn hide={!isPlugins} />
           <a
-            onClick={this.reinstallAllPlugins}
+            onClick={this.installPlugins}
             className={'w-plugins-menu' + (isPlugins ? '' : ' hide')}
             draggable="false"
           >
@@ -4342,14 +4355,27 @@ var Index = React.createClass({
             hide={!isNetwork}
             onClick={this.handleAction}
           />
-          <a
-            onClick={this.importData}
-            className="w-import-menu"
+          <div
+            onMouseEnter={this.showImportOptions}
+            onMouseLeave={this.hideImportOptions}
             style={importMenuStyle}
-            draggable="false"
+            className={
+              'w-menu-wrapper w-remove-menu-list w-menu-auto' +
+              (state.showImportOptions ? ' w-menu-wrapper-show' : '')
+            }
           >
-            <span className="glyphicon glyphicon-import"></span>Import
-          </a>
+            <a
+              onClick={this.importData}
+              className="w-import-menu"
+              draggable="false"
+            >
+              <span className="glyphicon glyphicon-import"></span>Import
+            </a>
+            <MenuItem
+              options={IMPORT_OPTIONS}
+              onClickOption={this.handleNetwork}
+            />
+          </div>
           <a
             onClick={this.exportData}
             className="w-export-menu"
@@ -4461,6 +4487,14 @@ var Index = React.createClass({
             isNetwork={isNetwork}
             hide={isPlugins}
           />
+          <a
+              onClick={this.showFiles}
+              className="w-files-menu"
+              style={showAccount ? null : HIDE_STYLE}
+              draggable="false"
+            >
+              <span className="glyphicon glyphicon-file" />Files
+          </a>
           <div
             onMouseEnter={this.showWeinreOptions}
             onMouseLeave={this.hideWeinreOptions}
@@ -4469,14 +4503,6 @@ var Index = React.createClass({
               (showWeinreOptions ? ' w-menu-wrapper-show' : '')
             }
           >
-            <a
-              onClick={this.showFiles}
-              className="w-files-menu"
-              style={showAccount ? null : HIDE_STYLE}
-              draggable="false"
-            >
-              <span className="glyphicon glyphicon-file" />Files
-            </a>
             <a
               onClick={this.showWeinreOptionsQuick}
               onDoubleClick={this.showAnonymousWeinre}
@@ -4783,7 +4809,7 @@ var Index = React.createClass({
               foldGutter={state.foldGutter}
             />
           ) : undefined}
-          {state.hasAccount ? (
+          {hasAccount ? (
             <Account hide={!isAccount} />
           ) : undefined}
           {state.hasNetwork ? (
@@ -5104,19 +5130,19 @@ var Index = React.createClass({
           <div className="modal-footer">
             <button
               type="button"
+              className="btn btn-default"
+              data-dismiss="modal"
+            >
+              Close
+            </button>
+            <button
+              type="button"
               className="btn btn-primary"
               disabled={pendingRules}
               onMouseDown={this.preventBlur}
               onClick={this.importRemoteRules}
             >
               {pendingRules ? 'Importing rules' : 'Import rules'}
-            </button>
-            <button
-              type="button"
-              className="btn btn-default"
-              data-dismiss="modal"
-            >
-              Close
             </button>
           </div>
         </Dialog>
@@ -5134,19 +5160,19 @@ var Index = React.createClass({
           <div className="modal-footer">
             <button
               type="button"
+              className="btn btn-default"
+              data-dismiss="modal"
+            >
+              Close
+            </button>
+            <button
+              type="button"
               className="btn btn-primary"
               disabled={pendingSessions}
               onMouseDown={this.preventBlur}
               onClick={this.importRemoteSessions}
             >
               {pendingSessions ? 'Importing sessions' : 'Import sessions'}
-            </button>
-            <button
-              type="button"
-              className="btn btn-default"
-              data-dismiss="modal"
-            >
-              Close
             </button>
           </div>
         </Dialog>
@@ -5164,19 +5190,19 @@ var Index = React.createClass({
           <div className="modal-footer">
             <button
               type="button"
+              className="btn btn-default"
+              data-dismiss="modal"
+            >
+              Close
+            </button>
+            <button
+              type="button"
               className="btn btn-primary"
               disabled={pendingValues}
               onMouseDown={this.preventBlur}
               onClick={this.importRemoteValues}
             >
               {pendingValues ? 'Importing values' : 'Import values'}
-            </button>
-            <button
-              type="button"
-              className="btn btn-default"
-              data-dismiss="modal"
-            >
-              Close
             </button>
           </div>
         </Dialog>
@@ -5259,58 +5285,6 @@ var Index = React.createClass({
             </button>
           </div>
         </Dialog>
-        <Dialog ref="confirmImportRules" wstyle="w-confirm-import-dialog">
-          <div className="modal-body w-confirm-import">
-            <button type="button" className="close" data-dismiss="modal">
-              <span aria-hidden="true">&times;</span>
-            </button>
-            Whether to replace the existing rules?
-          </div>
-          <div className="modal-footer">
-            <button
-              type="button"
-              className="btn btn-danger"
-              onClick={this.uploadRules}
-              data-dismiss="modal"
-            >
-              Replace
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={this.uploadRules}
-              data-dismiss="modal"
-            >
-              Reserve
-            </button>
-          </div>
-        </Dialog>
-        <Dialog ref="confirmImportValues" wstyle="w-confirm-import-dialog">
-          <div className="modal-body w-confirm-import">
-            <button type="button" className="close" data-dismiss="modal">
-              <span aria-hidden="true">&times;</span>
-            </button>
-            Whether to replace the existing values?
-          </div>
-          <div className="modal-footer">
-            <button
-              type="button"
-              className="btn btn-danger"
-              onClick={this.uploadValues}
-              data-dismiss="modal"
-            >
-              Replace
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={this.uploadValues}
-              data-dismiss="modal"
-            >
-              Reserve
-            </button>
-          </div>
-        </Dialog>
         <ListDialog
           ref="deleteRulesDialog"
           tips="Are you sure to delete all follow rules or group？"
@@ -5329,6 +5303,7 @@ var Index = React.createClass({
         <ListDialog
           ref="selectRulesDialog"
           name="rules"
+          modal={state.rules}
           list={state.rules.list}
         />
         <ListDialog

@@ -186,8 +186,10 @@ var JSONTree = (function (_React$Component) {
   function JSONTree(props) {
     (0, _classCallCheck3['default'])(this, JSONTree);
     var contextMenuList = [
+      { name: 'Copy' },
       { name: 'Copy Key' },
       { name: 'Copy Value' },
+      { name: 'Copy Object' },
       { name: 'Collapse Parent' }
     ];
     var expandMenu;
@@ -239,13 +241,14 @@ var JSONTree = (function (_React$Component) {
       var data = _this.props.data;
       var keyPathLen = keyPath.length;
       var showInspect = keyPathLen >= 2 || props.onSearch;
+      contextMenuList[3].copyText = data ? JSON.stringify(data, null, '  ') : '';
       if (data) {
         for (var i = keyPathLen - 2; i >= 0; i--) {
           data = data && data[keyPath[i]];
         }
       }
 
-      var height = isRoot ? 60 : 90;
+      var height = isRoot ? 90 : 120;
       if (props.onSearch && !searchMenu) {
         searchMenu = expandMenu;
         expandMenu = null;
@@ -259,17 +262,20 @@ var JSONTree = (function (_React$Component) {
       if (searchMenu) {
         height += 30;
       }
+      var selectedText = _contextMenu.util.getSelectedText(e.clientX, e.clientY);
       var json = data && showInspect && (typeof data === 'object' ? data : _contextMenu.util.parseJSON(data));
       inspectMenu.hide = !json;
       inspectMenu.onClick = json ? function() {
         _contextMenu.util.showJSONDialog(json, [keyPath[0]]);
       } : null;
       height += json ? 30 : 0;
+      height += selectedText ? 30 : 0;
       var isRoot = keyPathLen === 1;
       var ctxMenu = _contextMenu.util.getMenuPosition(e, 110, height);
-      ctxMenu.list = contextMenuList;
       ctxMenu.className = 'w-inspectors-ctx-menu';
-      contextMenuList[0].copyText = keyPath[0];
+      contextMenuList[0].copyText = selectedText;
+      contextMenuList[0].hide = !selectedText;
+      contextMenuList[1].copyText = keyPath[0];
       if (
         data &&
         (typeof data === 'undefined'
@@ -281,11 +287,18 @@ var JSONTree = (function (_React$Component) {
           data = (0, _stringify2['default'])(data, null, '  ');
         } catch (e) {} // eslint-disable-line
       }
-      contextMenuList[1].copyText = data + '';
-      contextMenuList[2].onClick = function () {
+      contextMenuList[2].copyText = data + '';
+      contextMenuList[4].onClick = function () {
         label.closest('li').parent().closest('li').find('div:first').click();
       };
-      contextMenuList[2].hide = isRoot;
+      contextMenuList[4].hide = isRoot;
+      var menus = contextMenuList;
+      if (!target.closest('label').length) {
+        menus = menus.map(_contextMenu.util.noop);
+        menus[1] = contextMenuList[2];
+        menus[2] = contextMenuList[1];
+      }
+      ctxMenu.list = menus;
       _this.refs.contextMenu.show(ctxMenu); // eslint-disable-line
       e.preventDefault();
       e.stopPropagation();

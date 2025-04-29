@@ -9,12 +9,14 @@ var util = require('./util');
 var win = require('./win');
 var LazyInit = require('./lazy-init');
 var storage = require('./storage');
-var message = require('./message');
+var PluginsMgr = require('./plugins-mgr');
 var ContextMenu = require('./context-menu');
 var iframes = require('./iframes');
 
+
 var CMD_RE = /^([\w]{1,12})(\s+-g)?$/;
 var WHISTLE_PLUGIN_RE = /(?:^|[\s,;|])(?:@[\w-]+\/)?whistle\.[a-z\d_-]+(?:\@[\w.^~*-]*)?(?:$|[\s,;|])/;
+var SPACE_RE = /\s+$/;
 var pendingEnable;
 var registryCache;
 
@@ -43,22 +45,19 @@ function getPluginComparator(plugins) {
   };
 }
 
-function getPluginList(plugins) {
+function getPluginList(plugins, installUrls, disabledPlugins) {
   if (!plugins) {
     return [];
   }
   return Object.keys(plugins).sort(getPluginComparator(plugins))
         .map(function (name) {
-          return plugins[name];
+          var plugin = plugins[name];
+          if (!dataCenter.disableInstaller && plugin && installUrls && disabledPlugins
+            && plugin.installUrl && !disabledPlugins[name.slice(0, -1)]) {
+            installUrls.push(plugin);
+          }
+          return plugin;
         });
-}
-
-function handlePlugins(data, xhr) {
-  if (!data) {
-    util.showSystemError(xhr);
-    return;
-  }
-  message.success('Request successful, the list of plugins will update itself.');
 }
 
 function enableAllPlugins(e) {
@@ -88,8 +87,13 @@ window.getWhistleProxyServerInfo = function () {
   return serverInfo && $.extend(true, {}, serverInfo);
 };
 
-function getAccount(plugin) {
-  return plugin.account ? ' --account=' + plugin.account : '';
+function getArgvs(account, dir) {
+  var params = account ? ' --account=' + account : '';
+  return params + (dir ? ' --dir=' + dir : '');
+}
+
+function getParams(plugin) {
+  return getArgvs(plugin.account, plugin.dir);
 }
 
 function getUpdateUrl(plugin) {
@@ -106,31 +110,6 @@ function isOpenExternal(plugin) {
 
 function getHomePage(plugin) {
   return plugin.pluginHomepage || 'plugin.' + util.getSimplePluginName(plugin) + '/';
-}
-
-function getRegistryList(cb) {
-  dataCenter.plugins.getRegistryList(function(data, xhr) {
-    var registry = storage.get('pluginsRegistry');
-    if (!data) {
-      util.showSystemError(xhr);
-    } else if (data.ec !== 0) {
-      win.alert(data.em);
-    } else {
-      registryCache = dataCenter.getPluginRegistry();
-      data.list.forEach(function(url) {
-        if (registryCache.indexOf(url) === -1) {
-          registryCache.push(url);
-        }
-      });
-    }
-    if (!registryCache) {
-      return;
-    }
-    if (registryCache.indexOf(registry) === -1) {
-      registry = '';
-    }
-    cb(registryCache, registry);
-  });
 }
 
 var Home = React.createClass({
@@ -160,18 +139,17 @@ var Home = React.createClass({
       self.onShowRules(util.getSimplePluginName(plugin));
     });
     events.on('installPlugins', self.showInstall);
-    events.on('updateAllPlugins', function (_, byInstall) {
-      byInstall = byInstall === 'reinstallAllPlugins';
+    events.on('updateAllPlugins', function () {
       var data = self.props.data || {};
       var plugins = data.plugins || {};
       var newPlugins = {};
       var registry;
       getPluginList(plugins).forEach(function (plugin) {
-        if (!plugin || plugin.isProj || (!byInstall && !util.compareVersion(plugin.latest, plugin.version))) {
+        if (!plugin || plugin.isProj || !util.compareVersion(plugin.latest, plugin.version)) {
           return;
         }
         registry = registry || plugin.registry;
-        var account = getAccount(plugin);
+        var account = getParams(plugin);
         var list = newPlugins[account] || [];
         list.push(getUpdateUrl(plugin));
         newPlugins[account] = list;
@@ -182,7 +160,7 @@ var Home = React.createClass({
           return getCmd() + list + registry;
         })
         .join('\n\n');
-      cmdMsg && getRegistryList(function(result, r) {
+      cmdMsg && self.getRegistryList(function(result, r) {
         self.setState({
           cmdMsg: cmdMsg,
           uninstall: false,
@@ -192,6 +170,49 @@ var Home = React.createClass({
           registryList: result
         }, self.showMsgDialog);
       });
+    });
+  },
+  getRegistryList: function(cb) {
+    var list = [];
+    if (this.installUrls) {
+      this.installUrls.forEach(function(plugin) {
+        var reg = plugin.installUrl && plugin.installRegistry;
+        Array.isArray(reg) && reg.forEach(function(r) {
+          if (r && list.indexOf(r) === -1) {
+            list.push(r);
+          }
+        });
+      });
+    }
+    dataCenter.plugins.getRegistryList(function(data, xhr) {
+      var registry = storage.get('pluginsRegistry');
+      if (!data) {
+        util.showSystemError(xhr);
+      } else if (data.ec !== 0) {
+        win.alert(data.em);
+      } else {
+        registryCache = dataCenter.getPluginRegistry();
+        data.list.forEach(function(url) {
+          if (registryCache.indexOf(url) === -1) {
+            registryCache.push(url);
+          }
+        });
+      }
+      if (list.length) {
+        registryCache = registryCache || [];
+        list.forEach(function(url) {
+          if (registryCache.indexOf(url) === -1) {
+            registryCache.push(url);
+          }
+        });
+      }
+      if (!registryCache) {
+        return;
+      }
+      if (registryCache.indexOf(registry) === -1) {
+        registry = '';
+      }
+      cb(registryCache, registry);
     });
   },
   componentDidUpdate: function () {
@@ -207,10 +228,7 @@ var Home = React.createClass({
     if (state.registryList && state.registry) {
       cmd += ' --registry=' + state.registry;
     }
-    var isInstall = install || cmd.indexOf('w2 install ') === 0;
-    dataCenter.plugins[(isInstall ? '' : 'un' ) + 'installPlugins']({
-      cmd: cmd
-    }, handlePlugins);
+    this.refs.pluginsMgrDialog.show(cmd, this.installUrls, !install);
   },
   onOpen: function (e) {
     var name = e.target.getAttribute('data-name');
@@ -297,10 +315,10 @@ var Home = React.createClass({
   },
   showUpdate: function (plugin) {
     var self = this;
-    getRegistryList(function(result, r) {
+    self.getRegistryList(function(result, r) {
       self.setState(
         {
-          cmdMsg: getCmd() + getUpdateUrl(plugin) + getAccount(plugin),
+          cmdMsg: getCmd() + getUpdateUrl(plugin) + getParams(plugin),
           isSys: plugin.isSys,
           uninstall: false,
           install: false,
@@ -314,7 +332,7 @@ var Home = React.createClass({
   },
   showInstall: function() {
     var self = this;
-    getRegistryList(function(result, r) {
+    self.getRegistryList(function(result, r) {
       self.setState({
         install: true,
         registryList: result,
@@ -329,46 +347,22 @@ var Home = React.createClass({
     this.showUninstall(plugin);
   },
   showUninstall: function (plugin) {
-    var self = this;
-    var sudo = self.props.data.isWin ? '' : 'sudo ';
-    var isSys = plugin.isSys || dataCenter.enablePluginMgr;
-    var cmdMsg = isSys ? getCmd(true) : sudo + 'npm uninstall -g ';
-    var registry = isSys ? null : plugin.registry;
-    var registryList = null;
-    var registryCmd = registry ? ' --registry=' + registry : '';
-    if (dataCenter.enablePluginMgr) {
-      var cmd = plugin.moduleName;
-      win.confirm('Are you sure to uninstall plugin \'' + cmd + '\'.', function(ok) {
-        if (ok) {
-          dataCenter.plugins.uninstallPlugins({ cmd: cmd }, handlePlugins);
-        }
-      });
-      return;
-    }
-    var update = function() {
-      self.setState(
-        {
-          cmdMsg: cmdMsg + plugin.moduleName + getAccount(plugin) + registryCmd,
-          isSys: isSys,
-          uninstall: true,
-          install: false,
-          registryList: registryList,
-          registry: registry,
-          registryChanged: true,
-          pluginPath: plugin.path
-        },
-        self.showMsgDialog
-      );
-    };
-    if (isSys) {
-      update();
-    } else {
-      getRegistryList(function(result, r) {
-        registryList = result;
-        registry = r || registry;
-        update();
-      });
-    }
+    var name = plugin.moduleName;
+    win.confirm('Are you sure to uninstall plugin \'' + name + '\'.', function(ok) {
+      if (ok) {
+        dataCenter.plugins.uninstallPlugins({ name: util.getSimplePluginName(plugin) }, function(data, xhr) {
+          if (!data) {
+            return util.showSystemError(xhr);
+          }
+          if (data.ec) {
+            return win.alert((data.em || 'Error') + ', ' + 'try again or delete the directory manually:\n' + plugin.path,
+            plugin.path
+          , 'Copy Directory Path');
+          }
+          util.showHandlePluginInfo(data);
+        });
+      }
+    });
   },
   enableAllPlugins: function (e) {
     var self = this;
@@ -387,33 +381,51 @@ var Home = React.createClass({
     var self = this;
     var data = self.props.data || {};
     var plugins = data.plugins || {};
+    var installUrls = [];
+    var disabledPlugins = data.disabledPlugins || {};
+    var list = getPluginList(plugins, installUrls, disabledPlugins);
     var state = self.state || {};
     var plugin = state.plugin || {};
     var install = state.install;
     var epm = dataCenter.enablePluginMgr;
-    var cmdMsg = install ? state.installMsg : state.cmdMsg;
-    var list = getPluginList(plugins);
-    var disabledPlugins = data.disabledPlugins || {};
+    var hasInstaller = epm || installUrls.length;
+    var cmdMsg = (install ? state.installMsg : state.cmdMsg) || '';
     var registryList = state.registryList || [];
     var registry = state.registry || '';
     var disabled = data.disabledAllPlugins;
     var ndp = data.ndp;
+    var showCopyBtn = !epm &&  hasInstaller;
+    var selectStyle = showCopyBtn ? {width: 225} : undefined;
     self.hasNewPlugin = false;
+    self.installUrls = installUrls;
 
-    if (!epm && state.registryChanged && cmdMsg) {
+    if (state.registryChanged) {
       state.registryChanged = false;
-      var regCmd = registry ? ' --registry=' + registry : '';
-      cmdMsg = cmdMsg.split('\n').map(function(line) {
-        line = line.trim();
-        line = line.split(/\s+/).filter(function(cmd) {
-          return cmd.indexOf('--registry') !== 0;
-        }).join(' ');
-        if (line && regCmd) {
-          line += regCmd;
+      var regCmd = registry ? ' --registry=' + registry + '  ' : '';
+      if (cmdMsg) {
+        var r = SPACE_RE.exec(cmdMsg);
+        var spaces = r && r[0];
+        cmdMsg = cmdMsg.split('\n').map(function(line) {
+          line = line.trim();
+          line = line.split(/\s+/).filter(function(cmd) {
+            return cmd.indexOf('--registry') !== 0;
+          }).join(' ');
+          if (line && regCmd) {
+            line += regCmd;
+          }
+          return line;
+        }).filter(util.noop).join('\n');
+        if (spaces && !registry) {
+          cmdMsg += spaces;
         }
-        return line;
-      }).filter(util.noop).join('\n');
+      } else {
+        cmdMsg = getCmd() + getArgvs(dataCenter.account, dataCenter.whistleName) + ' ' + (regCmd ? regCmd : '');
+      }
+      state.cmdMsg = cmdMsg;
+      state.installMsg = cmdMsg;
     }
+
+    var disabledBtn = !WHISTLE_PLUGIN_RE.test(cmdMsg);
 
     return (
       <div
@@ -563,7 +575,7 @@ var Home = React.createClass({
                         ) : (
                           <a
                             draggable="false"
-                            className="w-plugin-btn"
+                            className="w-delete"
                             data-name={name}
                             onClick={self.onShowUninstall}
                           >
@@ -655,7 +667,7 @@ var Home = React.createClass({
         </Dialog>
         <Dialog ref="operatePluginDialog" wstyle="w-plugin-update-dialog">
           <div className="modal-body">
-            {dataCenter.enablePluginMgr ? null : (<h5>
+            {hasInstaller || install ? null : (<h5>
               <a
                 data-dismiss="modal"
                 className="w-copy-text-with-tips"
@@ -666,15 +678,17 @@ var Home = React.createClass({
               and execute it in the CLI:
             </h5>)}
             {
-              install ? <h5>Input the package name of plugins (separated by spaces) and click Install:</h5> : null
+              install ? (hasInstaller ? <h5>Input the package name of plugins (separated by spaces) and click Install:</h5> :
+              <h5>Input the package name of plugins (separated by spaces) and execute it in the CLI:</h5> ) : null
             }
             <textarea
               ref="textarea"
               value={cmdMsg || ''}
-              placeholder={install ? 'Such as: whistle.inspect whistle.abc@1.0.0 @org/whistle.xxx' : undefined}
+              placeholder={install ? 'SUCH AS: whistle.inspect whistle.abc@1.0.0 @org/whistle.xyz' : undefined}
               className={'w-plugin-update-cmd' + (install ? ' w-plugin-install' : '')}
               maxLength={install ? 360 : undefined}
               onChange={this.onCmdChange}
+              onKeyDown={util.handleTab}
             />
             <div
               style={{
@@ -698,34 +712,24 @@ var Home = React.createClass({
           <div className="modal-footer">
             {registryList.length ? <label className="w-registry-list">
               <strong>--registry=</strong>
-              <select className="form-control" value={registry} onChange={this.onRegistry}>
+              <select className="form-control" value={registry} onChange={this.onRegistry} style={selectStyle}>
                 <option value="">None</option>
                 {
                   registryList.map(function(url) {
                     return (
-                      <option value={url}>{url}</option>
+                      <option key={url} value={url}>{url}</option>
                     );
                   })
                 }
-                {epm ? <option value="+Add">+Add</option> : null}
+                {hasInstaller ? <option value="+Add">+Add</option> : null}
               </select>
-            </label> : (epm ? <label className="w-registry-list">
+            </label> : (hasInstaller ? <label className="w-registry-list">
               <strong>--registry=</strong>
-              <select className="form-control" value={registry} onChange={this.onRegistry}>
+              <select className="form-control" value={registry} onChange={this.onRegistry} style={selectStyle}>
                 <option value="">None</option>
                 <option value="+Add">+Add</option>
               </select>
             </label> : null)}
-            <button
-              type="button"
-              className="btn btn-primary w-copy-text-with-tips"
-              data-dismiss="modal"
-              data-clipboard-text={dataCenter.enablePluginMgr ? undefined : cmdMsg}
-              onClick={dataCenter.enablePluginMgr ? self.execCmd : null}
-              disabled={install && !WHISTLE_PLUGIN_RE.test(cmdMsg)}
-            >
-              {dataCenter.enablePluginMgr ? (install ? 'Install' : 'Update') : 'Copy'}
-            </button>
             <button
               type="button"
               className="btn btn-default"
@@ -733,8 +737,30 @@ var Home = React.createClass({
             >
               Close
             </button>
+            {showCopyBtn ? (
+              <button
+              type="button"
+                data-dismiss="modal"
+                className="btn btn-info w-copy-text-with-tips"
+                data-clipboard-text={cmdMsg}
+                disabled={disabledBtn}
+              >
+                Copy Command
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="btn btn-primary w-copy-text-with-tips"
+              data-dismiss="modal"
+              data-clipboard-text={hasInstaller ? undefined : cmdMsg}
+              onClick={hasInstaller ? self.execCmd : null}
+              disabled={disabledBtn}
+            >
+              {hasInstaller ? (install ? 'Install' : 'Update') : 'Copy'}
+            </button>
           </div>
         </Dialog>
+        <PluginsMgr ref="pluginsMgrDialog" />
       </div>
     );
   }
@@ -861,7 +887,7 @@ var Tabs = React.createClass({
         plugin: plugin,
         plugins: getPluginList(props.plugins),
         pluginsRoot: dataCenter.pluginsRoot,
-        getRegistryList: getRegistryList
+        getRegistryList: this.getRegistryList
       });
       return;
     }
@@ -916,7 +942,7 @@ var Tabs = React.createClass({
           {tabs.map(function (tab) {
             var disd = util.pluginIsDisabled(props, tab.name);
             return (
-              <li className={activeName == tab.name ? ' active' : ''}>
+              <li key={tab.name} className={activeName == tab.name ? ' active' : ''}>
                 <a
                   data-name={tab.name}
                   title={tab.name}
@@ -951,7 +977,7 @@ var Tabs = React.createClass({
             />
             {tabs.map(function (tab) {
               return (
-                <LazyInit inited={activeName == tab.name}>
+                <LazyInit key={tab.name} inited={activeName == tab.name}>
                   <iframe
                     style={{ display: activeName == tab.name ? '' : 'none' }}
                     src={tab.url}

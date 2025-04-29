@@ -416,6 +416,8 @@ var MockDialog = React.createClass({
           if ((e.ctrlKey || e.metaKey) && e.keyCode === 83) {
             e.preventDefault();
           }
+          util.handleFormat(e, self.formatValue);
+          util.handleTab(e);
         };
       }
     };
@@ -655,16 +657,16 @@ var MockDialog = React.createClass({
             <select className="form-control w-mock-protocol" onChange={this.onProtoChange} value={state.protocol}>
               {
                 COMMON_OPS.map(function(proto) {
-                  return <option value={proto}>{proto}</option>;
+                  return <option key={proto} value={proto}>{proto}</option>;
                 })
               }
               <option disabled>─────────</option>
               {protoList.map(function(item) {
                 var list = item[1];
-                return list.length ? <optgroup label={item[0]}>
+                return list.length ? <optgroup key={item[0]} label={item[0]}>
                   {
                     list.map(function(proto) {
-                      return <option value={proto}>{proto}</option>;
+                      return <option key={proto} value={proto}>{proto}</option>;
                     })
                   }
                 </optgroup> : null;

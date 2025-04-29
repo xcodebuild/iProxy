@@ -35,7 +35,6 @@ var toBuffer = fileMgr.toBuffer;
 var pendingFiles = {};
 var localIpCache = new LRU({ max: 120 });
 var CRLF_RE = /\r\n|\r|\n/g;
-var SEARCH_RE = /[?#].*$/;
 var LOCALHOST = '127.0.0.1';
 var aliasProtocols = protoMgr.aliasProtocols;
 var CONTEXT = vm.createContext();
@@ -137,6 +136,7 @@ exports.removeProtocol = removeProtocol;
 exports.setProtocol = common.setProtocol;
 exports.getProtocol = common.getProtocol;
 exports.replaceProtocol = common.replaceProtocol;
+exports.getPureUrl = common.getPureUrl;
 exports.isTunnelHost = common.isTunnelHost;
 exports.joinIpPort = joinIpPort;
 exports.isWebSocket = common.isWebSocket;
@@ -167,11 +167,16 @@ exports.SpeedTransform = require('./speed-transform');
 exports.FileWriterTransform = require('./file-writer-transform');
 exports.getServer = require('hagent').getServer;
 exports.parseUrl = parseUrl;
-exports.request = httpMgr.request;
 exports.parseQuery = parseQuery;
 exports.localIpCache = localIpCache;
 exports.listenerCount = require('./patch').listenerCount;
 exports.EMPTY_BUFFER = EMPTY_BUFFER;
+
+function request(options, callback) {
+  return httpMgr.request(common.setInternalOptions(options, config), callback);
+}
+
+exports.request = request;
 
 function setSecureOptions(options) {
   var secureOptions = cryptoConsts.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION;
@@ -261,13 +266,13 @@ var MAX_LEN = 1024 * 1024 * 5;
 function getLatestVersion(registry, cb) {
   // if (registry && typeof registry !== 'string') {
   //   var name = registry.moduleName;
-  //   registry = registry || 'https://registry.npmjs.org';
+  //   registry = registry.registry || 'https://registry.npmjs.org';
   //   registry = registry.replace(/\/$/, '') + '/' + name;
   // }
   // if (!registry) {
   //   return cb();
   // }
-  // httpMgr.request(
+  // request(
   //   {
   //     url: registry,
   //     maxLength: MAX_LEN
@@ -664,61 +669,9 @@ exports.toRegExp = function toRegExp(regExp, ignoreCase) {
   return regExp;
 };
 
-var HTTP_PORT_RE = /:80$/;
-var HTTPS_PORT_RE = /:443$/;
-
-function removeDefaultPort(host, isHttps) {
-  return host && host.replace(isHttps ? HTTPS_PORT_RE : HTTP_PORT_RE, '');
-}
-
-function isString(str) {
-  return str && typeof str === 'string';
-}
-
+var isString = common.isString;
+var getFullUrl = common.getFullUrl;
 exports.isString = isString;
-
-function getFullUrl(req) {
-  var headers = req.headers;
-  var host = headers[config.REAL_HOST_HEADER];
-  if (hasProtocol(req.url)) {
-    var options = parseUrl(req.url);
-    if (
-      options.protocol === 'https:' ||
-      (req.isWs && options.protocol === 'wss:')
-    ) {
-      req.isHttps = true;
-    }
-    req.url = options.path;
-    if (options.host) {
-      headers.host = options.host;
-    }
-  } else {
-    req.url = req.url || '/';
-    if (req.url[0] !== '/') {
-      req.url = '/' + req.url;
-    }
-  }
-  if (host) {
-    delete headers[config.REAL_HOST_HEADER];
-  }
-  if (!isString(host)) {
-    host = headers.host;
-    if (typeof host !== 'string') {
-      host = headers.host = '';
-    }
-  } else if (headers.host !== host) {
-    if (isString(headers.host)) {
-      req._fwdHost = headers.host;
-    }
-    headers.host = host;
-  }
-  host = removeDefaultPort(host, req.isHttps);
-  var fullUrl = host + req.url;
-  if (req.isWs) {
-    return (req.isHttps ? 'wss://' : 'ws://') + fullUrl;
-  }
-  return (req.isHttps ? 'https://' : 'http://') + fullUrl;
-}
 exports.getFullUrl = getFullUrl;
 
 function disableCSP(headers) {
@@ -954,7 +907,7 @@ exports.compareUrl = compareUrl;
 
 function getPath(url, noProtocol) {
   if (url) {
-    url = url.replace(SEARCH_RE, '');
+    url = common.getPureUrl(url);
     var index = noProtocol ? -1 : url.indexOf('://');
     url = index > -1 ? url.substring(index + 3) : url;
   }
@@ -2429,20 +2382,12 @@ exports.handleHeaderReplace = handleHeaderReplace;
 var HTML_RE = /html/i;
 
 exports.transformReq = function(req, res, port, host, html) {
-  var options = parseUrl(getFullUrl(req));
+  var options = common.getReqOptions(req, port, host);
   var headers = req.headers;
-  options.headers = headers;
-  options.method = req.method;
-  options.agent = false;
-  options.protocol = null;
-  options.host = host || LOCALHOST;
   if (req.fromComposer) {
     headers[config.REQ_FROM_HEADER] = 'W2COMPOSER';
   } else if (req.fromInternalPath) {
     headers[config.REQ_FROM_HEADER] = 'W2INTERNAL_PATH';
-  }
-  if (port > 0) {
-    options.port = port;
   }
   if (req.clientIp || !net.isIP(headers[config.CLIENT_IP_HEAD])) {
     var clientIp = req.clientIp || getClientIp(req);
@@ -2540,6 +2485,22 @@ function getCgiUrl(url) {
   return url[0] === '/' ? url.substring(1) : url;
 }
 exports.getCgiUrl = getCgiUrl;
+
+exports.getInstallRegistry = function(registry) {
+  if (Array.isArray(registry)) {
+    var result;
+    registry.slice(0, 3).forEach(function (reg) {
+      reg = common.getRegistry(reg);
+      if (reg) {
+        result = result || [];
+        result.push(reg);
+      }
+    });
+    return result;
+  }
+  registry = common.getRegistry(registry);
+  return registry && [registry];
+};
 
 exports.getCustomTab = function (tab, pluginName) {
   if (!tab || !isString(tab.name)) {
@@ -3597,6 +3558,10 @@ exports.connect = function (options, callback) {
 exports.checkPluginReqOnce = function (req, raw) {
   var isPluginReq = req.headers[config.PROXY_ID_HEADER];
   if (raw ? isPluginReq : isPluginReq == 1) {
+    delete req.headers[config.PROXY_ID_HEADER];
+  }
+  if (isPluginReq == 'internal') {
+    req._isInternalReq = true;
     delete req.headers[config.PROXY_ID_HEADER];
   }
   return isPluginReq;

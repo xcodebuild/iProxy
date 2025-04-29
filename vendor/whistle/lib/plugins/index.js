@@ -425,6 +425,8 @@ function readPackages(obj, callback) {
             0;
           newPkg.rulesUrl = util.getCgiUrl(conf.rulesUrl);
           newPkg.valuesUrl = util.getCgiUrl(conf.valuesUrl);
+          newPkg.installUrl = util.getCgiUrl(conf.installUrl);
+          newPkg.installRegistry = util.getInstallRegistry(conf.installRegistry);
           newPkg.networkColumn = util.getNetworkColumn(conf);
           newPkg.networkMenus = util.getPluginMenu(
             conf.networkMenus || conf.networkMenu,
@@ -901,6 +903,11 @@ function getPluginByName(name) {
 }
 
 pluginMgr.getPluginByName = getPluginByName;
+
+pluginMgr.getModifiablePlugin = function(name) {
+  name = getPluginByName(name);
+  return name && !name.isProj && !name.notUn ? name : null;
+};
 
 function getPluginByRuleUrl(ruleUrl) {
   if (!ruleUrl || typeof ruleUrl != 'string') {
@@ -1674,9 +1681,9 @@ function requestValue(options, callback, isBin) {
     err && logger.error(err);
     callback(body, err, res);
   };
-  httpMgr.request(extend({}, options), function(err, body, res) {
+  util.request(extend({}, options), function(err, body, res) {
     if (err) {
-      return  httpMgr.request(options, handleCallback);
+      return  util.request(options, handleCallback);
     }
     handleCallback(err, body, res);
   });

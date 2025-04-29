@@ -13,7 +13,7 @@ var getServer = require('hagent').getServer;
 var SESSIONS_FILE_RE = /\.(txt|json|saz)$/i;
 var TEMP_FILES_PATH;
 var LIMIT_SIZE = 1024 * 1024 * 128;
-var MAX_TEMP_SIZE = 1024 * 1024 * 10;
+var MAX_TEMP_SIZE = 1024 * 1024 * 12;
 var TEMP_FILE_RE = /^[\da-f]{64}$/;
 var storage = multer.memoryStorage();
 var upload = multer({
@@ -62,6 +62,56 @@ function getContent(options) {
   return '';
 }
 
+function getFile(filename, cb) {
+  statRetry(filename, function(err, stat) {
+    if (err ? err.code === 'ENOENT' : !stat.isFile()) {
+      return cb();
+    }
+    if (err) {
+      return cb(err.message || 'Error');
+    }
+    if (stat.size > MAX_TEMP_SIZE) {
+      return cb('File is too large to load.');
+    }
+    fs.readFile(filename, function(e, data) {
+      if (e) {
+        return cb(e.message || 'Error');
+      }
+      cb(null, data);
+    });
+  });
+}
+
+function getTempFiles(list, cb) {
+  var len = list.length;
+  if (!len) {
+    return cb(list);
+  }
+  if (len > 11) {
+    len = 11;
+    list = list.slice(0, 11);
+  }
+  var result = [];
+  var execCb = function() {
+    --len;
+    if (len === 0) {
+      cb(result);
+    }
+  };
+  list = list.forEach(function(filename) {
+    if (!TEMP_FILE_RE.test(filename)) {
+      return execCb();
+    }
+    filename = path.join(TEMP_FILES_PATH, filename);
+    getFile(filename, function(err, data) {
+      if (data) {
+        result.push(data.toString('base64'));
+      }
+      execCb();
+    });
+  });
+}
+
 function sessionsHandler() {
   var app = express();
   app.use(function (req, res, next) {
@@ -73,27 +123,21 @@ function sessionsHandler() {
     next();
   });
   app.get('/cgi-bin/sessions/get-temp-file', function(req, res) {
-    var filename = req.query.filename;
-    if (!TEMP_FILE_RE.test(filename)) {
-      return res.json({ ec: 0 });
-    }
-    filename = path.join(TEMP_FILES_PATH, filename);
-    statRetry(filename, function(err, stat) {
-      if (err ? err.code === 'ENOENT' : !stat.isFile()) {
-        return res.json({ ec: 0 });
-      }
-      if (err) {
-        return res.json({ ec: 2, em: err.message || 'Error' });
-      }
-      if (stat.size > MAX_TEMP_SIZE) {
-        return res.json({ ec: 0, em: 'File is too large to load.' });
-      }
-      fs.readFile(filename, function(e, data) {
-        if (e) {
-          return res.json({ ec: 2, em: e.message || 'Error' });
-        }
-        res.json({ ec: 0, value: data + '' });
+    var files = req.query.files;
+    if (files && typeof files === 'string') {
+      return getTempFiles(files.split(','), function(list) {
+        res.json({ ec: 0, list: list });
       });
+    }
+    var filename = req.query.filename;
+    if (TEMP_FILE_RE.test(filename)) {
+      filename = path.join(TEMP_FILES_PATH, filename);
+    }
+    getFile(filename, function(em, data) {
+      if (em) {
+        return res.json({ ec: 2, em: em });
+      }
+      res.json({ ec: 0, value: data && data + '' });
     });
   });
   app.use('/cgi-bin/sessions/create-temp-file',

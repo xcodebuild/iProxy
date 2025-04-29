@@ -154,7 +154,7 @@
     var addSessionCompleteListener = getAddEventHandler(3);
     var removeSessionCompleteListener = getRemoveEventListener(3);
     var removeSessionCompleteListeners = getRemoveEventListeners(3);
-  
+
     function on(type, l) {
       if (typeof l !== 'function') {
         return;
@@ -295,8 +295,11 @@
         whistleBridge.download = options.download;
         whistleBridge.setNetworkSettings = options.setNetworkSettings;
         whistleBridge.setComposerData = options.setComposerData;
+        whistleBridge.showHttpsSettings = options.showHttpsSettings;
+        whistleBridge.showCustomCerts = options.showCustomCerts;
         whistleBridge.request = options.request;
         whistleBridge.createRequest = options.createRequest;
+        whistleBridge.parseRules = options.parseRules;
         whistleBridge.showModal = options.showModal;
         whistleBridge.getSelectedSessionList = getSelectedSessionList;
         whistleBridge.getActiveSession = whistleBridge.getSession = whistleBridge.getSelectedSession = getActiveSession;

@@ -12,7 +12,7 @@ var Properties = require('./properties');
 
 var Inspectors = React.createClass({
   getInitialState: function () {
-    return { activeName: 'Request', urlModal: { Url: '' } };
+    return { activeName: 'Request', urlModal: { URL: '' } };
   },
   shouldComponentUpdate: function (nextProps) {
     var hide = util.getBoolean(this.props.hide);
@@ -22,6 +22,9 @@ var Inspectors = React.createClass({
     var self = this;
     events.on('tabsChange', function () {
       self.setState({});
+    });
+    events.on('showFrames', function () {
+      self.showTab('Frames');
     });
   },
   showTab: function (name) {
@@ -44,7 +47,7 @@ var Inspectors = React.createClass({
     var hide = util.getBoolean(props.hide);
     var tabs = dataCenter.getTabs();
     var active = this.state.activeName;
-    urlModal.Url = modal && modal.url;
+    urlModal.URL = modal && ((modal.isHttps ? 'tunnel://' : '') + modal.url);
 
     return (
       <div
@@ -52,7 +55,7 @@ var Inspectors = React.createClass({
           'fill orient-vertical-box w-detail-inspectors' + (hide ? ' hide' : '')
         }
       >
-        <Properties className="w-detail-inspectors-url" modal={urlModal} />
+        <Properties className="w-detail-inspectors-url" modal={urlModal}  showEnableBtn={true} />
         <div className="box w-detail-inspectors-title w-detail-inspectors-tabs">
           <button
             type="button"
