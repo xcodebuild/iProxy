@@ -67,6 +67,7 @@ export interface WhistleSession {
 export type WhistleSecureFilter = ((item: WhistleSession, clientIp?: string, filter?: string) => WhistleSession) | string;
 
 export interface WhistleOptions {
+  whistleName?: string;
   config?: string;
   cluster?: number | string;
   server?: EventEmitter | Server;
@@ -129,6 +130,7 @@ export interface WhistleOptions {
   shadowRules?: string;
   dnsCache?: number;
   allowDisableShadowRules?: boolean;
+  disableInstaller?: boolean;
   customHandler?: (req: IncomingMessage, res: ServerResponse, next?: Function) => void;
   pluginHost?: string;
   copy?: string;

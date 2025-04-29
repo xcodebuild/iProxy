@@ -316,6 +316,7 @@ var Composer = React.createClass({
         self.hideParams();
       }
       if (!(target.closest('.w-composer-history-data').length ||
+        target.closest('.w-keep-history-data').length ||
         target.closest('.w-replay-count-dialog').length ||
         target.closest('.w-composer-history-btn').length ||
         target.closest('.w-copy-text-with-tips').length)) {
@@ -1086,6 +1087,15 @@ var Composer = React.createClass({
       }
     }
   },
+  formatHeaders: function(e) {
+    util.handleTab(e);
+    this.onKeyDown(e);
+  },
+  onFormat: function(e) {
+    util.handleFormat(e, this.formatJSON);
+    util.handleTab(e);
+    this.onKeyDown(e);
+  },
   showCookiesDialog: function() {
     var self = this;
     var url = ReactDOM.findDOMNode(self.refs.url).value;
@@ -1203,6 +1213,7 @@ var Composer = React.createClass({
       elem = this.hintElem.find('.w-active');
       var value = elem.attr('title');
       value && this.setUrl(value);
+      this.execute();
     } else {
       var curUrl = e.target.value;
       this.onKeyDown(e);
@@ -1611,6 +1622,7 @@ var Composer = React.createClass({
               <textarea
                 readOnly={disableComposerRules || pending}
                 defaultValue={rules}
+                onKeyDown={util.handleTab}
                 ref="composerRules"
                 onChange={this.onRulesChange}
                 onDoubleClick={this.enableRules}
@@ -1630,14 +1642,17 @@ var Composer = React.createClass({
                   name="Request"
                   className={showRequest ? 'w-tab-btn w-active' : 'w-tab-btn'}
                 >
+                  <span className="glyphicon glyphicon-edit" />
                   Request
                 </button>
                 <button
                   title={result.url}
                   onClick={this.onTabChange}
                   name="Response"
+                  style={{fontWeight: 'normal'}}
                   className={showResponse ? 'w-tab-btn w-active' : 'w-tab-btn'}
                 >
+                  <span className="glyphicon glyphicon-arrow-left" />
                   Response
                 </button>
               </div>
@@ -1727,7 +1742,7 @@ var Composer = React.createClass({
                     defaultValue={state.headers}
                     onChange={this.onComposerChange}
                     maxLength={MAX_HEADERS_SIZE}
-                    onKeyDown={this.onKeyDown}
+                    onKeyDown={this.formatHeaders}
                     ref="headers"
                     placeholder="Input the headers"
                     name="headers"
@@ -1837,7 +1852,7 @@ var Composer = React.createClass({
                         hasBody && !disableBody ? 'lightyellow' : undefined,
                       fontFamily: isHexText ? 'monospace' : undefined
                     }}
-                    onKeyDown={this.onKeyDown}
+                    onKeyDown={this.onFormat}
                     ref="body"
                     placeholder={'Input the ' + (isHexText ? 'hex text' : 'body')}
                     className={

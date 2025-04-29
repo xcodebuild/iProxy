@@ -34,6 +34,8 @@ var NOT_BOLD_RULES = {
   G: 1,
   ignore: 1
 };
+var HINTS = ['d:<domain keyword or regexp>', 'm:<method keyword or regexp>',
+  's:<status code keyword or regexp>', 'h:<headers keyword or regexp>', 'b:<body keyword or regexp>'];
 var contextMenuList = [
   {
     name: 'Open',
@@ -106,7 +108,13 @@ var contextMenuList = [
     ]
   },
   { name: 'Mock' },
-  { name: 'Import' },
+  {
+    name: 'Import',
+    list: [
+      { name: 'Local' },
+      { name: 'Remote' }
+    ]
+  },
   { name: 'Export' },
   {
     name: 'Others',
@@ -304,7 +312,7 @@ var Row = React.createClass({
     var columnList = p.columnList;
     var item = p.item;
     var style = item.style;
-    
+
     return (
       <table className="table w-req-table" key={p.key} style={p.style} data-id={item.id}>
         <tbody>
@@ -850,8 +858,11 @@ var ReqData = React.createClass({
     case 'Abort':
       events.trigger('abortRequest', item);
       break;
-    case 'Import':
-      events.trigger('importSessions', e);
+    case 'Local':
+      events.trigger('importSessions');
+      break;
+    case 'Remote':
+      events.trigger('importSessions', {shiftKey: true});
       break;
     case 'Edit Settings':
       events.trigger('filterSessions', e);
@@ -1131,6 +1142,7 @@ var ReqData = React.createClass({
     var data = util.getMenuPosition(e, 110, height);
     data.list = contextMenuList;
     data.className = data.marginRight < 360 ? 'w-ctx-menu-left' : '';
+    data.className += pluginItem.hide ? '' : ' w-ctx-menu-others';
     this.refs.contextMenu.show(data);
   },
   updateList: function () {
@@ -1445,6 +1457,7 @@ var ReqData = React.createClass({
           onKeyDown={this.onFilterKeyDown}
           onChange={this.onFilterChange}
           wStyle={colStyle}
+          addonHints={HINTS}
           hintKey="networkHintList"
         />
         <ContextMenu onClick={this.onClickContextMenu} ref="contextMenu" />

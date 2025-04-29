@@ -439,6 +439,10 @@ a {
   width: 960px;
 }
 
+.w-editor-dialog .modal-body {
+  background: #fafafa;
+}
+
 .w-editor-dialog textarea {
   width: 940px;
   height: 520px;
@@ -448,12 +452,12 @@ a {
 }
 
 .w-big-editor-dialog .modal-dialog {
-  width: 1060px;
+  width: 1000px;
 }
 
 .w-big-editor-dialog textarea {
-  width: 1040px;
-  height: 600px;
+  width: 980px;
+  height: 550px;
 }
 
 .w-win-dialog .modal-dialog {
@@ -475,4 +479,17 @@ a {
 .w-gray {
   color: #777;
   margin-left: 5px;
+}
+
+.w-tabs > li > a {
+  padding: 5px 10px;
+}
+
+.w-tabs > li > a > span {
+  margin-right: 5px;
+}
+
+.modal.in {
+  overflow-x: hidden;
+  overflow-y: auto;
 }

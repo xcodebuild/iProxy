@@ -7,6 +7,7 @@ var util = require('./util');
 var modal = require('./modal');
 var events = require('./events');
 var mockWin = require('./win');
+var parseRules = require('./parse-rules');
 
 var dataModal = dataCenter.networkModal;
 
@@ -76,6 +77,12 @@ function getBridge(win) {
     setComposerData: function(data) {
       events.trigger('setComposerData', data);
     },
+    showHttpsSettings: function() {
+      events.trigger('showHttpsSettingsDialog');
+    },
+    showCustomCerts: function() {
+      events.trigger('showCustomCerts');
+    },
     copyText: util.copyText,
     syncData: function(cb) {
       plugin && dataCenter.syncData(plugin, cb);
@@ -93,54 +100,17 @@ function getBridge(win) {
     createRequest: function (options) {
       return createCgi(compatAjax(options));
     },
+    parseRules: parseRules,
     showModal: modal.show,
     getServerInfo: function () {
       var serverInfo = dataCenter.getServerInfo();
       return serverInfo && $.extend(true, {}, serverInfo);
     },
     importRules: function (data) {
-      if (!data) {
-        return;
-      }
-      var list = util.parseImportData(data, dataCenter.rulesModal);
-      var handleImport = function (sure) {
-        if (sure) {
-          data = {};
-          list.forEach(function (item) {
-            data[item.name] = item.value;
-          });
-          events.trigger('uploadRules', data);
-        }
-      };
-      if (!list.hasConflict) {
-        return handleImport(true);
-      }
-      mockWin.confirm(
-        'Conflict with existing content, whether to continue to overwrite them?',
-        handleImport
-      );
+      events.trigger('handleImportRules', data);
     },
     importValues: function (data) {
-      if (!data) {
-        return;
-      }
-      var list = util.parseImportData(data, dataCenter.valuesModal, true);
-      var handleImport = function (sure) {
-        if (sure) {
-          data = {};
-          list.forEach(function (item) {
-            data[item.name] = item.value;
-          });
-          events.trigger('uploadValues', data);
-        }
-      };
-      if (!list.hasConflict) {
-        return handleImport(true);
-      }
-      mockWin.confirm(
-        'Conflict with existing content, whether to continue to overwrite them?',
-        handleImport
-      );
+      events.trigger('handleImportValues', data);
     }
   };
 }
