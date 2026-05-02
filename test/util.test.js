@@ -182,6 +182,7 @@ function connect(host, port, callback) {
       'user-agent': 'test/whistle',
       'proxy-connection': 'keep-alive',
       'x-whistle-policy': 'tunnel',
+      'x-forwarded-for': '3.3.3.3',
       host: host + (port ? ':' + port : '')
     }
   });
@@ -249,3 +250,11 @@ function getValues() {
 }
 
 exports.getValues = getValues;
+
+exports.readText = function(file) {
+  return fs.readFileSync(path.join(__dirname, file), {encoding: 'utf8'});
+};
+
+exports.setPath = function(str) {
+  return str.split('$__dirname$').join(__dirname);
+};

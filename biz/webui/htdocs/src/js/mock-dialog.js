@@ -10,7 +10,11 @@ var win = require('./win');
 var message = require('./message');
 var events = require('./events');
 var PropsEditor = require('./props-editor');
+var Icon = require('./icon');
+var HelpIcon = require('./help-icon');
+var CloseBtn = require('./close-btn');
 
+var findDOMNode = ReactDOM.findDOMNode;
 var MAX_LEN = 64;
 var fakeIframe = 'javascript:"<style>html,body{padding:0;margin:0}</style><textarea></textarea>"';
 var HIDE_STYLE = { display: 'none' };
@@ -28,7 +32,7 @@ var INLINE_PROTOCOLS = ['http://', 'https://', 'ws://', 'wss://', 'tunnel://', '
 'socks://', 'xsocks://', 'pac://', 'weinre://', 'log://', 'excludeFilter://', 'includeFilter://', 'ignore://', 'skip://', 'enable://',
 'disable://', 'delete://', 'method://', 'replaceStatus://', 'referer://', 'auth://', 'ua://', 'cache://', 'attachment://', 'forwardedFor://',
 'responseFor://', 'reqDelay://', 'resDelay://', 'reqSpeed://', 'resSpeed://', 'reqType://', 'resType://', 'reqCharset://', 'resCharset://',
-'reqWrite://', 'resWrite://', 'reqWriteRaw://', 'resWriteRaw://', 'cipher://', 'sniCallback://', 'lineProps://'];
+'reqWrite://', 'resWrite://', 'reqWriteRaw://', 'resWriteRaw://', 'sniCallback://', 'lineProps://'];
 var COMMON_OPS = ['Map Local', 'Map Remote', 'DNS Spoofing', 'Modify URL', 'Modify Method', 'Request Headers', 'Response Headers',
   'Request Body', 'Response Body', 'Response 404', 'Response 500', 'Abort Request', 'Abort Response', 'Delay Request', 'Delay Response'];
 var HTTP_PROTOCOLS = ['http://', 'https://', 'ws://', 'wss://'];
@@ -43,6 +47,10 @@ function getDefaultValue(value) {
     return JSON_STR;
   }
   return value;
+}
+
+function getStyle(show) {
+  return show ? null : HIDE_STYLE;
 }
 
 function getDefaultHost(value) {
@@ -104,9 +112,9 @@ function getValue(item, key) {
   case 'resJson':
     return util.getJsonStr(res);
   case 'reqRaw':
-    return util.objectToString(req.headers, req.rawHeaderNames) + '\r\n\r\n' + util.getBody(req, true);
+    return util.getReqRawHeaders(item) + '\r\n\r\n' + util.getBody(req, true);
   case 'resRaw':
-    return util.objectToString(res.headers, res.rawHeaderNames) + '\r\n\r\n' + util.getBody(res);
+    return util.getResRawHeaders(item) + '\r\n\r\n' + util.getBody(res);
   case 'statusCode':
     return res.statusCode;
   }
@@ -156,9 +164,9 @@ var MockDialog = React.createClass({
       valueType: 'file',
       keyName: keyName.substring(0, MAX_LEN),
       inlineKey: 'mock_' + util.getTempName() + type,
-      protocol: 'file://'
+      protocol:dataSrc === 'resRaw' ? 'rawfile://' : 'file://'
     }, this.updateRules);
-    var url = ReactDOM.findDOMNode(this.refs.url);
+    var url = findDOMNode(this.refs.url);
     setTimeout(function() {
       url.select();
       url.focus();
@@ -168,8 +176,12 @@ var MockDialog = React.createClass({
   onValueTypeChange: function(e) {
     var value = e.target.value;
     var protocol = this.state.protocol;
+    value = INLINE_PROTOCOLS.indexOf(protocol) === -1 ? value : 'inline';
+    if (value === 'key' && !this.isValuesKey()) {
+      util.shakeElem($(findDOMNode(this.refs.keyName)));
+    }
     this.setState({
-      valueType: INLINE_PROTOCOLS.indexOf(protocol) === -1 ? value : 'inline'
+      valueType: value
     }, this.updateRules);
   },
   onProtoChange: function(e) {
@@ -318,8 +330,7 @@ var MockDialog = React.createClass({
     if (values) {
       data.push(values);
     }
-    ReactDOM.findDOMNode(this.refs.content).value = JSON.stringify(data);
-    ReactDOM.findDOMNode(this.refs.downloadForm).submit();
+    events.trigger('showExportDialog', ['mock', data]);
   },
   isValuesKey: function(dataSrc) {
     return (dataSrc || this.state.dataSrc)[0] === '{';
@@ -384,7 +395,7 @@ var MockDialog = React.createClass({
     if (!self.state.hasChanged) {
       return updateValue();
     }
-    win.confirm('Switching values will cause the changed content to be lost, continue?', function(sure) {
+    win.confirm('Unsaved changes will be lost. Continue?', function(sure) {
       if (sure) {
         updateValue();
         self.setState({ hasChanged: false });
@@ -393,7 +404,7 @@ var MockDialog = React.createClass({
   },
   componentDidMount: function() {
     var self = this;
-    var iframe = ReactDOM.findDOMNode(self.refs.iframe);
+    var iframe = findDOMNode(self.refs.iframe);
     var initTextArea = function() {
       var textarea = iframe.contentWindow.document.querySelector('textarea');
       var style = textarea && textarea.style;
@@ -404,10 +415,10 @@ var MockDialog = React.createClass({
         style.width = iframeStyle.width + 'px';
         style.height = iframeStyle.height + 'px';
         style.padding = '5px';
-        style.border = '1px solid #ccc';
+        style.border = '1px solid var(--c-border, #ccc)';
         style.borderRadius = '3px';
         textarea.maxLength = 1024 * 1024 * 3;
-        textarea.placeholder='Input the value';
+        textarea.placeholder='Enter value';
         textarea.addEventListener('input', function() {
           self.setState({ hasChanged: true });
         });
@@ -433,9 +444,9 @@ var MockDialog = React.createClass({
     });
     $(document).on('click mousedown', function(e) {
       var target = $(e.target);
-      if (!(target.closest('.w-composer-params').length ||
-        target.closest('.w-composer-params-editor').length ||
-        target.closest('.w-composer-dialog').length ||
+      if (!(target.closest('.w-com-params').length ||
+        target.closest('.w-com-params-editor').length ||
+        target.closest('.w-com-dialog').length ||
         target.closest('.w-win-dialog').length)) {
         self.hideParams();
       }
@@ -461,15 +472,12 @@ var MockDialog = React.createClass({
   },
   removeRules: function() {
     var self = this;
-    win.confirm('Are you sure to delete the rules?', function(sure) {
-      if (sure) {
-        self.setState({ pattern: '' }, self.updateRules);
-        ReactDOM.findDOMNode(self.refs.url).focus();
-      }
+    win.confirm('Do you confirm the deletion of the rules?', function(sure) {
+      sure && self.setState({ pattern: '' }, self.updateRules);
     });
   },
   showParams: function() {
-    var url = ReactDOM.findDOMNode(this.refs.url).value.replace(/#.*$/, '');
+    var url = findDOMNode(this.refs.url).value.replace(/#.*$/, '');
     var index = url.indexOf('?');
     var hasQuery = index !== -1;
     var query = hasQuery ? url.substring(index + 1) : '';
@@ -495,7 +503,7 @@ var MockDialog = React.createClass({
   },
   clearQuery: function() {
     var self = this;
-    win.confirm('Are you sure to delete all params?', function(sure) {
+    win.confirm('Do you confirm the deletion of all params?', function(sure) {
       if (sure) {
         self.refs.paramsEditor.clear();
         self.hideParams();
@@ -507,7 +515,7 @@ var MockDialog = React.createClass({
   },
   onParamsChange: function () {
     var query = this.refs.paramsEditor.toString();
-    var elem = ReactDOM.findDOMNode(this.refs.url);
+    var elem = findDOMNode(this.refs.url);
     this.setState({
       hasQuery: !!query,
       pattern: util.replacQuery(elem.value, query)
@@ -541,13 +549,13 @@ var MockDialog = React.createClass({
     };
     if (showKeyValue) {
       if (!keyName) {
-        ReactDOM.findDOMNode(self.refs.keyName).focus();
-        return message.error('Input the key name.');
+        findDOMNode(self.refs.keyName).focus();
+        return message.error('The key name is required');
       }
       if (force === true) {
         var item = dataCenter.getValuesModal().getItem(keyName);
         if (item && item.value !== self._textarea.value) {
-          return win.confirm('The name `' + keyName + '`  already exists, whether to overwrite it?', next);
+          return win.confirm('The name \'' + keyName + '\' is already in use. Overwrite?', next);
         }
       }
     }
@@ -561,6 +569,10 @@ var MockDialog = React.createClass({
     return state.keyName;
   },
   saveValueOnly: function() {
+    if (this.getValueType() !== 'key' && !this.isValuesKey()) {
+      util.shakeElem($(findDOMNode(this.refs.valueType)));
+      return message.info('Switch to \'Key Value\' mode, and set the corresponding key name');
+    }
     this.save(true);
   },
   saveValue: function() {
@@ -627,7 +639,7 @@ var MockDialog = React.createClass({
     var showParams = state.showParams;
     var hasQuery = state.hasQuery;
     var dataSrc = state.dataSrc || '';
-    var preStyle = rules ? null : HIDE_STYLE;
+    var preStyle = getStyle(rules);
     var protoList = getGroupRules();
     var valuesModal = dataCenter.getValuesModal();
     rules = this.wrapComment();
@@ -635,18 +647,16 @@ var MockDialog = React.createClass({
     return (
       <Dialog ref="mockDialog" wstyle="w-mock-dialog">
         <div className={'modal-body' + (isFile ? ' w-mock-file' : '')}>
-          <button type="button" className="close" data-dismiss="modal">
-            <span aria-hidden="true">&times;</span>
-          </button>
+          <CloseBtn />
           <div className="w-mock-row">
               <span>
-                <a className="glyphicon glyphicon-question-sign" href="https://avwo.github.io/whistle/webui/mock.html" target="_blank" />
+                <HelpIcon docsUrl="rules/pattern.html" />
                 URL Pattern:
               </span>
-              <input ref="url" onChange={this.onPatternChange} onFocus={this.selectAllText} placeholder="Input the url pattern"
+              <input ref="url" onChange={this.onPatternChange} onFocus={this.selectAllText} placeholder="Enter url pattern"
                 value={state.pattern} className="form-control w-url-pattern" maxLength="1200" />
                 <button
-                  className="btn btn-default w-composer-params"
+                  className="btn btn-default w-com-params"
                   onClick={this.toggleParams}
                 >
                   Params
@@ -672,12 +682,12 @@ var MockDialog = React.createClass({
                 </optgroup> : null;
               })}
             </select>
-            <select onChange={this.onValueTypeChange} value={valueType} className="form-control w-mock-value-options">
+            <select ref="valueType" onChange={this.onValueTypeChange} value={valueType} className="form-control w-mock-value-options">
             <option value="file">System File</option>
               <option value="key">Key Value</option>
               <option value="inline">Inline Value</option>
             </select>
-            <select className="form-control w-mock-value-type" onChange={this.onSourceChange} value={dataSrc} style={showKeyValue ? null : HIDE_STYLE} title={dataSrc}>
+            <select className="form-control w-mock-value-type" onChange={this.onSourceChange} value={dataSrc} style={getStyle(showKeyValue)} title={dataSrc}>
               <option value="blank">Blank</option>
               <option value="url">URL</option>
               <option value="method">Method</option>
@@ -701,30 +711,31 @@ var MockDialog = React.createClass({
               # Comment:
               <input
                 className="form-control"
-                placeholder="Input the comment of rules"
+                placeholder="Enter rule comment"
                 value={state.comment}
                 onChange={this.onComment}
                 maxLength={32}
               />
             </label>
-            <textarea onChange={this.onInlineValueChange} className="w-mock-inline" placeholder="Input the rule value"
-              style={{display: showKeyValue ? 'none' : null}} maxLength="1200" value={inlineValue} />
-            <div style={{display: showKeyValue || !inlineValue ? 'none' : null}} className="w-mock-inline-action">
-              <a onClick={this.asValue} style={/\s/.test(inlineValue) || isValue(inlineValue) ? HIDE_STYLE : null}>AsValue</a>
-              <a onClick={this.trimInline} style={/^\s|\s$/.test(inlineValue) ? null : HIDE_STYLE}>Trim</a>
+            <textarea onChange={this.onInlineValueChange} className="w-mock-inline" placeholder="Enter value"
+              style={getStyle(!showKeyValue)} maxLength="1200" value={inlineValue} />
+            <div style={getStyle(!showKeyValue && inlineValue)} className="w-mock-action">
+              <a onClick={this.asValue} style={getStyle(!/\s/.test(inlineValue) && !isValue(inlineValue))}>AsValue</a>
+              <a onClick={this.trimInline} style={getStyle(/^\s|\s$/.test(inlineValue))}>Trim</a>
               <a onClick={this.clearInline}>Clear</a>
             </div>
-            <input ref="keyName" onChange={this.onKeyNameChange} placeholder="Input the key name"
+            <input ref="keyName" onChange={this.onKeyNameChange} placeholder="Enter key name"
               value={this.isValuesKey() ? dataSrc.slice(1, -1) : state.keyName}
               readOnly={this.isValuesKey()} onFocus={this.selectAllText} className="form-control w-mock-key-name"
-              style={showKeyValue && !isFile ? null : HIDE_STYLE} maxLength={MAX_LEN} />
+              style={getStyle(showKeyValue && !isFile)} maxLength={MAX_LEN} />
           </div>
-          <div className="w-mock-row" style={showKeyValue ? null : HIDE_STYLE}>
+          <div className="w-mock-row" style={getStyle(showKeyValue)}>
             <span>
               Value:
             </span>
-            <iframe ref="iframe" src={fakeIframe} style={iframeStyle}/>
-            <div style={{display: showKeyValue ? null : 'none'}} className="w-mock-inline-action">
+            <div className="w-fake-iframe w-fix-drag"><iframe ref="iframe" data-type="fake" onLoad={dataCenter.handleIframeLoad}
+              src={fakeIframe} style={iframeStyle}/></div>
+            <div style={getStyle(showKeyValue)} className="w-mock-action">
               <a onClick={this.formatValue}>Format</a>
               <a onClick={this.clearValue}>Clear</a>
             </div>
@@ -736,7 +747,7 @@ var MockDialog = React.createClass({
               <pre className="w-mock-preview">
                 {rules}
               </pre>
-              <span className="glyphicon glyphicon-trash" onClick={this.removeRules} />
+              <Icon name="trash" onClick={this.removeRules} />
               <div className="w-mock-rules-action">
                 <CopyBtn value={rules} />
               </div>
@@ -759,11 +770,10 @@ var MockDialog = React.createClass({
             Export
           </button>
           {
-            rules && showKeyValue && !isFile ? <button
+            showKeyValue ? <button
               type="button"
               className="btn btn-default"
               onClick={this.saveValueOnly}
-              disabled={this.valueNotChanged()}
             >
               Save As Values
             </button> : null
@@ -775,6 +785,7 @@ var MockDialog = React.createClass({
               className="btn btn-primary"
               onClick={this.save}
               disabled={!rules}
+              title={rules ? '' : 'Please enter URL Pattern first'}
             >
               Save As Rules
             </button> : <button
@@ -788,14 +799,12 @@ var MockDialog = React.createClass({
           }
         </div>
         <div
-            className={'w-layer w-composer-params-editor orient-vertical-box' + (showParams ? '' : ' hide')}
+            className={'w-layer w-com-params-editor v-box' + (showParams ? '' : ' hide')}
           >
             <div className="w-filter-bar">
-              <span onClick={this.hideParams} aria-hidden="true">
-                &times;
-              </span>
+              <CloseBtn onClick={this.hideParams} className="w-close-params" />
               <a style={{display: hasQuery ? null : 'none'}} className="w-params-clear-btn" onClick={this.clearQuery}>
-                <span className="glyphicon glyphicon-trash" />Clear
+                <Icon name="trash" />Clear
               </a>
               <a onClick={this.addQueryParam}>
                 +Param
@@ -806,16 +815,6 @@ var MockDialog = React.createClass({
               onChange={this.onParamsChange}
             />
           </div>
-          <form
-            ref="downloadForm"
-            action="cgi-bin/download"
-            style={{ display: 'none' }}
-            method="post"
-            target="downloadTargetFrame"
-          >
-            <input ref="type" name="type" value="mock" type="hidden" />
-            <input ref="content" name="content" type="hidden" />
-          </form>
       </Dialog>
     );
   }

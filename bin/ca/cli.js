@@ -16,30 +16,33 @@ var MAX_LEN = 1024 * 1024;
 function installCert(certFile, url) {
   try {
     installRootCA(fileMgr.convertSlash(certFile));
-    util.info('Install root CA (' + (url || certFile) + ') successful.');
+    util.info('Successfully installed Root CA from (' + (url || certFile) + ')');
   } catch (e) {
-    util.error(e.message);
+    util.error('Certificate installation failed: ' + e.message);
   }
 }
 
-function install(addr) {
+function install(addr, useDefault) {
   if (addr.file) {
     return installCert(addr.file);
   }
   addr.needRawData = true;
   addr.maxLength = MAX_LEN;
   addr.headers = {
-    'user-agent': 'whistle/' + config.name
+    'user-agent': config.appName + '/' + config.version
   };
   httpMgr.request(addr, function(err, body, res) {
     if (err) {
+      if (useDefault && err.code === 'ECONNREFUSED') {
+        return installCert(path.join(commonUtil.getWhistlePath(), '.whistle/certs/root.crt'));
+      }
       return util.error(err.message);
     }
     if (res.statusCode != 200) {
-      return util.error('Bad response (' + res.statusCode + ').');
+      return util.error('Bad response (' + res.statusCode + ')');
     }
     if (!body || !body.length) {
-      return util.error('No content.');
+      return util.error('Empty certificate content');
     }
     var tempFile = path.join(commonUtil.getWhistlePath(), Date.now() + '-' + util.getHash(addr.url) + '.crt');
     fs.writeFileSync(tempFile, body);
@@ -50,7 +53,6 @@ function install(addr) {
 
 module.exports = function(argv) {
   var options = {};
-  var enableHttps;
   argv.forEach(function(arg) {
     if (NUM_RE.test(arg)) {
       delete options.addr;
@@ -58,8 +60,6 @@ module.exports = function(argv) {
     } else if (net.isIP(arg)) {
       delete options.addr;
       options.host = arg || options.host;
-    } else if (arg === '--capture' || arg === '--enable-https') {
-      enableHttps = true;
     } else if (HOST_SUFFIX_RE.test(arg)) {
       delete options.port;
       delete options.addr;
@@ -93,9 +93,9 @@ module.exports = function(argv) {
     var port = options.port || util.getDefaultPort();
     options.addr = { url: 'http://' + util.joinIpPort(host, + port) + '/cgi-bin/rootca' };
   }
-  var url = enableHttps && options.addr && options.addr.url;
+  var url = options.addr && options.addr.url;
   if (url) {
     options.addr.url = url.replace(/#.*$/, '') + (url.indexOf('?') === -1 ? '?' : '&') + 'enableHttps=1';
   }
-  install(options.addr);
+  install(options.addr, !options.host && !options.port);
 };

@@ -1,8 +1,8 @@
-require('./base-css.js');
 require('../css/menu-item.css');
 var React = require('react');
 var util = require('./util');
 var GitHubIcon = require('./github-icon');
+var Icon = require('./icon');
 
 var MenuItem = React.createClass({
   preventBlur: function (e) {
@@ -29,7 +29,7 @@ var MenuItem = React.createClass({
         onBlur={self.props.onBlur}
         tabIndex="0"
         onMouseDown={self.preventBlur}
-        style={{ display: util.getBoolean(self.props.hide) ? 'none' : 'block' }}
+        style={{ display: util.getBool(self.props.hide) ? 'none' : 'block' }}
         className={
           'w-menu-item ' +
           (self.props.className || '') +
@@ -71,12 +71,10 @@ var MenuItem = React.createClass({
                     />
                   ) : option.icon === false ? undefined : (
                     option.icon === 'github' ? <GitHubIcon /> :
-                    <span
-                      className={
-                        'glyphicon glyphicon-' + (option.icon || 'asterisk')
-                      }
-                      style={{ visibility: option.icon ? '' : 'hidden' }}
-                    ></span>
+                    <Icon
+                      name={option.icon || 'asterisk'}
+                      className={option.icon ? '' : 'w-hidden'}
+                    />
                   )}
                   {option.name}
                 </a>
@@ -89,7 +87,7 @@ var MenuItem = React.createClass({
         {name ? (
           typeof name === 'string' ? (
             <a onClick={onClick} className="w-menu-open" draggable="false">
-              <span className="glyphicon glyphicon-folder-open"></span>
+              <Icon name={self.props.icon || 'folder-open'} />
               {name}
             </a>
           ) : (

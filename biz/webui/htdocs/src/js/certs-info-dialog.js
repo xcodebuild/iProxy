@@ -1,4 +1,3 @@
-require('./base-css.js');
 require('../css/certs.css');
 var React = require('react');
 var ReactDOM = require('react-dom');
@@ -8,8 +7,11 @@ var TipsDialog = require('./tips-dialog');
 var win = require('./win');
 var dataCenter = require('./data-center');
 var message = require('./message');
+var Icon = require('./icon');
+var HelpIcon = require('./help-icon');
+var CloseBtn = require('./close-btn');
 
-var OK_STYLE = { color: '#5bbd72' };
+var findDOMNode = ReactDOM.findDOMNode;
 var MAX_CERT_SIZE = 128 * 1024;
 
 function getCertName(cert, filename) {
@@ -25,7 +27,7 @@ function readFile(file, callback) {
   };
 }
 
-var HistoryData = React.createClass({
+var CertsInfoDialog = React.createClass({
   getInitialState: function () {
     return { list: [] };
   },
@@ -51,18 +53,18 @@ var HistoryData = React.createClass({
         dir: cert.dir,
         filename: filename,
         domain: cert.dnsName,
+        disabled: cert.disabled,
         mtime: cert.mtime,
         type: cert.type,
         validity: startDate.toLocaleString() + ' ~ ' + endDate.toLocaleString(),
-        status: status || (
-          <span className="glyphicon glyphicon-ok" style={OK_STYLE} />
-        ),
+        status: status || <Icon name="ok" />,
         isInvalid: isInvalid
       };
       if (filename === 'root') {
         item.displayName = 'root (Root CA)';
         rootCA = item;
         item.readOnly = true;
+        item.isRoot = true;
       } else {
         if (filename[0] === 'z' && filename[1] === '/') {
           filename = filename.substring(2);
@@ -112,7 +114,7 @@ var HistoryData = React.createClass({
   removeCert: function (item) {
     var self = this;
     win.confirm(
-      'Are you sure to delete \'' + getCertName(item) + '\'.',
+      'Do you confirm the deletion of \'' + getCertName(item) + '\'?',
       function (sure) {
         if (!sure) {
           return;
@@ -129,20 +131,18 @@ var HistoryData = React.createClass({
     for (var i = 0, len = fileList.length; i < len; i++) {
       var cert = fileList[i];
       if (cert.size > MAX_CERT_SIZE || !(cert.size > 0)) {
-        message.error('The uploaded certificate size cannot exceed 128K.');
+        message.error('Maximum file size: 128KB');
         return;
       }
       var { name } = cert;
       if (!/\.(crt|cer|pem|key)/.test(name)) {
-        message.error('Only files with .key, .crt, .cer, .pem suffixes are supported.');
+        message.error('Supported file formats: .key, .crt, .cer, .pem');
         return;
       }
       var suffix = RegExp.$1;
       name = name.slice(0, -4);
       if (!name || name.length > 128) {
-        message.error(
-          'The file name cannot be empty and the length cannot exceed 128.'
-        );
+        message.error('Filename must be between 1-128 characters');
         return;
       }
       certs = certs || {};
@@ -157,18 +157,34 @@ var HistoryData = React.createClass({
       return;
     }
     var result;
+    var missKeys = [];
+    var missCerts = [];
     Object.keys(certs).forEach(function (key) {
       var cert = certs[key];
       if (cert.key && cert.cert) {
         result = result || {};
         result[key] = cert;
+      } else if (cert.key) {
+        missCerts.push(key + '.[crt/cer/pem]');
+      } else {
+        missKeys.push(key + '.key');
       }
     });
+    if (missKeys.length || missCerts.length) {
+      var msg = '';
+      if (missKeys.length) {
+        msg += 'Missing key files: ' + missKeys.join(', ');
+      }
+      if (missCerts.length) {
+        msg += (msg ? '\n' : '') + 'Missing cert files: ' + missCerts.join(', ');
+      }
+      win.alert(msg);
+    }
     return result;
   },
   handleChange: function (e) {
     var self = this;
-    var input = ReactDOM.findDOMNode(self.refs.uploadCerts);
+    var input = findDOMNode(self.refs.uploadCerts);
     var files = input.files && self.formatFiles(input.files);
     input.value = '';
     if (!files) {
@@ -176,18 +192,15 @@ var HistoryData = React.createClass({
     }
     if (files.root) {
       var dir = self._certsDir || '~/.WhistleAppData/custom_certs';
-      win.alert(
-        'Root CA cannot be uploaded by UI.\nYou must manually upload to follow directory and restart Whistle:\n' +
-          dir
-      );
+      win.alert('Root CA must be manually copied to the following directory and Whistle restarted:\n' + dir);
       delete files.root;
     }
     var handleCallback = function () {
-      dataCenter.certs.upload(JSON.stringify(files), self.handleCgi);
+      dataCenter.uploadCerts(files, self.handleCgi);
     };
     var keys = Object.keys(files);
     var len = keys.length * 2;
-    keys.map((name) => {
+    keys.map(function (name) {
       var file = files[name];
       readFile(file.key, function (text) {
         file.key = text;
@@ -203,79 +216,78 @@ var HistoryData = React.createClass({
       });
     });
   },
+  handleActive: function (e) {
+    var target = e.target;
+    var checked = target.checked;
+    var filename = target.getAttribute('data-filename');
+    var data = JSON.stringify({ filename: filename, disabled: !checked });
+    dataCenter.certs.active(data, this.handleCgi);
+  },
   showUpload: function () {
-    ReactDOM.findDOMNode(this.refs.uploadCerts).click();
+    findDOMNode(this.refs.uploadCerts).click();
+  },
+  showService: function () {
+    util.showService('certs/history');
   },
   render: function () {
     var self = this;
     var list = self.state.list || [];
     return (
-      <Dialog ref="certsInfoDialog" wstyle="w-certs-info-dialog">
+      <Dialog ref="certsInfoDialog" wstyle="w-certs-dialog">
         <div className="modal-body">
-          <button type="button" className="close" onClick={self.hide}>
-            <span aria-hidden="true">&times;</span>
-          </button>
-          <h4 className="w-certs-info-title">
-            <a
-              className="w-help-menu"
-              title="Click here to see help"
-              href="https://avwo.github.io/whistle/custom-certs.html"
-              target="_blank"
-            >
-              <span className="glyphicon glyphicon-question-sign"></span>
-            </a>
-            Custom Certificates
+          <CloseBtn onClick={self.hide} />
+          <h4 className="w-certs-title">
+            <HelpIcon docsUrl="gui/https.html#custom-certs" />
+            Custom Certs Settings
           </h4>
-          <table className="table">
+          <table className="table w-hover-body">
             <thead>
-              <th className="w-certs-info-order">#</th>
-              <th className="w-certs-info-filename">Filename</th>
-              <th className="w-certs-info-domain">DNS Name</th>
-              <th className="w-certs-info-validity">Validity</th>
-              <th className="w-certs-info-status">Status</th>
+              <th className="w-certs-order">#</th>
+              <th className="w-certs-active">Active</th>
+              <th className="w-certs-filename">Filename</th>
+              <th className="w-certs-domain">DNS Name</th>
+              <th className="w-certs-validity">Validity</th>
+              <th className="w-certs-status">Status</th>
             </thead>
             <tbody>
               {list.length ? (
                 list.map(function (item, i) {
                   return (
                     <tr
-                      className={item.isInvalid ? 'w-cert-invalid' : undefined}
+                      className={(item.isInvalid ? 'w-cert-invalid' : '') + (item.disabled ? ' w-certs-disabled' : '')}
                     >
-                      <th className="w-certs-info-order">{i + 1}</th>
+                      <th className="w-certs-order">{i + 1}</th>
+                      <td className="w-certs-active">
+                        {item.isRoot ? null :  <input type="checkbox" data-filename={item.filename}
+                        onChange={self.handleActive} checked={!item.disabled} />}
+                      </td>
                       <td
-                        className="w-certs-info-filename"
+                        className="w-certs-filename"
                         title={item.filename}
                       >
-                        {item.readOnly ? (
-                          <span className="glyphicon glyphicon-lock" />
-                        ) : undefined}
                         {item.displayName || item.filename}
                         <br />
                         <a
-                          className="w-delete"
+                          className={item.readOnly ? null : 'w-delete'}
                           onClick={function () {
                             item.readOnly
                               ? self.showRemoveTips(item)
                               : self.removeCert(item);
                           }}
-                          title=""
-                          style={{
-                            color: item.readOnly ? '#337ab7' : undefined
-                          }}
                         >
                           {item.readOnly ? 'View path' : 'Delete'}
                         </a>
                       </td>
-                      <td className="w-certs-info-domain" title={item.domain}>
-                        {item.domain}
+                      <td className="w-certs-domain" title={item.domain}>
+                        {item.isRoot ? null : item.domain}
                       </td>
                       <td
-                        className="w-certs-info-validity"
+                        className="w-certs-validity"
                         title={item.validity}
                       >
                         {item.validity}
                       </td>
-                      <td className="w-certs-info-status">{item.status}</td>
+                      <td className="w-certs-status">{item.status}</td>
                     </tr>
                   );
                 })
@@ -290,6 +302,22 @@ var HistoryData = React.createClass({
           </table>
         </div>
         <div className="modal-footer">
+          <button
+            type="button"
+            className="btn btn-default"
+            data-dismiss="modal"
+          >
+            Close
+          </button>
+          {dataCenter.whistleId ? <button
+            type="button"
+            className="btn btn-warning"
+            data-dismiss="modal"
+            onClick={this.showService}
+          >
+            <Icon name="cloud" />
+            Import From Service
+          </button> : null}
           <input
             ref="uploadCerts"
             style={{ display: 'none' }}
@@ -300,19 +328,14 @@ var HistoryData = React.createClass({
           />
           <button
             type="button"
-            className="btn btn-default"
-            data-dismiss="modal"
-          >
-            Close
-          </button>
-          <button
-            type="button"
             style={{
-              display: dataCenter.isDiableCustomCerts() ? 'none' : undefined
+              display: dataCenter.isDiableCustomCerts() ? 'none' : undefined,
+              marginLeft: 5
             }}
             className="btn btn-primary"
             onClick={self.showUpload}
           >
+            <Icon name="folder-open" />
             Upload
           </button>
         </div>
@@ -322,4 +345,4 @@ var HistoryData = React.createClass({
   }
 });
 
-module.exports = HistoryData;
+module.exports = CertsInfoDialog;

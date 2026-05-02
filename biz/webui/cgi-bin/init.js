@@ -11,7 +11,6 @@ var logger = proxy.logger;
 var pluginMgr = proxy.pluginMgr;
 
 module.exports = function(req, res) {
-  var lastLog = proxy.getLogs(0, 1)[0];
   var lastSvrLog = logger.getLogs(0, 1)[0];
 
   util.sendGzip(req, res, {
@@ -19,12 +18,10 @@ module.exports = function(req, res) {
     disableInstaller: config.disableInstaller,
     account: config.account,
     version: config.version,
-    epm: config.epm,
     custom1: properties.get('Custom1'),
     custom2: properties.get('Custom2'),
     hasInvalidCerts: ca.hasInvalidCerts,
     supportH2: config.enableH2,
-    lastLogId: lastLog && lastLog.id,
     lastSvrLogId: lastSvrLog && lastSvrLog.id,
     lastDataId: proxy.getLastDataId(),
     clientId: util.getClientId(),
@@ -34,14 +31,13 @@ module.exports = function(req, res) {
     mvaluesClientId: config.mvaluesClientId,
     mvaluesTime: config.mvaluesTime,
     latestVersion: properties.getLatestVersion('latestVersion'),
+    latestClientVersion: properties.getLatestVersion('latestClientVersion'),
     server: util.getServerInfo(req),
-    hasARules: rulesUtil.hasAccountRules ? 1 : undefined,
     rules: getRules(),
     values: getValues(),
     interceptHttpsConnects: properties.isEnableCapture(),
     enableHttp2: properties.isEnableHttp2(),
     plugins: pluginMgr.getPlugins(),
-    pluginsRoot: config.PLUGIN_INSTALL_ROOT,
     disabledPlugins: !config.notAllowedDisablePlugins && properties.get('disabledPlugins') || {},
     disabledAllPlugins: !config.notAllowedDisablePlugins && properties.get('disabledAllPlugins'),
     disabledAllRules: !config.notAllowedDisableRules && properties.get('disabledAllRules'),

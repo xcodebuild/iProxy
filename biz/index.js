@@ -4,6 +4,7 @@ var util = require('../lib/util');
 var handleUIReq = require('./webui/lib').handleRequest;
 var handleWeinreReq = require('./weinre');
 var config = require('../lib/config');
+var common = require('../lib/util/common');
 
 var localIpCache = util.localIpCache;
 var WEBUI_PATH = config.WEBUI_PATH;
@@ -20,7 +21,6 @@ var CUSTOM_PLUGIN_RE = new RegExp('^/[\\w.-]*\\.whistle-path\\.5b6af7b9884e1165[
 var REAL_WEBUI_HOST_PARAM = /_whistleInternalHost_=(__([a-z\d.-]+)(?:__(\d{1,5}))?__)/;
 var OUTER_PLUGIN_RE = /^(?:\/whistle)?\/((?:whistle|plugin)\.[a-z\\d_-]+)::(\d{1,5})\//;
 
-
 function transformUI(req, res) {
   if (config.customUIHost && !config.keepProxyUI) {
     return res.status(404).end();
@@ -32,7 +32,8 @@ module.exports = function(req, res, next) {
   var config = this.config;
   var pluginMgr = this.pluginMgr;
   var fullUrl = req.fullUrl = util.getFullUrl(req); // format request
-  var host = util.parseHost(req.headers.host);
+  var headers = req.headers;
+  var host = util.parseHost(headers.host);
   var port = host[1] || (req.isHttps ? 443 : 80);
   var bypass;
   host = host[0];
@@ -60,12 +61,12 @@ module.exports = function(req, res, next) {
         var realPath = RegExp.$1;
         var realPort = RegExp.$3;
         realHost = RegExp.$2 + (realPort ? ':' + realPort : '');
-        req.headers[config.REAL_HOST_HEADER] = realHost;
+        headers[util.REAL_HOST_HEADER] = realHost;
         req.url = req.url.replace(realPath, '');
       } else {
         req.curUrl = fullUrl;
         if (realHost = rules.resolveInternalHost(req)) {
-          req.headers[config.REAL_HOST_HEADER] = realHost;
+          headers[util.REAL_HOST_HEADER] = realHost;
         }
       }
       if (internalAppRe.test(req.path)) {
@@ -80,7 +81,7 @@ module.exports = function(req, res, next) {
         isProxyReq = isProxyReq || isOld;
       } else if (pluginRe.test(req.path)) {
         isProxyReq = !pluginMgr.getPlugin(RegExp.$1 + ':');
-      } else if (!req.headers[config.WEBUI_HEAD]) {
+      } else if (!headers[config.WEBUI_HEAD]) {
         isWebUI = false;
       }
       if (!config.proxyServer && isProxyReq && !config.isLocalUIUrl(host)) {
@@ -91,11 +92,11 @@ module.exports = function(req, res, next) {
       if (isWebUI) {
         req.fromInternalPath = true;
         var hostname = (req._fwdHost && util.parseHost(req._fwdHost)[0]) || host;
-        req.headers['x-whistle-origin-host'] = hostname || '*';
+        headers[common.ORIGIN_HOST_HEADER] = hostname || '*';
       }
     }
   } else {
-    isWebUI = req.headers[config.WEBUI_HEAD];
+    isWebUI = headers[config.WEBUI_HEAD];
     if (!isWebUI) {
       if (!(isWebUI = localIpCache.get(host))) {
         isWebUI = config.isLocalUIUrl(host);
@@ -106,7 +107,11 @@ module.exports = function(req, res, next) {
     } else if (util.isProxyPort(port) && net.isIP(host)) {
       localIpCache.set(host, 1);
     }
-    if (isWebUI) {
+    if (PREVIEW_PATH_RE.test(req.url)) {
+      headers[util.INTERNAL_ID_HEADER] = util.INTERNAL_ID;
+      req.url = '/preview.html?charset=' + RegExp.$1;
+      isWebUI = true;
+    } else if (isWebUI) {
       if (req.path.indexOf('/_/') === 0) {
         bypass = '/_/';
       } else if (req.path.indexOf('/-/') === 0) {
@@ -115,11 +120,7 @@ module.exports = function(req, res, next) {
       if (bypass) {
         req.url = req.url.replace(bypass, '/');
       }
-      delete req.headers[config.INTERNAL_ID_HEADER];
-    } else if (PREVIEW_PATH_RE.test(req.url)) {
-      req.headers[config.INTERNAL_ID_HEADER] = config.INTERNAL_ID;
-      req.url = '/preview.html?charset=' + RegExp.$1;
-      isWebUI = true;
+      delete headers[util.INTERNAL_ID_HEADER];
     }
   }
   // 后续有用到
@@ -138,7 +139,7 @@ module.exports = function(req, res, next) {
         var outerPort = RegExp.$2;
         req.url = req.url.replace(RegExp['$&'], '/' + RegExp.$1 + '/');
         if (outerPort > 0 && outerPort < 65536 && outerPort != config.port) {
-          req.headers.host = '127.0.0.1:' + outerPort;
+          headers.host = '127.0.0.1:' + outerPort;
           return util.transformReq(req, res, outerPort);
         }
       }
@@ -152,7 +153,7 @@ module.exports = function(req, res, next) {
   } else if (localRule = rules.resolveLocalRule(req)) {
     req.url = localRule.url;
     if (localRule.realPort) {
-      req.headers.host = '127.0.0.1:' + localRule.realPort;
+      headers.host = '127.0.0.1:' + localRule.realPort;
       util.transformReq(req, res, localRule.realPort);
     } else {
       transformUI(req, res);

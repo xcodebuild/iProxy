@@ -1,14 +1,14 @@
-require('./base-css.js');
 var React = require('react');
 var Divider = require('./divider');
 var ReqDetail = require('./req-detail');
 var ResDetail = require('./res-detail');
 var util = require('./util');
+var Icon = require('./icon');
 
 var Inspector = React.createClass({
   shouldComponentUpdate: function (nextProps) {
-    var hide = util.getBoolean(this.props.hide);
-    if (hide != util.getBoolean(nextProps.hide)) {
+    var hide = util.getBool(this.props.hide);
+    if (hide != util.getBool(nextProps.hide)) {
       return true;
     }
     if (hide) {
@@ -19,21 +19,20 @@ var Inspector = React.createClass({
     if (!modal || modal !== newModal) {
       return true;
     }
-
-    return !this.endTime;
+    return !this.endTime || this.refs.divider._needReset;
   },
   render: function () {
     var props = this.props;
     var modal = props.modal;
     this.endTime = modal && (modal.endTime || modal.lost);
     return (
-      <Divider vertical="true" hide={props.hide}>
-        <div className="fill orient-vertical-box">
+      <Divider ref="divider" vertical="true" hide={props.hide}>
+        <div className="fill v-box">
           <ReqDetail modal={modal} />
         </div>
-        <div className="fill orient-vertical-box">
+        <div className="fill v-box">
           <div className="w-detail-inspectors-title w-detail-inspectors-res">
-            <span className="glyphicon glyphicon-arrow-left" />Response
+            <Icon name="arrow-left" />Response
           </div>
           <ResDetail modal={modal} />
         </div>

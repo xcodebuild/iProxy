@@ -1,4 +1,6 @@
+require('./base-css.js');
 require('../css/index.css');
+require('../css/theme.css');
 var $ = require('jquery');
 var React = require('react');
 var ReactDOM = require('react-dom');
@@ -25,43 +27,54 @@ var FilterBtn = require('./filter-btn');
 var message = require('./message');
 var UpdateAllBtn = require('./update-all-btn');
 var ContextMenu = require('./context-menu');
-var CertsInfoDialog = require('./certs-info-dialog');
 var RulesDialog = require('./rules-dialog');
 var SyncDialog = require('./sync-dialog');
-var AccountDialog = require('./account-dialog');
+var LargeDialog = require('./large-dialog');
 var JSONDialog = require('./json-dialog');
-var Account = require('./account');
 var MockDialog = require('./mock-dialog');
 var IframeDialog = require('./iframe-dialog');
 var win = require('./win');
+var ServiceBtn = require('./service-btn');
+var SaveToServiceBtn = require('./share-via-url-btn');
+var ImportDialog = require('./import-dialog');
+var ExportDialog = require('./export-dialog');
+var HttpsSettings = require('./https-settings');
+var ServiceDialog = require('./service-dialog');
+var Icon = require('./icon');
+var CloseBtn = require('./close-btn');
 
 var TEMP_LINK_RE = /^(?:[\w-]+:\/\/)?temp(?:\/([\da-z]{64}|blank))?(?:\.[\w-]+)?$/;
 var FILE_PATH_RE = /^(?:[\w-]+:\/\/)?((?:[a-z]:[\\/]|\/).+)$/i;
-var H2_RE = /http\/2\.0/i;
-var JSON_RE = /^\s*(?:[\{｛][\w\W]+[\}｝]|\[[\w\W]+\])\s*$/;
 var DEFAULT = 'Default';
 var MAX_PLUGINS_TABS = 7;
 var MAX_FILE_SIZE = 1024 * 1024 * 128;
 var MAX_OBJECT_SIZE = 1024 * 1024 * 36;
 var MAX_LOG_SIZE = 1024 * 1024 * 2;
 var MAX_REPLAY_COUNT = 100;
-var LINK_SELECTOR = '.cm-js-type, .cm-js-http-url, .cm-string, .cm-js-at';
+var LINK_SELECTOR = '.cm-js-type, .cm-js-http-url, .cm-string, .cm-js-at, .cm-js-weinre, .cm-js-log';
 var LINK_RE = /^"(https?:)?(\/\/[^/]\S+)"$/i;
 var AT_LINK_RE = /^@(https?:)?(\/\/[^/]\S+)$/i;
 var OPTIONS_WITH_SELECTED = [
   'removeSelected',
-  'exportWhistleFile',
-  'exportSazFile'
+  'exportWhistleFile'
 ];
 var HIDE_STYLE = { display: 'none' };
+var VER_RE = /^(?:\d+)\.(?:\d+)\.(?:\d+)(?:-[\w-]+)?$/;
 var search = window.location.search;
 var query = util.getQuery();
 var isClient = query.mode === 'client';
+var clientVersion = isClient && util.isElectron && VER_RE.test(query.v) ? query.v : '';
 var hideMenus = !!(query.hideMenus || query.hideMenu);
 var hideLeftMenu;
 var showTreeView;
 var dataUrl;
+var TABS = ['Network', 'Rules', 'Values', 'Plugins'];
 var TEXT_SUFFIX_RE = /[\w-]\.(?:txt|csv|tsv|json|xml|yaml|yml|ini|conf|log|html|htm|css|js|py|java|c|cpp|h|sh|php|sql|md|markdown|rtf|tex|bib|vcf)$/i;
+var findDOMNode = ReactDOM.findDOMNode;
+
+function getHideStyle(hide) {
+  return hide ? HIDE_STYLE: null;
+}
 
 function getString(url) {
   return typeof url === 'string' ? url.trim() : '';
@@ -86,6 +99,16 @@ window.setWhistleDataUrl = function(url) {
     return true;
   }
   return false;
+};
+
+window.showWhistleMessage = function(options) {
+  message[options.level || options.type || 'info'](options.text || options.msg || options.message);
+};
+
+window.showWhistleWebUI = function(name) {
+  if (TABS.indexOf(name) !== -1) {
+    events.trigger('show' + name);
+  }
 };
 
 if (/[&#?]showTreeView=(0|false|1|true)(?:&|$|#)/.test(search)) {
@@ -138,77 +161,31 @@ var LEFT_BAR_MENUS = [
 
 var RULES_ACTIONS = [
   {
-    name: 'Export Selected',
+    name: 'Import',
+    icon: 'import',
+    id: 'importRules',
+    title: 'Ctrl[Command] + I'
+  },
+  {
+    name: 'Export',
     icon: 'export',
     id: 'exportRules'
-  },
-  {
-    name: 'Export All',
-    href: 'cgi-bin/rules/export',
-    target: 'downloadTargetFrame',
-    id: 'exportAllRules'
-  },
-  {
-    name: 'Import Local',
-    icon: 'import',
-    id: 'importLocalRules'
-  },
-  {
-    name: 'Import Remote',
-    id: 'importRemoteRules'
   }
 ];
 var VALUES_ACTIONS = [
   {
-    name: 'Export Selected',
-    icon: 'export',
-    id: 'exportValues'
-  },
-  {
-    name: 'Export All',
-    href: 'cgi-bin/values/export',
-    target: 'downloadTargetFrame',
-    id: 'exportAllValues'
-  },
-  {
-    name: 'Import Local',
+    name: 'Import',
     icon: 'import',
-    id: 'importLocalValues'
-  },
-  {
-    name: 'Import Remote',
-    id: 'importRemoteValues'
-  }
-];
-var IMPORT_OPTIONS = [
-  {
-    name: 'Local',
-    icon: 'file',
-    id: 'importLocal',
+    id: 'importValues',
     title: 'Ctrl[Command] + I'
   },
   {
-    name: 'Remote',
-    icon: 'link',
-    id: 'importRemote',
-    title: 'Ctrl[Command] + Shift + I'
+    name: 'Export',
+    icon: 'export',
+    id: 'exportValues'
   }
 ];
-var REMOVE_OPTIONS = [
-  {
-    name: 'Remove Selected Sessions',
-    icon: 'remove',
-    id: 'removeSelected',
-    disabled: true,
-    title: 'Ctrl[Command] + D'
-  },
-  {
-    name: 'Remove Unselected Sessions',
-    id: 'removeUnselected',
-    disabled: true,
-    title: 'Ctrl[Command] + Shift + D'
-  }
-];
+
 var ABORT_OPTIONS = [
   {
     name: 'Abort',
@@ -217,21 +194,6 @@ var ABORT_OPTIONS = [
   }
 ];
 
-function checkJson(item) {
-  if (/\.json$/i.test(item.name) && JSON_RE.test(item.value)) {
-    try {
-      JSON.parse(item.value);
-    } catch (e) {
-      message.warn(
-        'Warning: the value of ' +
-          item.name +
-          ' can`t be parsed into json. ' +
-          e.message
-      );
-    }
-  }
-}
-
 function getJsonForm(data, name) {
   var form = new FormData();
   var file = new File([JSON.stringify(data)], 'data.json', { type: 'application/json' });
@@ -239,56 +201,21 @@ function getJsonForm(data, name) {
   return form;
 }
 
-function checkUrl(url) {
-  url = url.trim();
-  if (!url) {
-    message.error('The url cannot be empty.');
-    return;
-  }
-  return url;
-}
-
-function getRemoteData(url, callback) {
-  var opts = {  url: url };
-  dataCenter.importRemote(opts,  function (data, xhr) {
-    if (!data) {
-      util.showSystemError(xhr);
-      return callback(true);
-    }
-    if (data.ec !== 0) {
-      message.error(data.em || 'Error');
-      return callback(true);
-    }
-    try {
-      var value = data.body || data.value;
-      data = value && JSON.parse(value);
-      if (!data || !Object.keys(data).length) {
-        message.info('Empty.');
-      } else {
-        return callback(false, data);
-      }
-    } catch (e) {
-      message.error(e.message);
-    }
-    callback(true);
-  });
-}
-
 function readFileJson(file, cb) {
   if (util.isString(file)) {
     if (file.length > MAX_OBJECT_SIZE) {
-      win.alert('The file size is too large.');
+      win.alert('File exceeds maximum size limit');
       return cb();
     }
     return cb(parseJSON(file));
   }
-  if (!file || !/\.(txt|json)$/i.test(file.name)) {
-    win.alert('Only supports .txt or .json file.');
+  if (!file || !/\.(txt|json|har)$/i.test(file.name)) {
+    win.alert('Supported file formats: .txt, .json, .har');
     return cb();
   }
 
   if (file.size > MAX_OBJECT_SIZE) {
-    win.alert('The file size is too large.');
+    win.alert('File exceeds maximum size limit');
     return cb();
   }
   util.readFileAsText(file, function(text) {
@@ -296,9 +223,9 @@ function readFileJson(file, cb) {
   });
 }
 
-function handleImportData(file, cb, name) {
+function handleImportData(file, cb, type) {
   readFileJson(file, function(data) {
-    if (!data || util.handleImportData(data)) {
+    if (!data || util.handleImportData(data, type)) {
       return cb();
     }
     cb(data);
@@ -311,9 +238,6 @@ function getPageName(options) {
     hash = hash.replace(/[?#].*$/, '');
   } else {
     hash = location.href.replace(/[?#].*$/, '').replace(/.*\//, '');
-  }
-  if (options.showAccount && hash === 'account') {
-    return hash;
   }
   if (options.networkMode) {
     return 'network';
@@ -332,7 +256,8 @@ function getPageName(options) {
     return hash !== 'plugins' ? 'network' : hash;
   }
   if (isClient && !hash) {
-    return storage.get('pageName') || 'network';
+    hash = storage.get('pageName');
+    return TABS.indexOf(hash) !== -1 ? hash : 'network';
   }
   return hash;
 }
@@ -443,22 +368,27 @@ var Index = React.createClass({
     var rules = modal.rules;
     var values = modal.values;
     var server = modal.server;
-    var multiEnv = !!server.multiEnv;
+    var caUrlList = [];
+    var caHash = util.getCAHash(server, caUrlList);
     var state = {
+      filename: '',
       replayCount: 1,
       tabs: [],
       caType: getCAType(storage.get('caType')),
+      caHash: caHash,
+      caUrlList: caUrlList,
       allowMultipleChoice: modal.rules.allowMultipleChoice,
       backRulesFirst: modal.rules.backRulesFirst,
       networkMode: !!server.networkMode,
       rulesMode: !!server.rulesMode,
       pluginsMode: !!server.pluginsMode,
       rulesOnlyMode: !!server.rulesOnlyMode,
-      multiEnv: server.multiEnv,
       ndr: server.ndr,
       ndp: server.ndp,
       drb: server.drb,
       drm: server.drm,
+      port: server.port,
+      whistleId: server.whistleId,
       version: modal.version
     };
     if (hideLeftMenu !== false) {
@@ -474,9 +404,6 @@ var Index = React.createClass({
     } else if (pageName.indexOf('plugins') != -1) {
       state.hasPlugins = true;
       state.name = 'plugins';
-    } else if (state.showAccount && pageName === 'account') {
-      state.hasAccount = true;
-      state.name = 'account';
     } else {
       state.hasNetwork = true;
       state.name = 'network';
@@ -587,13 +514,13 @@ var Index = React.createClass({
     state.showRulesLineNumbers = showRulesLineNumbers === 'true';
     state.showValuesLineNumbers = showValuesLineNumbers === 'true';
     state.autoRulesLineWrapping = !!autoRulesLineWrapping;
-    state.foldGutter = !!storage.get('foldGutter') !== '';
+    state.foldGutter = storage.get('foldGutter') !== '';
     state.autoValuesLineWrapping = !!autoValuesLineWrapping;
     state.plugins = modal.plugins;
     state.disabledPlugins = modal.disabledPlugins;
     state.disabledAllRules = modal.disabledAllRules;
     state.disabledAllPlugins = modal.disabledAllPlugins;
-    state.interceptHttpsConnects = !multiEnv && modal.interceptHttpsConnects;
+    state.interceptHttpsConnects = modal.interceptHttpsConnects;
     state.enableHttp2 = modal.enableHttp2;
     state.rules = rulesModal;
     state.network = networkModal;
@@ -615,48 +542,36 @@ var Index = React.createClass({
 
     state.networkOptions = [
       {
-        name: 'Remove All Sessions',
+        name: 'Remove All',
         icon: 'remove',
         id: 'removeAll',
         disabled: true,
         title: 'Ctrl[Command] + X'
       },
       {
-        name: 'Remove Selected Sessions',
+        name: 'Remove Selected',
         id: 'removeSelected',
         disabled: true,
         title: 'Ctrl[Command] + D'
       },
       {
-        name: 'Remove Unselected Sessions',
+        name: 'Remove Unselected',
         id: 'removeUnselected',
         disabled: true,
         title: 'Ctrl[Command] + Shift + D'
       },
       {
-        name: 'Export Selected Sessions (*.txt)',
+        name: 'Import',
+        icon: 'import',
+        id: 'importSessions',
+        title: 'Ctrl[Command] + I'
+      },
+      {
+        name: 'Export',
         icon: 'export',
         id: 'exportWhistleFile',
         disabled: true,
-        title: 'Ctrl + S'
-      },
-      {
-        name: 'Export Selected Sessions (*.saz)',
-        id: 'exportSazFile',
-        disabled: true,
-        title: 'Ctrl + S'
-      },
-      {
-        name: 'Export Selected Sessions (*.har)',
-        id: 'exportHarFile',
-        disabled: true,
-        title: 'Ctrl + S'
-      },
-      {
-        name: 'Import Sessions',
-        icon: 'import',
-        id: 'importSessions',
-        title: 'Ctrl + I'
+        title: 'Ctrl[Command] + S'
       },
       {
         name: 'Show Tree View',
@@ -666,19 +581,24 @@ var Index = React.createClass({
     ];
     state.helpOptions = [
       {
+        name: 'Website',
+        href: util.getDocUrl(),
+        icon: 'link'
+      },
+      {
         name: 'GitHub',
         href: 'https://github.com/avwo/whistle',
         icon: 'github'
       },
       {
         name: 'Update',
-        href: 'https://avwo.github.io/whistle/update.html',
+        href: util.UPDATE_URL,
         icon: 'refresh'
       },
       {
         name: 'Issue',
         href: 'https://github.com/avwo/whistle/issues/new',
-        icon: 'pencil'
+        icon: 'record'
       }
     ];
     protocols.setPlugins(state);
@@ -768,8 +688,6 @@ var Index = React.createClass({
     if (data) {
       this.refs.syncDialog.showKVDialog(data, this.state.rules, this.state.values, isValues);
     }
-    ReactDOM.findDOMNode(this.refs.importRules).value = '';
-    ReactDOM.findDOMNode(this.refs.importValues).value = '';
   },
   createPluginsOptions: function (plugins) {
     plugins = plugins || {};
@@ -892,7 +810,7 @@ var Index = React.createClass({
       this.rulesChanged = false;
       var hasChanged = this.state.rules.hasChanged();
       this.showReloadDialog(
-        'The rules has been modified.<br/>Do you want to reload it.',
+        'Rules changed. Reload now?',
         hasChanged,
         force
       );
@@ -903,7 +821,7 @@ var Index = React.createClass({
       this.valuesChanged = false;
       var hasChanged = this.state.values.hasChanged();
       this.showReloadDialog(
-        'The values has been modified.<br/>Do you want to reload it.',
+        'Values changed. Reload now?',
         hasChanged,
         force
       );
@@ -925,7 +843,7 @@ var Index = React.createClass({
     dialog.show();
     if (existsUnsaved) {
       msg +=
-        '<p class="w-confim-reload-note">Note: There are unsaved changes.</p>';
+        '<p class="w-confim-reload-note">Warning: Unsaved changes will be lost</p>';
     }
     tips.html(msg);
   },
@@ -937,25 +855,67 @@ var Index = React.createClass({
       this.showValues();
     } else if (pageName.indexOf('plugins') != -1) {
       this.showPlugins();
-    } else if (this.state.showAccount && pageName === 'account') {
-      this.showAccount();
     } else {
       this.showNetwork();
     }
     storage.set('pageName', pageName || '');
   },
+  switchTab: function(isBack) {
+    var self = this;
+    var name = self.state.name;
+    var tabs = [];
+    if (!self.hideNetwork) {
+      tabs.push('network');
+    }
+    if (!self.hideRules) {
+      tabs.push('rules');
+    }
+    if (!self.hideValues) {
+      tabs.push('values');
+    }
+    if (!self.hidePlugins) {
+      tabs.push('plugins');
+    }
+    var index = tabs.indexOf(name);
+    var len = tabs.length;
+    if (isBack) {
+      index = index - 1;
+      if (index < 0) {
+        index = len - 1;
+      }
+    } else {
+      index = index + 1;
+      if (index >= len) {
+        index = 0;
+      }
+    }
+    switch (tabs[index]) {
+    case 'network':
+      self.showNetwork();
+      break;
+    case 'rules':
+      self.showRules();
+      break;
+    case 'values':
+      self.showValues();
+      break;
+    case 'plugins':
+      self.showPlugins();
+      break;
+    }
+  },
   componentDidMount: function () {
     var self = this;
     var clipboard = new Clipboard('.w-copy-text');
     clipboard.on('error', function (e) {
-      win.alert('Copy failed.');
+      win.alert('Copy failed');
     });
     clipboard = new Clipboard('.w-copy-text-with-tips');
     clipboard.on('error', function (e) {
-      message.error('Copy failed.');
+      message.error('Copy failed');
     });
     clipboard.on('success', function (e) {
-      message.success('Copied clipboard.');
+      message.success('Copied clipboard');
     });
     var preventDefault = function (e) {
       e.preventDefault();
@@ -982,6 +942,10 @@ var Index = React.createClass({
     var composerDidMount;
     var composerData;
 
+    events.one('networkDidMount', function() {
+      composerData && events.trigger('showComposerTab');
+    });
+
     events.one('composerDidMount', function() {
       composerDidMount = true;
       if (composerData) {
@@ -998,21 +962,19 @@ var Index = React.createClass({
       self.setPluginState(util.getSimplePluginName(plugin), disabled);
     });
 
-    events.on('showCustomCerts', self.showCustomCertsInfo);
-
     events.on('setComposerData', function(_, data) {
       if (!data || self.state.rulesMode) {
         return;
       }
-      if (self.state.name !== 'network') {
-        self.showNetwork();
-      }
-      events.trigger('showComposerTab');
-      if (composerDidMount) {
-        events.trigger('_setComposerData', data);
-      } else {
-        composerData = data;
-      }
+      win.confirm('Do you confirm the changes to the composer\'s data?', function(sure) {
+        if (sure) {
+          if (composerDidMount) {
+            events.trigger('_setComposerData', data);
+          } else {
+            composerData = data;
+          }
+        }
+      });
     });
 
     events.on('showPluginOption', function(_, plugin) {
@@ -1029,6 +991,7 @@ var Index = React.createClass({
         url += '?openInModal=5b6af7b9884e1165';
       }
       self.refs.iframeDialog.show({
+        favicon: util.getPluginIcon(plugin),
         name: name,
         url: url,
         homepage: plugin.homepage,
@@ -1072,13 +1035,23 @@ var Index = React.createClass({
     events.on('showNetwork', function () {
       self.showNetwork();
     });
-    events.on('showRules', function () {
+    events.on('showRules', function (_, name) {
       self.showRules();
+      if (name && self.state.rules.exists(name)) {
+        events.trigger('expandRulesGroup', name);
+        self.setRulesActive(name);
+      }
     });
     events.on('showValues', function () {
       self.showValues();
     });
-    events.on('showPlugins', function () {
+    events.on('showPlugins', function (_, name) {
+      if (name && typeof name === 'string') {
+        self.setState({ active: 'Home' });
+        setTimeout(function() {
+          events.trigger('highlightPlugin', name);
+        }, 600);
+      }
       self.showPlugins();
     });
     events.on('disableAllPlugins', self.disableAllPlugins);
@@ -1190,7 +1163,7 @@ var Index = React.createClass({
         return handleRecover(true);
       }
       win.confirm(
-        'The name `' + filename + '`  already exists, whether to overwrite it?',
+        'The name \'' + filename + '\' is already in use. Overwrite?',
         handleRecover
       );
     });
@@ -1225,9 +1198,75 @@ var Index = React.createClass({
         return handleRecover(true);
       }
       win.confirm(
-        'The name `' + filename + '`  already exists, whether to overwrite it?',
+        'The name \'' + filename + '\' is already in use. Overwrite?',
         handleRecover
       );
+    });
+    events.on('networkImportFile', function (_, file) {
+      self.uploadSessionsForm(file);
+    });
+    events.on('networkImportData', function (_, data) {
+      self.importAnySessions(data);
+    });
+    events.on('rulesImportFile', function (_, file) {
+      handleImportData(file, self.handleImportRules);
+    });
+    events.on('rulesImportData', function (_, data) {
+      self.handleImportRules(data);
+    });
+    events.on('valuesImportFile', function (_, file) {
+      handleImportData(file, self.handleImportValues);
+    });
+    events.on('valuesImportData', function (_, data) {
+      self.handleImportValues(data);
+    });
+    events.on('networkSettingsImportFile composerImportFile rulesSettingsImportFile valuesSettingsImportFile', function (e, file) {
+      handleImportData(file, util.noop, e.type);
+    });
+    events.on('networkSettingsImportData composerImportData rulesSettingsImportFile valuesSettingsImportFile', function (_, data) {
+      util.handleImportData(data);
+    });
+    events.on('setRulesSettings', function (_, data) {
+      if (!data) {
+        return;
+      }
+      win.confirm('Do you confirm the changes to the rules settings?', function(sure) {
+        if (sure) {
+          self.setState({
+            rulesTheme: data.theme,
+            rulesFontSize: data.fontSize,
+            showRulesLineNumbers: data.lineNumbers,
+            autoRulesLineWrapping: data.autoLineWrapping
+          });
+          storage.set('rulesTheme', getString(data.theme).substring(0, 30));
+          storage.set('rulesFontSize', getString(data.fontSize).substring(0, 30));
+          storage.set('showRulesLineNumbers', !!data.lineNumbers);
+          storage.set('autoRulesLineWrapping', data.autoLineWrapping ? '1' : '');
+          self.setMultipleCohice(data.allowMultipleChoice);
+          self.setBackRulesFirst(data.backRulesFirst);
+        }
+      });
+    });
+    events.on('setValuesSettings', function (_, data) {
+      if (!data) {
+        return;
+      }
+      win.confirm('Do you confirm the changes to the values settings?', function(sure) {
+        if (sure) {
+          self.setState({
+            valuesTheme: data.theme,
+            valuesFontSize: data.fontSize,
+            showValuesLineNumbers: data.lineNumbers,
+            autoValuesLineWrapping: data.autoLineWrapping,
+            foldGutter: data.foldGutter
+          });
+          storage.set('valuesTheme', getString(data.theme).substring(0, 30));
+          storage.set('valuesFontSize', getString(data.fontSize).substring(0, 10));
+          storage.set('showValuesLineNumbers', !!data.lineNumbers);
+          storage.set('autoValuesLineWrapping', data.autoLineWrapping ? '1' : '');
+          storage.set('foldGutter', data.foldGutter ? '1' : '');
+        }
+      });
     });
 
     $(document)
@@ -1241,66 +1280,83 @@ var Index = React.createClass({
         if (!file) {
           return;
         }
-        if ($('.w-files-dialog.in').length) {
-          return events.trigger('uploadFile', file);
+        var target = e.target;
+        if (target.nodeName === 'TEXTAREA') {
+          e.preventDefault();
+          target.readOnly = true;
+          setTimeout(function() {
+            target.readOnly = false;
+          }, 0);
+        }
+        target = $(target);
+        var iframe = target.closest('.w-fix-drag').find('iframe')[0];
+        if (iframe) {
+          try {
+            var win = iframe.contentWindow;
+            if (win && typeof win.onWhistleFileDrop === 'function') {
+              return win.onWhistleFileDrop(file);
+            }
+          } catch (e) {
+            console.error(e); // eslint-disable-line
+          }
         }
         if ($('.w-show-upload-temp-file.in').length) {
           return events.trigger('uploadTempFile', file);
         }
-        var data;
+        if ($('.w-import-dialog.in').length) {
+          return events.trigger('importFile', file);
+        }
         var name = self.state.name;
-        var target = $(e.target);
+        var filename = file.name;
         if (name === 'network') {
-          if (target.closest('.w-frames-composer').length) {
+          if (target.closest('.w-frames-com').length) {
             return;
           }
-          if (/\.log$/i.test(file.name)) {
+          if (/\.log$/i.test(filename)) {
             if (file.size > MAX_LOG_SIZE) {
-              return win.alert('The file size cannot exceed 2m.');
+              return win.alert('Maximum file size: 2MB');
             }
             util.readFileAsText(file, function (logs) {
               logs = util.parseLogs(logs);
-              if (!logs) {
-                return;
-              }
-              if (dataCenter.uploadLogs !== null) {
-                dataCenter.uploadLogs = logs;
-              }
-              events.trigger('showLog');
-              events.trigger('uploadLogs', { logs: logs });
+              logs && events.trigger('showLog', { logs: logs });
             });
             return;
           }
-          data = new FormData();
-          data.append('importSessions', files[0]);
-          self.uploadSessionsForm(data);
-          if (!/\.(txt|json)$/i.test(file && file.name)) {
-            return;
-          }
-        }
-        var overLeftBar = target.closest('.w-divider-left').length;
-        var overPlugins = name === 'plugins';
-        if ((!overLeftBar && !overPlugins) || self.isHideRules()) {
-          return;
+          return self.uploadSessionsForm(file);
         }
         handleImportData(file, function(json) {
-          if (!json || !overLeftBar) {
-            return;
-          }
-          if (name === 'rules') {
-            self.handleImportRules(json);
-          } else if (name === 'values') {
-            self.handleImportValues(json);
+          if (json) {
+            if (name === 'rules') {
+              self.handleImportRules(json);
+            } else if (name === 'values') {
+              self.handleImportValues(json);
+            }
           }
         });
       })
       .on('keyup', function (e) {
         if ((e.metaKey || e.ctrlKey) && e.keyCode === 82) {
-          e.preventDefault();
-        } else if (self.state.name == 'network' &&  e.keyCode === 191) {
+          !isClient && e.preventDefault();
+        } else if (e.keyCode === 191) {
+          var name = self.state.name;
           var nodeName = document.activeElement && document.activeElement.nodeName;
           if (nodeName !== 'INPUT' && nodeName !== 'TEXTAREA' && !$('.modal.in').length) {
-            events.trigger('focusNetworkFilterInput');
+            if (name === 'network') {
+              if (!util.hasShortcut('focusNetworkSearchBox')) {
+                return;
+              }
+              events.trigger('focusNetworkFilterInput');
+            } else if (name === 'rules') {
+              if (!util.hasShortcut('focusRulesSearchBox')) {
+                return;
+              }
+              events.trigger('focusRulesFilterInput');
+            } else if (name === 'values') {
+              if (!util.hasShortcut('focusValuesSearchBox')) {
+                return;
+              }
+              events.trigger('focusValuesFilterInput');
+            }
           }
         }
       })
@@ -1317,6 +1373,7 @@ var Index = React.createClass({
       }
       e.preventDefault();
     };
+
     $(window)
       .on('hashchange', self.showTab)
       .on('keyup', function (e) {
@@ -1329,44 +1386,107 @@ var Index = React.createClass({
         }
       })
       .on('keydown', function (e) {
-        e.keyCode == 46 && removeItem(e);
+        var name = self.state.name;
+        var code = e.keyCode;
+        code == 46 && removeItem(e);
         if (!e.ctrlKey && !e.metaKey) {
-          if (e.keyCode === 112) {
+          if (code === 112) {
             e.preventDefault();
-            window.open(
-              'https://avwo.github.io/whistle/webui/' +
-                self.state.name +
-                '.html'
-            );
-          } else if (e.keyCode === 116) {
+            window.open(util.getDocUrl('gui/' + name + '.html'));
+          } else if (code === 116) {
             e.preventDefault();
           }
           return;
         }
-        if (e.keyCode === 77) {
+        var isBack = code === 37;
+        if (isBack || code === 39) {
+          if (!util.hasShortcut(isBack ? 'switchTabReverse' : 'switchTab')) {
+            return;
+          }
+          self.switchTab(isBack);
+          return e.preventDefault();
+        }
+        if (code === 79) {
+          if (name === 'network') {
+            if (!util.hasShortcut('toggleNetworkState')) {
+              return;
+            }
+            events.trigger('toggleNetworkState');
+          } else if (name === 'rules') {
+            if (!util.hasShortcut('toggleRules')) {
+              return;
+            }
+            self.confirmDisableAllRules();
+          } else if (name === 'plugins') {
+            if (!util.hasShortcut('togglePlugins')) {
+              return;
+            }
+            self.confirmDisableAllPlugins();
+          }
+          e.preventDefault();
+        } else if (code === 76) {
+          if (name === 'network') {
+            if (!util.hasShortcut('toggleNetworkPanelLayout')) {
+              return;
+            }
+            events.trigger('toggleNetworkDock');
+          } else if (name === 'rules') {
+            if (!util.hasShortcut('toggleRulesNum')) {
+              return;
+            }
+            events.trigger('toggleRulesLineNumbers');
+          } else if (name === 'values') {
+            if (!util.hasShortcut('toggleValuesNum')) {
+              return;
+            }
+            events.trigger('toggleValuesLineNumbers');
+          }
+          e.preventDefault();
+        } else if (code === 82) {
+          !isClient && e.preventDefault();
+        } else if (code === 77) {
           self.toggleLeftMenu();
           e.preventDefault();
-        } else if (e.keyCode === 66) {
+        } else if (code === 66) {
+          if (!util.hasShortcut('switchNetworkView')) {
+            return;
+          }
           self.toggleTreeView();
           e.preventDefault();
           events.trigger('toggleTreeViewByAccessKey');
+          return;
         }
-        var isNetwork = self.state.name === 'network';
-        if (isNetwork && e.keyCode == 88) {
+        var isNetwork = name === 'network';
+        if (isNetwork && code == 88) {
           if (
             !util.isFocusEditor() &&
-            !$(e.target).closest('.w-frames-list').length
+            !$(e.target).closest('.w-frames-list').length &&
+            util.hasShortcut('clearNetworkSessions')
           ) {
             self.clear();
           }
+          return;
         }
-        e.keyCode == 68 && removeItem(e);
+        if (code == 68) {
+          if (!util.hasShortcut(isNetwork ? 'removeNetworkSessions' : name === 'rules' ? 'removeRules' : 'removeValues')) {
+            return;
+          }
+          return removeItem(e);
+        }
         var modal = self.state.network;
-        if (isNetwork && e.keyCode === 83) {
+        if (isNetwork && (code === 83 || code === 69)) {
+          if (code === 83) {
+            if (!util.hasShortcut('saveNetwork')) {
+              return;
+            }
+            e.preventDefault();
+            util.noModal() && events.trigger('saveSessions');
+            return;
+          }
           e.preventDefault();
-          if ($('.modal.in').length) {
+          if (!util.noModal()) {
             if (
-              $(ReactDOM.findDOMNode(self.refs.chooseFileType)).is(':visible')
+              $(findDOMNode(self.refs.chooseFileType)).is(':visible')
             ) {
               self.exportBySave();
             }
@@ -1378,16 +1498,49 @@ var Index = React.createClass({
           }
           var hasSelected = modal.hasSelected();
           if (hasSelected) {
-            $(ReactDOM.findDOMNode(self.refs.chooseFileType)).modal('show');
+            $(findDOMNode(self.refs.chooseFileType)).modal('show');
             setTimeout(function () {
-              ReactDOM.findDOMNode(self.refs.sessionsName).focus();
+              var input = findDOMNode(self.refs.sessionsName);
+              input.focus();
+              input.select();
             }, 500);
           }
           return;
         }
-
-        if (isNetwork && e.keyCode === 73) {
-          self.importSessions(e);
+        if (code === 69) {
+          if (!util.hasShortcut(isNetwork ? 'exportNetwork' : name === 'rules' ? 'exportRules' : 'exportValues')) {
+            return;
+          }
+          e.preventDefault();
+          return util.noModal() && self.exportData();
+        }
+        if (code === 190) {
+          if (!util.hasShortcut(isNetwork ? 'openNetworkSettings' : name === 'rules' ? 'openRulesSettings' : 'openValuesSettings')) {
+            return;
+          }
+          self.showSettings();
+          return e.preventDefault();
+        }
+        var isService = code === 74;
+        if (isService || code === 73) {
+          if (util.noModal()) {
+            if (isService) {
+              if (!dataCenter.whistleId || !util.hasShortcut('openService')) {
+                return;
+              }
+              self.showService();
+            } else if (isNetwork || name === 'rules' || name === 'values') {
+              if (!util.hasShortcut(isNetwork ? 'importNetwork' : name === 'rules' ? 'importRules' : 'importValues')) {
+                return;
+              }
+              self.importData();
+            } else if (name === 'plugins') {
+              if (!util.hasShortcut('openInstallPlugins')) {
+                return;
+              }
+              events.trigger('installPlugins');
+            }
+          }
           e.preventDefault();
         }
       });
@@ -1423,6 +1576,8 @@ var Index = React.createClass({
           elem.hasClass('cm-js-http-url') ||
           elem.hasClass('cm-string') ||
           elem.hasClass('cm-js-at') ||
+          elem.hasClass('cm-js-weinre') ||
+          (!self.hideNetwork && elem.hasClass('cm-js-log')) ||
           TEMP_LINK_RE.test(text = elem.text()) ||
           isTextFile(text) ||
           getKey(text)
@@ -1451,6 +1606,12 @@ var Index = React.createClass({
           }
           return;
         }
+        if (elem.hasClass('cm-js-weinre')) {
+          return self.openWeinre(util.removeProtocol(text));
+        }
+        if (elem.hasClass('cm-js-log')) {
+          return self.openLog(util.removeProtocol(text));
+        }
         if (elem.hasClass('cm-js-http-url')) {
           if (!/^https?:\/\//i.test(text)) {
             text = 'http:' + (text[0] === '/' ? '' : '//') + text;
@@ -1467,8 +1628,17 @@ var Index = React.createClass({
         } else {
           var name = getKey(text);
           if (name) {
-            return events.trigger('showEditorDialog', {
-              name: name
+            var activeRule = self.state.rules.getActive();
+            var rulesText = activeRule && activeRule.value;
+            var values = {};
+            util.resolveInlineValues(rulesText, values);
+            if (values[name] == null) {
+              return events.trigger('showEditorDialog', { name: name });
+            }
+            return win.confirm('The value of \'' + name + '\' is stored in this rule file and cannot be synced if edited via the Values\'s editor. Continue?', function (sure) {
+              if (sure) {
+                events.trigger('showEditorDialog', { name: name });
+              }
             });
           }
         }
@@ -1480,6 +1650,17 @@ var Index = React.createClass({
     dataCenter.on('settings', function (data) {
       var state = self.state;
       var server = data.server;
+      var hasChanged = state.whistleId !== server.whistleId;
+      if (hasChanged) {
+        state.whistleId = server.whistleId;
+      }
+      var caUrlList = [];
+      var caHash = util.getCAHash(server, caUrlList);
+      if (caHash !== state.caHash) {
+        state.caHash = caHash;
+        state.caUrlList = caUrlList;
+        hasChanged = true;
+      }
       if (
         state.interceptHttpsConnects !== data.interceptHttpsConnects ||
         state.enableHttp2 !== data.enableHttp2 ||
@@ -1487,11 +1668,11 @@ var Index = React.createClass({
         state.allowMultipleChoice !== data.allowMultipleChoice ||
         state.disabledAllPlugins !== data.disabledAllPlugins ||
         state.backRulesFirst !== data.backRulesFirst ||
-        state.multiEnv != server.multiEnv ||
         state.ndp != server.ndp ||
         state.ndr != server.ndr ||
         state.drb != server.drb ||
-        state.drm != server.drm
+        state.drm != server.drm ||
+        state.port != server.port
       ) {
         state.interceptHttpsConnects = data.interceptHttpsConnects;
         state.enableHttp2 = data.enableHttp2;
@@ -1499,17 +1680,20 @@ var Index = React.createClass({
         state.allowMultipleChoice = data.allowMultipleChoice;
         state.backRulesFirst = data.backRulesFirst;
         state.disabledAllPlugins = data.disabledAllPlugins;
-        state.multiEnv = server.multiEnv;
         state.ndp = server.ndp;
         state.ndr = server.ndr;
         state.drb = server.drb;
         state.drm = server.drm;
+        state.port = server.port;
         protocols.setPlugins(state);
         var list = LEFT_BAR_MENUS;
         list[3].checked = !state.disabledAllRules;
         list[4].checked = !state.disabledAllPlugins;
         self.refs.contextMenu.update();
         return self.setState({});
+      }
+      if (hasChanged) {
+        self.setState({});
       }
     });
     dataCenter.on('rules', function (data) {
@@ -1532,8 +1716,8 @@ var Index = React.createClass({
       self.serverInfo = data;
     });
 
-    events.on('executeComposer', function () {
-      self.autoRefresh && self.autoRefresh();
+    events.on('autoRefreshNetwork', function () {
+      !self.state.network.isTreeView && self.autoRefresh && self.autoRefresh();
     });
 
     var getFocusItemList = function (curItem) {
@@ -1558,7 +1742,7 @@ var Index = React.createClass({
         self.replayList = list;
         self.refs.setReplayCount.show();
         setTimeout(function () {
-          var input = ReactDOM.findDOMNode(self.refs.replayCount);
+          var input = findDOMNode(self.refs.replayCount);
           input.select();
           input.focus();
         }, 300);
@@ -1566,27 +1750,12 @@ var Index = React.createClass({
       }
       self.replay(e, list);
     });
-    events.on('importSessions', self.importSessions);
     events.on('filterSessions', self.showSettings);
-    events.on('exportSessions', function (e, curItem) {
-      self.exportData(e, getFocusItemList(curItem));
+    events.on('exportSessions', function (e, curItem, filename) {
+      self.exportData(e, getFocusItemList(curItem), filename);
     });
     events.on('abortRequest', function (e, curItem) {
       self.abort(getFocusItemList(curItem));
-    });
-    events.on('uploadSessions', function (e, data) {
-      var sessions = getFocusItemList(data && data.curItem);
-      var upload = data && data.upload;
-      if (typeof upload === 'function') {
-        if (!sessions) {
-          var modal = self.state.network;
-          sessions = modal.getSelectedList();
-          if (sessions && sessions.length) {
-            sessions = $.extend(true, [], sessions);
-          }
-        }
-        sessions && upload(sessions);
-      }
     });
     events.on('removeIt', function (e, item) {
       var modal = self.state.network;
@@ -1658,10 +1827,13 @@ var Index = React.createClass({
     });
     events.on('createRules', self.showCreateRules);
     events.on('createValues', self.showCreateValues);
-    events.on('exportRules', self.exportData);
-    events.on('exportValues', self.exportData);
-    events.on('importRules', self.importRules);
-    events.on('importValues', self.importValues);
+    events.on('showImportDialog', function (_, name) {
+      self.refs.importDialog.show(name || self.state.name);
+    });
+    events.on('showExportDialog', function (_, name, data) {
+      self.refs.exportDialog.show(name || self.state.name, data);
+    });
+    events.on('exportData', self.exportData);
     events.on('handleImportRules', function(_, data) {
       self.handleImportRules(data);
     });
@@ -1676,7 +1848,7 @@ var Index = React.createClass({
           util.showSystemError(xhr);
         } else if (data.ec === 0) {
           self.reloadRules(data);
-          message.success('Rules imported successfully.');
+          message.success('Rules imported successfully');
         } else {
           win.alert(data.em);
         }
@@ -1691,7 +1863,7 @@ var Index = React.createClass({
         }
         if (data.ec === 0) {
           self.reloadValues(data);
-          message.success('Values imported successfully.');
+          message.success('Values imported successfully');
         } else {
           win.alert(data.em);
         }
@@ -1729,7 +1901,7 @@ var Index = React.createClass({
               latestVersion: data.latestVersion
             },
             function () {
-              $(ReactDOM.findDOMNode(self.refs.showUpdateTipsDialog)).modal(
+              $(findDOMNode(self.refs.showUpdateTipsDialog)).modal(
                 'show'
               );
             }
@@ -1738,7 +1910,25 @@ var Index = React.createClass({
       });
     }, 10000);
 
-    dataCenter.getLogIdList = this.getLogIdListFromRules;
+    dataCenter.getLogIdOptions = function(id) {
+      var list = self.getLogIdListFromRules() || [];
+      var map = {};
+      list = list.map(function (id) {
+        map[id] = true;
+        return {
+          value: id,
+          text: id
+        };
+      });
+      list.unshift({
+        value: '',
+        text: 'All Logs'
+      });
+      return {
+        logIdList: list,
+        logId: !id || !map[id] ? '' : id
+      };
+    };
     dataCenter.importAnySessions = self.importAnySessions;
     dataCenter.on('plugins', function (data) {
       var pluginsOptions = self.createPluginsOptions(data.plugins);
@@ -1808,6 +1998,7 @@ var Index = React.createClass({
           url: location.href,
           pageId: dataCenter.getPageId(),
           compose: dataCenter.compose,
+          createComposeInterrupt: dataCenter.createComposeInterrupt,
           importSessions: self.importAnySessions,
           importHarSessions: self.importHarSessions,
           clearSessions: self.clear,
@@ -1826,6 +2017,50 @@ var Index = React.createClass({
     self.handleDataUrl(dataUrl || util.getDataUrl());
     dataCenter.handleDataUrl = self.handleDataUrl;
     dataUrl = null;
+
+    var INTERVAL = 6000;
+    var curNetworkSettings;
+    var curRulesSettings;
+    var curValuesSettings;
+    var curWhistleId;
+    var saveSettings = function () {
+      if (!dataCenter.whistleId) {
+        curNetworkSettings = curRulesSettings = curValuesSettings = null;
+        return setTimeout(saveSettings, INTERVAL);
+      }
+      if (curWhistleId !== dataCenter.whistleId) {
+        curNetworkSettings = curRulesSettings = curValuesSettings = null;
+        curWhistleId = dataCenter.whistleId;
+      }
+      var networkSettings = JSON.stringify(self.refs.networkSettings.getSettings());
+      var rulesSettings = JSON.stringify(self.getRulesSettings());
+      var valuesSettings = JSON.stringify(self.getValuesSettings());
+      var data;
+      if (curNetworkSettings !== networkSettings) {
+        data = { networkSettings: networkSettings };
+      }
+      if (curRulesSettings !== rulesSettings) {
+        data = data || {};
+        data.rulesSettings = rulesSettings;
+      }
+      if (curValuesSettings !== valuesSettings) {
+        data = data || {};
+        data.valuesSettings = valuesSettings;
+      }
+      if (!data) {
+        return setTimeout(saveSettings, INTERVAL);
+      }
+      data.type = 'settings';
+      dataCenter.saveToService(data, function (result) {
+        setTimeout(saveSettings, INTERVAL);
+        if (result && result.ec === 0) {
+          curValuesSettings = valuesSettings;
+          curRulesSettings = rulesSettings;
+          curNetworkSettings = networkSettings;
+        }
+      });
+    };
+    setTimeout(saveSettings, INTERVAL);
   },
   shouldComponentUpdate: function (_, nextSate) {
     var name = this.state.name;
@@ -1840,7 +2075,7 @@ var Index = React.createClass({
       return;
     }
     var self = this;
-    getRemoteData(url, function(err, data) {
+    dataCenter.getRemoteData(url, function(err, data) {
       if (!err) {
         self.importAnySessions(data);
       }
@@ -1848,6 +2083,11 @@ var Index = React.createClass({
   },
   importAnySessions: function (data) {
     if (data && !util.handleImportData(data)) {
+      var isArr = Array.isArray(data);
+      if (!isArr && !Array.isArray(data.log && data.log.entries)) {
+        isArr = true;
+        data = [data];
+      }
       if (Array.isArray(data)) {
         dataCenter.addNetworkList(data);
       } else {
@@ -1859,7 +2099,7 @@ var Index = React.createClass({
     dataCenter.donotShowAgain();
   },
   hideUpdateTipsDialog: function () {
-    $(ReactDOM.findDOMNode(this.refs.showUpdateTipsDialog)).modal('hide');
+    $(findDOMNode(this.refs.showUpdateTipsDialog)).modal('hide');
   },
   getAllRulesText: function () {
     var text = ' ' + this.getAllRulesValue();
@@ -2040,9 +2280,7 @@ var Index = React.createClass({
     function atBottom(force) {
       var body = baseDom.find('.ReactVirtualized__Grid__innerScrollContainer')[0];
       if (!body) {
-        if (force) {
-          events.trigger('toggleBackToBottomBtn', false);
-        }
+        force && events.trigger('toggleBackToBottomBtn', false);
         return true;
       }
       var height = con.offsetHeight + 5;
@@ -2090,7 +2328,7 @@ var Index = React.createClass({
       return this.autoRefresh();
     }
   },
-  showNetwork: function (e) {
+  showNetwork: function (e, cb) {
     var self = this;
     if (self.state.name == 'network') {
       e && !self.state.showLeftMenu && self.showNetworkOptions();
@@ -2108,24 +2346,12 @@ var Index = React.createClass({
           self._isAtBottom = false;
           self.autoRefresh && self.autoRefresh();
         }
+        if (typeof cb === 'function') {
+          cb();
+        }
       }
     );
     util.changePageName('network');
-  },
-  showAccount: function() {
-    var self = this;
-    if (self.state.name == 'account') {
-      return;
-    }
-    self.setState({
-      name: 'account',
-      hasAccount: true
-    });
-    util.changePageName('account');
-  },
-  signOut: function() {
-    this.state.showAccount = false;
-    this.showTab();
   },
   handleNetwork: function (item, e) {
     var modal = this.state.network;
@@ -2136,52 +2362,76 @@ var Index = React.createClass({
     } else if (item.id == 'removeUnselected') {
       modal.removeUnselectedItems();
     } else if (item.id == 'exportWhistleFile') {
-      this.exportSessions('whistle');
-    } else if (item.id == 'exportSazFile') {
-      this.exportSessions('Fiddler');
-    } else if (item.id == 'exportHarFile') {
-      this.exportSessions('har');
-    } else if (item.id == 'importSessions') {
-      this.importSessions(e);
+      this.exportData();
     } else if (item.id === 'toggleView') {
       this.toggleTreeView();
-    } else if (item.id === 'importLocal') {
+    } else if (item.id === 'importSessions') {
       this.importData();
-    } else if (item.id === 'importRemote') {
-      this.importData({shiftKey: true});
     }
     this.hideNetworkOptions();
   },
-  importData: function (e) {
-    switch (this.state.name) {
-    case 'network':
-      this.importSessions(e);
-      break;
-    case 'rules':
-      this.importRules(e);
-      break;
-    case 'values':
-      this.importValues(e);
-      break;
-    }
-    this.setState({
-      showImportOptions: false
-    });
+  importData: function () {
+    this.refs.importDialog.show(this.state.name);
   },
-  exportData: function (e, curItem) {
+  getRulesSettings: function() {
+    var state = this.state;
+    return {
+      type: 'setRulesSettings',
+      theme: state.rulesTheme || 'cobalt',
+      fontSize: state.rulesFontSize || '14px',
+      lineNumbers: !!state.showRulesLineNumbers,
+      autoLineWrapping: !!state.autoRulesLineWrapping,
+      allowMultipleChoice: !!state.allowMultipleChoice,
+      backRulesFirst: !!state.backRulesFirst
+    };
+  },
+  getValuesSettings: function() {
+    var state = this.state;
+    return {
+      type: 'setValuesSettings',
+      theme: state.valuesTheme || 'cobalt',
+      fontSize: state.rulesFontSize || '14px',
+      lineNumbers: !!state.showValuesLineNumbers,
+      autoLineWrapping: !!state.autoValuesLineWrapping,
+      foldGutter: !!state.foldGutter
+    };
+  },
+  importRulesSettings: function() {
+    this.refs.importDialog.show('rulesSettings');
+  },
+  exportRulesSettings: function() {
+    this.refs.exportDialog.show('rulesSettings', this.getRulesSettings());
+  },
+  importValuesSettings: function() {
+    this.refs.importDialog.show('valuesSettings');
+  },
+  exportValuesSettings: function() {
+    this.refs.exportDialog.show('valuesSettings', this.getValuesSettings());
+  },
+  getInputValue: function () {
+    return util.formatFilename(findDOMNode(this.refs.sessionsName).value.trim());
+  },
+  filterFilename: function (e) {
+    this.setState({ filename: util.formatFilename(e.target.value) });
+  },
+  exportData: function (e, curItem, filename) {
     switch (this.state.name) {
     case 'network':
       var modal = this.state.network;
       var hasSelected = Array.isArray(curItem) || modal.hasSelected();
       this.currentFoucsItem = curItem;
       if (hasSelected) {
-        $(ReactDOM.findDOMNode(this.refs.chooseFileType)).modal('show');
-        var self = this;
+        $(findDOMNode(this.refs.chooseFileType)).modal('show');
+        var input = findDOMNode(this.refs.sessionsName);
+        if (filename && typeof filename === 'string') {
+          input.value = filename;
+        }
         setTimeout(function () {
-          ReactDOM.findDOMNode(self.refs.sessionsName).focus();
+          input.focus();
+          input.select();
         }, 500);
       } else {
-        message.info('Please select the sessions first.');
+        message.info('Please select one or more sessions first');
       }
       break;
     case 'rules':
@@ -2192,132 +2442,26 @@ var Index = React.createClass({
       break;
     }
   },
-  importSessions: function (e, data) {
-    var self = this;
-    var shiftKey = (e && e.shiftKey) || (data && data.shiftKey);
-    if (shiftKey) {
-      self.refs.importRemoteSessions.show();
-      setTimeout(function () {
-        var input = ReactDOM.findDOMNode(self.refs.sessionsRemoteUrl);
-        input.focus();
-        input.select();
-      }, 500);
-      return;
-    }
-    ReactDOM.findDOMNode(self.refs.importSessions).click();
+  showService: function () {
+    util.showService(this.state.name);
   },
-  importSessionsFromUrl: function (url, byInput) {
-    if (!url) {
-      return;
-    }
+  importSessionsFromUrl: function (url) {
     var self = this;
-    self.setState({ pendingSessions: true });
-    getRemoteData(url, function (err, data) {
-      self.setState({ pendingSessions: false });
+    url && dataCenter.getRemoteData(url, function (err, data) {
       if (!err) {
-        byInput && self.refs.importRemoteSessions.hide();
         self.importAnySessions(data);
       }
     });
   },
-  importRemoteSessions: function (e) {
-    if (e && e.type !== 'click' && e.keyCode !== 13) {
-      return;
-    }
-    var self = this;
-    var input = ReactDOM.findDOMNode(self.refs.sessionsRemoteUrl);
-    var url = checkUrl(input.value);
-    self.importSessionsFromUrl(url, true);
-  },
-  importRules: function (e, data) {
-    var self = this;
-    var shiftKey = (e && e.shiftKey) || (data && data.shiftKey);
-    if (shiftKey) {
-      self.refs.importRemoteRules.show();
-      setTimeout(function () {
-        var input = ReactDOM.findDOMNode(self.refs.rulesRemoteUrl);
-        input.focus();
-        input.select();
-      }, 500);
-      return;
-    }
-    ReactDOM.findDOMNode(self.refs.importRules).click();
-  },
-  importRemoteRules: function (e) {
-    if (e && e.type !== 'click' && e.keyCode !== 13) {
-      return;
-    }
-    var self = this;
-    var input = ReactDOM.findDOMNode(self.refs.rulesRemoteUrl);
-    var url = checkUrl(input.value);
-    if (!url) {
-      return;
-    }
-    self.setState({ pendingRules: true });
-    getRemoteData(url, function (err, data) {
-      self.setState({ pendingRules: false });
-      if (err) {
-        return;
-      }
-      self.refs.importRemoteRules.hide();
-      if (data && !util.handleImportData(data)) {
-        self.handleImportRules(data);
-      }
-    });
-  },
-  importValues: function (e, data) {
-    var self = this;
-    var shiftKey = (e && e.shiftKey) || (data && data.shiftKey);
-    if (shiftKey) {
-      self.refs.importRemoteValues.show();
-      setTimeout(function () {
-        var input = ReactDOM.findDOMNode(self.refs.valuesRemoteUrl);
-        input.focus();
-        input.select();
-      }, 500);
-      return;
-    }
-    ReactDOM.findDOMNode(self.refs.importValues).click();
-  },
-  importRemoteValues: function (e) {
-    if (e && e.type !== 'click' && e.keyCode !== 13) {
-      return;
-    }
-    var self = this;
-    var input = ReactDOM.findDOMNode(self.refs.valuesRemoteUrl);
-    var url = checkUrl(input.value);
-    if (!url) {
-      return;
-    }
-    self.setState({ pendingValues: true });
-    getRemoteData(url, function (err, data) {
-      self.setState({ pendingValues: false });
-      if (err) {
-        return;
-      }
-      self.refs.importRemoteValues.hide();
-      if (data && !util.handleImportData(data)) {
-        self.handleImportValues(data);
-      }
-    });
-  },
   handleImportRules: function(data) {
-    this.showKVDialog(data);
+    if (data && !util.handleImportData(data)) {
+      this.showKVDialog(data);
+    }
   },
   handleImportValues: function(data) {
-    this.showKVDialog(data, true);
-  },
-  uploadRulesForm: function () {
-    var form = new FormData(
-      ReactDOM.findDOMNode(this.refs.importRulesForm)
-    );
-    handleImportData(form.get('rules'), this.handleImportRules);
-  },
-  uploadValuesForm: function () {
-    var form = new FormData(
-      ReactDOM.findDOMNode(this.refs.importValuesForm)
-    );
-    handleImportData(form.get('values'), this.handleImportValues);
+    if (data && !util.handleImportData(data)) {
+      this.showKVDialog(data, true);
+    }
   },
   showAndActiveRules: function (item, e) {
     if (this.state.name === 'rules') {
@@ -2325,11 +2469,8 @@ var Index = React.createClass({
       case 'exportRules':
         this.refs.selectRulesDialog.show();
         break;
-      case 'importLocalRules':
-        this.importRules();
-        break;
-      case 'importRemoteRules':
-        this.importRules({ shiftKey: true });
+      case 'importRules':
+        this.importData();
         break;
       }
     } else {
@@ -2358,11 +2499,8 @@ var Index = React.createClass({
       case 'exportValues':
         self.refs.selectValuesDialog.show();
         break;
-      case 'importLocalValues':
-        this.importValues();
-        break;
-      case 'importRemoteValues':
-        this.importValues({ shiftKey: true });
+      case 'importValues':
+        this.importData();
         break;
       }
     } else {
@@ -2413,20 +2551,8 @@ var Index = React.createClass({
   },
   hideNetworkOptions: function () {
     this.setState({
-      showImportOptions: false,
-      showRemoveOptions: false,
       showAbortOptions: false,
       showNetworkOptions: false
-    });
-  },
-  showImportOptions: function () {
-    this.setState({
-      showImportOptions: true
-    });
-  },
-  showRemoveOptions: function () {
-    this.setState({
-      showRemoveOptions: true
     });
   },
   showAbortOptions: function () {
@@ -2445,16 +2571,6 @@ var Index = React.createClass({
   hideCreateOptions: function () {
     this.setState({
       showCreateOptions: false
-    });
-  },
-  hideImportOptions: function () {
-    this.setState({
-      showImportOptions: false
-    });
-  },
-  hideRemoveOptions: function () {
-    this.setState({
-      showRemoveOptions: false
     });
   },
   hideAbortOptions: function () {
@@ -2558,11 +2674,7 @@ var Index = React.createClass({
     var plugin = name && this.state.plugins[name + ':'];
     if (plugin) {
       if (tabs.length >= MAX_PLUGINS_TABS) {
-        win.alert(
-          'At most ' +
-            MAX_PLUGINS_TABS +
-            ' tabs can be opened at the same time.'
-        );
+        win.alert('Maximum ' + MAX_PLUGINS_TABS + ' tabs allowed');
         return this.showPlugins();
       }
       active = name;
@@ -2627,6 +2739,7 @@ var Index = React.createClass({
       return;
     }
     $(e.target).closest('div').addClass('w-menu-wrapper-show');
+    util.shakeElem($(findDOMNode(this.refs.weinreMenuItem)));
   },
   showWeinreOptions: function (e) {
     var self = this;
@@ -2672,7 +2785,7 @@ var Index = React.createClass({
     this.setState({ showEditValues: false });
   },
   showCreateRules: function (_, group, focusItem) {
-    var createRulesInput = ReactDOM.findDOMNode(this.refs.createRulesInput);
+    var createRulesInput = findDOMNode(this.refs.createRulesInput);
     this._curFocusRulesGroup = group;
     this._curFocusRulesItem = focusItem;
     this.setState(
@@ -2685,7 +2798,7 @@ var Index = React.createClass({
     );
   },
   showCreateValues: function (_, group, focusItem) {
-    var createValuesInput = ReactDOM.findDOMNode(this.refs.createValuesInput);
+    var createValuesInput = findDOMNode(this.refs.createValuesInput);
     this._curFocusValuesGroup = group;
     this._curFocusValuesItem = focusItem;
     this.setState(
@@ -2698,7 +2811,7 @@ var Index = React.createClass({
     );
   },
   showHttpsSettingsDialog: function () {
-    $(ReactDOM.findDOMNode(this.refs.rootCADialog)).modal('show');
+    this.refs.httpsSettings.show();
   },
   interceptHttpsConnects: function (e) {
     var self = this;
@@ -2722,7 +2835,7 @@ var Index = React.createClass({
     var self = this;
     if (!dataCenter.supportH2) {
       win.confirm(
-        'The current version of Node.js cannot support HTTP/2.\nPlease upgrade to the latest LTS version.',
+        'HTTP/2 requires Node.js LTS version v16+. Please upgrade',
         function (sure) {
           sure && window.open('https://nodejs.org/');
           self.setState({});
@@ -2748,10 +2861,10 @@ var Index = React.createClass({
       return;
     }
     var self = this;
-    var target = ReactDOM.findDOMNode(self.refs.createRulesInput);
+    var target = findDOMNode(self.refs.createRulesInput);
     var name = target.value.trim();
     if (!name) {
-      message.error('The name cannot be empty.');
+      message.error('The name is required');
       return;
     }
     var modal = self.state.rules;
@@ -2762,7 +2875,7 @@ var Index = React.createClass({
       name = '\r' + name;
     }
     if (modal.exists(name)) {
-      message.error('The name \'' + name + '\' already exists.');
+      message.error('The name \'' + name + '\' is already in use');
       return;
     }
     var addToTop = type === 'top' ? 1 : '';
@@ -2814,20 +2927,20 @@ var Index = React.createClass({
       return;
     }
     var self = this;
-    var target = ReactDOM.findDOMNode(self.refs.createValuesInput);
+    var target = findDOMNode(self.refs.createValuesInput);
     var name = target.value.trim();
     if (!name) {
-      message.error('The name cannot be empty.');
+      message.error('The name is required');
       return;
     }
 
     if (/\s/.test(name)) {
-      message.error('The name cannot contain spaces.');
+      message.error('Spaces are not allowed in the name');
       return;
     }
 
     if (/#/.test(name)) {
-      message.error('The name cannot contain #.');
+      message.error('Special character \'#\' is not allowed in the name');
       return;
     }
 
@@ -2839,7 +2952,7 @@ var Index = React.createClass({
       name = '\r' + name;
     }
     if (modal.exists(name)) {
-      message.error('The name \'' + name + '\' already exists.');
+      message.error('The name \'' + name + '\' is already in use');
       return;
     }
     var groupItem = self._curFocusValuesGroup;
@@ -2887,7 +3000,7 @@ var Index = React.createClass({
     if (!activeItem || activeItem.isDefault) {
       return;
     }
-    var editRulesInput = ReactDOM.findDOMNode(this.refs.editRulesInput);
+    var editRulesInput = findDOMNode(this.refs.editRulesInput);
     editRulesInput.value = activeItem.name;
     this.setState(
       {
@@ -2911,7 +3024,7 @@ var Index = React.createClass({
       return;
     }
 
-    var editValuesInput = ReactDOM.findDOMNode(this.refs.editValuesInput);
+    var editValuesInput = findDOMNode(this.refs.editValuesInput);
     editValuesInput.value = activeItem.name;
     this.setState(
       {
@@ -2934,16 +3047,16 @@ var Index = React.createClass({
     if (!activeItem) {
       return;
     }
-    var target = ReactDOM.findDOMNode(self.refs.editRulesInput);
+    var target = findDOMNode(self.refs.editRulesInput);
     var isGroup = util.isGroup(activeItem.name);
     var name = (isGroup ? '\r' : '') + target.value.trim();
     if (!name) {
-      message.error('The name cannot be empty.');
+      message.error('The name is required');
       return;
     }
 
     if (modal.exists(name)) {
-      message.error('The name \'' + name + '\' already exists.');
+      message.error('The name \'' + name + '\' is already in use');
       return;
     }
     var curName = activeItem.name;
@@ -2974,16 +3087,16 @@ var Index = React.createClass({
     if (!activeItem) {
       return;
     }
-    var target = ReactDOM.findDOMNode(self.refs.editValuesInput);
+    var target = findDOMNode(self.refs.editValuesInput);
     var isGroup = util.isGroup(activeItem.name);
     var name = (isGroup ? '\r' : '') + target.value.trim();
     if (!name) {
-      message.error('The name cannot be empty.');
+      message.error('The name is required');
       return;
     }
 
     if (modal.exists(name)) {
-      message.error('The name \'' + name + '\' already exists.');
+      message.error('The name \'' + name + '\' is already in use');
       return;
     }
     var curName = activeItem.name;
@@ -2998,7 +3111,6 @@ var Index = React.createClass({
           events.trigger('valuesNameChanged', [curName, name]);
           self.setState({ activeValues: modal.getActive() });
           self.triggerValuesChange('rename');
-          checkJson(activeItem);
         } else {
           util.showSystemError(xhr);
         }
@@ -3022,6 +3134,13 @@ var Index = React.createClass({
       showWeinreOptions: false
     });
   },
+  openLog: function(id) {
+    if (!this.hideNetwork) {
+      this.showNetwork(null, function() {
+        events.trigger('showLog', id);
+      });
+    }
+  },
   onClickRulesOption: function (item) {
     item.selected ? this.unselectRules(item) : this.selectRules(item);
   },
@@ -3043,7 +3162,7 @@ var Index = React.createClass({
           }
           if (self.state.disabledAllRules) {
             win.confirm(
-              'Rules has been turn off, do you want to turn on it?',
+              'Rules are currently disabled. Enable them now?',
               function (sure) {
                 if (sure) {
                   dataCenter.rules.disableAllRules(
@@ -3079,6 +3198,7 @@ var Index = React.createClass({
       function (data, xhr) {
         if (data && data.ec === 0) {
           self.reselectRules(data);
+          self.triggerRulesChange('unselect');
           self.setState({});
         } else {
           util.showSystemError(xhr);
@@ -3109,7 +3229,6 @@ var Index = React.createClass({
       if (data && data.ec === 0) {
         self.setSelected(self.state.values, item.name);
         self.triggerValuesChange('save');
-        checkJson(item);
       } else {
         util.showSystemError(xhr);
       }
@@ -3150,7 +3269,7 @@ var Index = React.createClass({
     this.enableRecord();
     var replayReq = function (item, repeatCount) {
       var req = item.req;
-      dataCenter.compose2({
+      dataCenter.compose({
         repeatCount: repeatCount,
         useH2: item.useH2 ? 1 : '',
         url: item.url,
@@ -3204,8 +3323,7 @@ var Index = React.createClass({
   clear: function () {
     var modal = this.state.network;
     this.setState({
-      network: modal.clear(),
-      showRemoveOptions: false
+      network: modal.clear()
     });
   },
   removeRulesBatch: function(list) {
@@ -3281,18 +3399,10 @@ var Index = React.createClass({
     modal.setActive(name);
   },
   showRulesSettings: function () {
-    var self = this;
-    $(ReactDOM.findDOMNode(self.refs.rulesSettingsDialog)).modal('show');
-    dataCenter.rules.accountRules(function (data, xhr) {
-      if (data && data.ec === 0) {
-        self.setState({ accountRules: data.rules });
-      } else {
-        util.showSystemError(xhr);
-      }
-    });
+    $(findDOMNode(this.refs.rulesSettingsDialog)).modal('show');
   },
   showValuesSettings: function () {
-    $(ReactDOM.findDOMNode(this.refs.valuesSettingsDialog)).modal('show');
+    $(findDOMNode(this.refs.valuesSettingsDialog)).modal('show');
   },
   toggleLeftMenu: function () {
     var showLeftMenu = !this.state.showLeftMenu;
@@ -3347,7 +3457,7 @@ var Index = React.createClass({
       self.saveRulesOrValues();
     }
   },
-  showSettings: function (e) {
+  showSettings: function () {
     var pageName = this.state.name;
     if (pageName === 'rules') {
       this.showRulesSettings();
@@ -3357,7 +3467,9 @@ var Index = React.createClass({
       this.showValuesSettings();
       return;
     }
-    this.refs.networkSettings.showDialog();
+    if (pageName === 'network') {
+      this.refs.networkSettings.showDialog();
+    }
   },
   activeRules: function (item) {
     storage.set('activeRules', item.name);
@@ -3431,24 +3543,28 @@ var Index = React.createClass({
   confirmDisableAllRules: function (e) {
     var self = this;
     var state = self.state;
-    if (state.disabledAllRules) {
+    var dialog;
+    if (state.disabledAllRules || (!e && (dialog = $('.w-win-dialog[data-confirm-flag=rules]')).is(':visible'))) {
       self.disableAllRules();
+      dialog && dialog.modal('hide');
     } else {
-      win.confirm('Are you sure to disable all rules', function (sure) {
+      win.confirm('Do you confirm disabling all rules?', function (sure) {
         sure && self.disableAllRules();
-      });
+      }, false, 'rules');
     }
     e && e.preventDefault();
   },
   confirmDisableAllPlugins: function (e) {
     var self = this;
     var state = self.state;
-    if (state.disabledAllPlugins) {
+    var dialog;
+    if (state.disabledAllPlugins || (!e && (dialog = $('.w-win-dialog[data-confirm-flag=plugins]')).is(':visible'))) {
       self.disableAllPlugins();
+      dialog && dialog.modal('hide');
     } else {
-      win.confirm('Are you sure to disable all plugins', function (sure) {
+      win.confirm('Do you confirm disabling all plugins?', function (sure) {
         sure && self.disableAllPlugins();
-      });
+      }, false, 'plugins');
     }
     e && e.preventDefault();
   },
@@ -3496,7 +3612,7 @@ var Index = React.createClass({
   setPluginState: function(name, disabled) {
     var self = this;
     if (self.state.ndp) {
-      return message.warn('Not allowed disable plugins.');
+      return message.info('Plugin disabling is restricted');
     }
     dataCenter.plugins.disablePlugin(
       {
@@ -3537,8 +3653,10 @@ var Index = React.createClass({
     this.hideAbortOptions();
   },
   allowMultipleChoice: function (e) {
+    this.setMultipleCohice(e.target.checked);
+  },
+  setMultipleCohice: function (checked) {
     var self = this;
-    var checked = e.target.checked;
     dataCenter.rules.allowMultipleChoice(
       { allowMultipleChoice: checked ? 1 : 0 },
       function (data, xhr) {
@@ -3553,8 +3671,10 @@ var Index = React.createClass({
     );
   },
   enableBackRulesFirst: function (e) {
+    this.setBackRulesFirst(e.target.checked);
+  },
+  setBackRulesFirst: function (checked) {
     var self = this;
-    var checked = e.target.checked;
     dataCenter.rules.enableBackRulesFirst(
       { backRulesFirst: checked ? 1 : 0 },
       function (data, xhr) {
@@ -3579,12 +3699,6 @@ var Index = React.createClass({
       exportFileType: value
     });
   },
-  uploadSessions: function () {
-    this.uploadSessionsForm(
-      new FormData(ReactDOM.findDOMNode(this.refs.importSessionsForm))
-    );
-    ReactDOM.findDOMNode(this.refs.importSessions).value = '';
-  },
   importHarSessions: function (result) {
     if (!result || typeof result !== 'object') {
       return;
@@ -3592,128 +3706,24 @@ var Index = React.createClass({
     var entries = result.log.entries;
     var sessions = [];
     entries.forEach(function (entry) {
-      if (!entry) {
-        return;
-      }
-      var times = entry.whistleTimes || '';
-      var startTime = new Date(
-        times.startTime || entry.startedDateTime
-      ).getTime();
-      if (isNaN(startTime)) {
-        return;
-      }
-
-      var rawReq = entry.request || {};
-      var rawRes = entry.response || {};
-      var reqHeaders = util.parseHeadersFromHar(rawReq.headers);
-      var resHeaders = util.parseHeadersFromHar(rawRes.headers);
-      var clientIp = entry.clientIPAddress || '127.0.0.1';
-      var serverIp = entry.serverIPAddress || '';
-      var useH2 = H2_RE.test(rawReq.httpVersion || rawRes.httpVersion);
-      var version = useH2 ? '2.0' : '1.1';
-      var postData = rawReq.postData || '';
-      var req = {
-        method: rawReq.method,
-        ip: clientIp,
-        port: rawReq.port,
-        httpVersion: version,
-        unzipSize: postData.size,
-        size: rawReq.bodySize > 0 ? rawReq.bodySize : 0,
-        headers: reqHeaders.headers,
-        rawHeaderNames: reqHeaders.rawHeaderNames,
-        body: ''
-      };
-      var reqText = postData.base64 || postData.text;
-      if (reqText) {
-        if (postData.base64) {
-          req.base64 = reqText;
-        } else {
-          req.body = reqText;
-        }
-      }
-      var content = rawRes.content;
-      var res = {
-        httpVersion: version,
-        statusCode: rawRes.statusCode || rawRes.status,
-        statusMessage: rawRes.statusText,
-        unzipSize: content.size,
-        size: rawRes.bodySize > 0 ? rawRes.bodySize : 0,
-        headers: resHeaders.headers,
-        rawHeaderNames: resHeaders.rawHeaderNames,
-        ip: serverIp,
-        port: rawRes.port,
-        body: ''
-      };
-      var resCtn = rawRes.content;
-      var text = resCtn && resCtn.text;
-      if (text) {
-        if (resCtn.base64) {
-          res.base64 = resCtn.base64;
-        } else if (
-          util.getContentType(resCtn.mimeType) === 'IMG' ||
-          (text.length % 4 === 0 && /^[a-z\d+/]+={0,2}$/i.test(text))
-        ) {
-          res.base64 = text;
-        } else {
-          res.body = text;
-        }
-      }
-      var session = {
-        useH2: useH2,
-        startTime: startTime,
-        frames: entry.frames,
-        url: rawReq.url,
-        realUrl: entry.whistleRealUrl,
-        req: req,
-        res: res,
-        customData: entry.whistleCustomData,
-        fwdHost: entry.whistleFwdHost,
-        sniPlugin: entry.whistleSniPlugin,
-        rules: entry.whistleRules || {},
-        captureError: entry.whistleCaptureError,
-        isHttps: entry.whistleIsHttps,
-        reqError: entry.whistleReqError,
-        resError: entry.whistleResError,
-        version: entry.whistleVersion,
-        nodeVersion: entry.whistleNodeVersion
-      };
-      if (times && times.startTime) {
-        session.dnsTime = times.dnsTime;
-        session.requestTime = times.requestTime;
-        session.responseTime = times.responseTime;
-        session.endTime = times.endTime;
-      } else {
-        var timings = entry.timings || {};
-        var endTime = Math.round(startTime + util.getTimeFromHar(entry.time));
-        startTime = Math.floor(startTime + util.getTimeFromHar(timings.dns));
-        session.dnsTime = startTime;
-        startTime = Math.floor(
-          startTime +
-            util.getTimeFromHar(timings.connect) +
-            util.getTimeFromHar(timings.ssl) +
-            util.getTimeFromHar(timings.send) +
-            util.getTimeFromHar(timings.blocked) +
-            util.getTimeFromHar(timings.wait)
-        );
-        session.requestTime = startTime;
-        startTime = Math.floor(
-          startTime + util.getTimeFromHar(timings.receive)
-        );
-        session.responseTime = startTime;
-        session.endTime = Math.max(startTime, endTime);
-      }
-      sessions.push(session);
+      entry = util.harToSession(entry);
+      entry && sessions.push(entry);
     });
     dataCenter.addNetworkList(sessions);
   },
   uploadSessionsForm: function (data) {
+    if (!(data instanceof FormData)) {
+      var form = new FormData();
+      form.append('importSessions', data);
+      data = form;
+    }
     var file = data.get('importSessions');
     if (!file || !/\.(txt|json|saz|har)$/i.test(file.name)) {
-      return win.alert('Only supports .txt, .json, .saz or .har file.');
+      return win.alert('Supported file formats: .txt, .json, .saz, .har');
     }
 
     if (file.size > MAX_FILE_SIZE) {
-      return win.alert('The file size cannot exceed 64m.');
+      return win.alert('Maximum file size: 64MB');
     }
     var isText = /\.(?:txt|json)$/i.test(file.name);
     if (isText || /\.har$/i.test(file.name)) {
@@ -3727,7 +3737,7 @@ var Index = React.createClass({
             self.importHarSessions(result);
           }
         } catch (e) {
-          win.alert('Format error.');
+          win.alert('Invalid JSON format');
         }
       });
       return;
@@ -3738,7 +3748,7 @@ var Index = React.createClass({
     var modal = this.state.network;
     var sessions = this.currentFoucsItem;
     this.currentFoucsItem = null;
-    if (!sessions || !$(ReactDOM.findDOMNode(this.refs.chooseFileType)).is(':visible')) {
+    if (!sessions || !$(findDOMNode(this.refs.chooseFileType)).is(':visible')) {
       sessions = modal.getSelectedList();
     }
     return sessions;
@@ -3748,9 +3758,9 @@ var Index = React.createClass({
     if (!sessions || !sessions.length) {
       return;
     }
-    var form = ReactDOM.findDOMNode(this.refs.exportSessionsForm);
-    ReactDOM.findDOMNode(this.refs.exportFilename).value = name || '';
-    ReactDOM.findDOMNode(this.refs.exportFileType).value = type;
+    var form = findDOMNode(this.refs.exportSessionsForm);
+    findDOMNode(this.refs.exportFilename).value = name || '';
+    findDOMNode(this.refs.exportFileType).value = type;
     if (type === 'har') {
       sessions = {
         log: {
@@ -3770,22 +3780,28 @@ var Index = React.createClass({
         }
       };
     }
-    ReactDOM.findDOMNode(this.refs.sessions).value = JSON.stringify(
+    findDOMNode(this.refs.sessions).value = JSON.stringify(
       sessions,
       null,
       '  '
     );
     form.submit();
   },
+  hideChooseFileTypeDialog: function(failed) {
+    if (!failed) {
+      $(findDOMNode(this.refs.chooseFileType)).modal('hide');
+      findDOMNode(this.refs.sessionsName).value = '';
+    }
+  },
   exportBySave: function (e) {
     if (e && e.type !== 'click' && e.keyCode !== 13) {
       return;
     }
-    var input = ReactDOM.findDOMNode(this.refs.sessionsName);
+    var input = findDOMNode(this.refs.sessionsName);
     var name = input.value.trim();
     input.value = '';
     this.exportSessions(this.state.exportFileType, name);
-    $(ReactDOM.findDOMNode(this.refs.chooseFileType)).modal('hide');
+    this.hideChooseFileTypeDialog();
   },
   replayRepeat: function (e) {
     if (e && e.type !== 'click' && e.keyCode !== 13) {
@@ -3796,27 +3812,13 @@ var Index = React.createClass({
     events.trigger('focusNetworkList');
   },
   showAboutDialog: function (e) {
-    if ($(e.target).closest('.w-menu-enable').length) {
+    if (this.state.hasNewVersion) {
       this.refs.aboutDialog.showAboutInfo();
+      e.preventDefault();
     }
-  },
-  showCustomCertsInfo: function () {
-    var self = this;
-    if (self.loadingCerts) {
-      return;
-    }
-    self.loadingCerts = true;
-    dataCenter.certs.all(function (data, xhr) {
-      self.loadingCerts = false;
-      if (!data) {
-        util.showSystemError(xhr);
-        return;
-      }
-      self.refs.certsInfoDialog.show(data.certs, data.dir);
-    });
   },
   onTopContextMenu: function(e) {
-    if (this.getTabName() !== 'network') {
+    if (this.getTabName() !== 'network' || $(e.target).closest('.w-menu-item').length) {
       return;
     }
     e.preventDefault();
@@ -3915,11 +3917,6 @@ var Index = React.createClass({
       self.setState({ forceShowLeftMenu: true });
     }, 200);
   },
-  selectCAType: function(e) {
-    var caType = getCAType(e.target.value);
-    this.setState({ caType: caType });
-    storage.set('caType', caType);
-  },
   forceHideLeftMenu: function () {
     var self = this;
     clearTimeout(self.hideTimer);
@@ -3961,19 +3958,16 @@ var Index = React.createClass({
       return;
     }
     var base64 = util.getString(data.base64);
-    ReactDOM.findDOMNode(this.refs.filename).value = util.getString(data.name);
-    ReactDOM.findDOMNode(this.refs.dataType).value = base64 ? 'rawBase64' : '';
-    ReactDOM.findDOMNode(this.refs.content).value = base64 || util.getString(data.value|| data.content);
-    ReactDOM.findDOMNode(this.refs.downloadForm).submit();
+    findDOMNode(this.refs.filename).value = util.getString(data.name);
+    findDOMNode(this.refs.dataType).value = base64 ? 'rawBase64' : '';
+    findDOMNode(this.refs.content).value = base64 || util.getString(data.value|| data.content);
+    findDOMNode(this.refs.downloadForm).submit();
   },
   getTabName: function () {
     var state = this.state;
     var rulesMode = state.rulesMode;
     var pluginsMode = state.pluginsMode;
     var name = state.name;
-    if (state.showAccount && name === 'account') {
-      return name;
-    }
     if (state.networkMode) {
       name = 'network';
     } else if (state.rulesOnlyMode) {
@@ -3990,13 +3984,18 @@ var Index = React.createClass({
   isHideRules: function() {
     return this.state.networkMode || this.state.pluginsMode;
   },
+  onClickHelpMenu: function(option, e) {
+    if (option.name === 'Update' && dataCenter.showLatestClientVersion()) {
+      e.preventDefault();
+    }
+  },
   render: function () {
     var state = this.state;
     var networkMode = state.networkMode;
     var rulesMode = state.rulesMode;
     var rulesOnlyMode = state.rulesOnlyMode;
     var pluginsMode = state.pluginsMode;
-    var multiEnv = state.multiEnv;
+    var multiEnv = dataCenter.isMultiEnv();
     var name = this.getTabName();
     var isAccount = name == 'account';
     var isNetwork = name == 'network';
@@ -4004,9 +4003,8 @@ var Index = React.createClass({
     var isValues = name == 'values';
     var isPlugins = name == 'plugins';
     var isEditor = isRules || isValues;
-    var editMenuStyle = isEditor ? null : HIDE_STYLE;
-    var importMenuStyle = isPlugins || isAccount ? HIDE_STYLE : null;
-    var accountMenuStyle = isAccount ? null : HIDE_STYLE;
+    var editMenuStyle = getHideStyle(!isEditor);
+    var importMenuStyle = getHideStyle(isPlugins || isAccount);
     var disabledEditBtn = true;
     var disabledDeleteBtn = true;
     var rulesTheme = state.rulesTheme || 'cobalt';
@@ -4031,7 +4029,7 @@ var Index = React.createClass({
     var networkType = (isTreeView ? 'tree-conifer' : 'globe') + (state.record ? ' w-disabled' : '');
     if (rulesOptions[0].name === DEFAULT) {
       rulesOptions.forEach(function (item, i) {
-        item.icon = !i || !state.multiEnv ? 'checkbox' : 'edit';
+        item.icon = !i || !multiEnv ? 'checkbox' : 'edit';
         if (!item.selected) {
           uncheckedRules[item.name] = 1;
         }
@@ -4071,12 +4069,6 @@ var Index = React.createClass({
           option.disabled = !hasUnselected;
         }
       });
-      REMOVE_OPTIONS.forEach(function (option) {
-        option.disabled = false;
-        if (option.id === 'removeUnselected') {
-          option.disabled = !hasUnselected;
-        }
-      });
     } else {
       networkOptions.forEach(function (option) {
         if (OPTIONS_WITH_SELECTED.indexOf(option.id) !== -1) {
@@ -4086,27 +4078,14 @@ var Index = React.createClass({
         }
       });
       networkOptions[0].disabled = !hasUnselected;
-      REMOVE_OPTIONS.forEach(function (option) {
-        if (OPTIONS_WITH_SELECTED.indexOf(option.id) !== -1) {
-          option.disabled = true;
-        } else if (option.id === 'removeUnselected') {
-          option.disabled = !hasUnselected;
-        }
-      });
     }
-    var pendingSessions = state.pendingSessions;
-    var pendingRules = state.pendingRules;
-    var pendingValues = state.pendingValues;
-    var accountRules = state.accountRules;
-    var hasAccount = state.hasAccount;
     var mustHideLeftMenu = hideLeftMenu && !state.forceShowLeftMenu;
     var pluginsOnlyMode = pluginsMode && rulesMode;
-    var showAccount = state.showAccount;
-    var showLeftMenu = ((networkMode && !showAccount)  || state.showLeftMenu) && (!pluginsOnlyMode || showAccount);
+    var showLeftMenu = (networkMode || state.showLeftMenu) && !pluginsOnlyMode;
     var disabledAllPlugins = state.disabledAllPlugins;
     var disabledAllRules = state.disabledAllRules;
     var forceShowLeftMenu, forceHideLeftMenu;
-    var pluginsStyle = rulesOnlyMode || (pluginsOnlyMode && !showAccount) || networkMode ? HIDE_STYLE : null;
+    var pluginsStyle = getHideStyle(rulesOnlyMode || pluginsOnlyMode || networkMode);
     if (showLeftMenu && hideLeftMenu) {
       forceShowLeftMenu = this.forceShowLeftMenu;
       forceHideLeftMenu = this.forceHideLeftMenu;
@@ -4116,7 +4095,7 @@ var Index = React.createClass({
     LEFT_BAR_MENUS[4].hide = rulesOnlyMode;
 
     var caType = state.caType || 'crt';
-    var qrCode = 'img/qrcode-' + caType + '.png';
+    var caHash = state.caHash;
     var caUrl = 'cgi-bin/rootca';
     var caShortUrl = 'http://rootca.pro/';
 
@@ -4125,43 +4104,40 @@ var Index = React.createClass({
       caShortUrl += caType;
     }
     var hideEditor = this.isHideRules();
-    var hideEditorStyle = hideEditor ? HIDE_STYLE : null;
+    var hideEditorStyle = getHideStyle(hideEditor);
     var hideStyle = hideMenus ? ' hide' : '';
     dataCenter.hideMockMenu = hideEditor;
+    this.hideNetwork = rulesMode;
+    this.hideRules = this.hideValues = hideEditor;
+    this.hidePlugins = pluginsStyle;
 
     return (
       <div
         className={
-          'main orient-vertical-box' + (showLeftMenu ? ' w-show-left-menu' : '')
-          + (showAccount ? ' w-show-account' : '')
-          + (hasAccount ? ' w-has-account' : '')
+          'main v-box' + (showLeftMenu ? ' w-show-left-menu' : '')
           + (isEditor && !rulesOnlyMode ? ' w-show-editor' : '') + (isRules ? ' w-show-rules' : '')
           + (rulesOnlyMode || rulesMode ? ' w-show-rules-mode' : '')
         }
       >
-        <div className={'w-menu w-' + name + '-menu-list' + hideStyle} onContextMenu={this.onTopContextMenu}>
+        <div className={'w-menu w-' + name + '-menu-list' + hideStyle + (showLeftMenu ? '' : ' w-top')} onContextMenu={this.onTopContextMenu}>
           <a
             onClick={this.toggleLeftMenu}
             draggable="false"
-            className="w-show-left-menu-btn"
+            className="w-switch-layout"
             onMouseEnter={forceShowLeftMenu}
             onMouseLeave={forceHideLeftMenu}
-            style={!showAccount && (networkMode || pluginsOnlyMode) ? HIDE_STYLE : null}
-            title={
-              'Dock to ' +
-              (showLeftMenu ? 'top' : 'left') +
-              ' (Ctrl[Command] + M)'
-            }
+            style={getHideStyle(networkMode || pluginsOnlyMode)}
+            title="Ctrl[Command] + M"
           >
-            <span
-              className={
-                'glyphicon glyphicon-chevron-' +
+            <Icon
+              name={
+                'chevron-' +
                 (showLeftMenu ? (mustHideLeftMenu ? 'down' : 'up') : 'left')
               }
-            ></span>
+            />
           </a>
           <div
-            style={{ display: rulesMode ? 'none' : undefined }}
+            style={getHideStyle(rulesMode)}
             onMouseEnter={this.showNetworkOptions}
             onMouseLeave={this.hideNetworkOptions}
             className={
@@ -4176,12 +4152,12 @@ var Index = React.createClass({
                 'w-network-menu' + (isNetwork ? ' w-menu-selected' : '')
               }
               title={
-                'Double click to show' +
+                'Double-click to open' +
                 (isTreeView ? ' List View' : ' Tree View')
               }
               draggable="false"
             >
-              <span className={'glyphicon glyphicon-' + networkType}></span>
+              <Icon name={networkType} />
               Network
             </a>
             <MenuItem
@@ -4208,12 +4184,7 @@ var Index = React.createClass({
               }
               draggable="false"
             >
-              <span
-                className={
-                  'glyphicon glyphicon-list' +
-                  (disabledAllRules ? ' w-disabled' : '')
-                }
-              ></span>
+              <Icon name="list" className={disabledAllRules ? 'w-disabled' : ''} />
               Rules
             </a>
             <MenuItem
@@ -4245,7 +4216,7 @@ var Index = React.createClass({
               }
               draggable="false"
             >
-              <span className="glyphicon glyphicon-folder-close"></span>Values
+              <Icon name="folder-close" />Values
             </a>
             <MenuItem
               ref="valuesMenuItem"
@@ -4273,12 +4244,7 @@ var Index = React.createClass({
               }
               draggable="false"
             >
-              <span
-                className={
-                  'glyphicon glyphicon-list-alt' +
-                  (disabledAllPlugins ? ' w-disabled' : '')
-                }
-              ></span>
+              <Icon name="th-large" className={disabledAllPlugins ? 'w-disabled' : ''} />
               Plugins
             </a>
             <MenuItem
@@ -4293,61 +4259,44 @@ var Index = React.createClass({
               onClickOption={this.showAndActivePlugins}
             />
           </div>
-          <a
-            onClick={this.showAccount}
-            className={'w-account-menu' + (isAccount ? ' w-menu-selected' : '')}
-            draggable="false"
-          >
-            <span className="glyphicon glyphicon-user" />
-            Account
-          </a>
           {!state.ndr && (
             <a
               onClick={this.confirmDisableAllRules}
-              className="w-enable-rules-menu"
+              className="w-enable-rules-menu w-switch-btn"
               title={
                 disabledAllRules ? 'Enable all rules' : 'Disable all rules'
               }
-              style={{ display: isRules ? '' : 'none' }}
+              style={getHideStyle(!isRules)}
               draggable="false"
             >
-              <span
-               className="glyphicon glyphicon-stop"
-               style={{
-                 color: disabledAllRules ? '#ccc' : 'rgb(255, 102, 102)'
-               }}
-              />
+              <Icon name="stop" className={disabledAllRules ? 'w-pause' : ''} />
               ON
             </a>
           )}
           {!state.ndp && (
             <a
               onClick={this.confirmDisableAllPlugins}
-              className="w-enable-plugin-menu"
+              className="w-enable-plugin-menu w-switch-btn"
               title={
                 disabledAllPlugins
                   ? 'Enable all plugins'
                   : 'Disable all plugins'
               }
-              style={{ display: isPlugins ? '' : 'none' }}
+              style={getHideStyle(!isPlugins)}
               draggable="false"
             >
-              <span
-                className="glyphicon glyphicon-stop"
-                style={{
-                  color: disabledAllPlugins ? '#ccc' : 'rgb(255, 102, 102)'
-                }}
-              />
+              <Icon name="stop" className={disabledAllPlugins ? 'w-pause' : ''} />
               ON
             </a>
           )}
           <UpdateAllBtn hide={!isPlugins} />
           <a
             onClick={this.installPlugins}
-            className={'w-plugins-menu' + (isPlugins ? '' : ' hide')}
+            className="w-plugins-menu"
+            style={getHideStyle(!isPlugins)}
             draggable="false"
           >
-            <span className="glyphicon glyphicon-download-alt" />
+            <Icon name="download-alt" />
             Install
           </a>
           <RecordBtn
@@ -4355,58 +4304,31 @@ var Index = React.createClass({
             hide={!isNetwork}
             onClick={this.handleAction}
           />
-          <div
-            onMouseEnter={this.showImportOptions}
-            onMouseLeave={this.hideImportOptions}
+          <a
+            onClick={this.importData}
             style={importMenuStyle}
-            className={
-              'w-menu-wrapper w-remove-menu-list w-menu-auto' +
-              (state.showImportOptions ? ' w-menu-wrapper-show' : '')
-            }
+            className="w-import-menu"
+            draggable="false"
           >
-            <a
-              onClick={this.importData}
-              className="w-import-menu"
-              draggable="false"
-            >
-              <span className="glyphicon glyphicon-import"></span>Import
-            </a>
-            <MenuItem
-              options={IMPORT_OPTIONS}
-              onClickOption={this.handleNetwork}
-            />
-          </div>
+            <Icon name="import" />Import
+          </a>
           <a
             onClick={this.exportData}
             className="w-export-menu"
             style={importMenuStyle}
             draggable="false"
           >
-            <span className="glyphicon glyphicon-export"></span>Export
+            <Icon name="export" />Export
           </a>
-          <div
-            onMouseEnter={this.showRemoveOptions}
-            onMouseLeave={this.hideRemoveOptions}
-            style={{ display: isNetwork ? '' : 'none' }}
-            className={
-              'w-menu-wrapper w-remove-menu-list w-menu-auto' +
-              (state.showRemoveOptions ? ' w-menu-wrapper-show' : '')
-            }
+          <a
+            onClick={this.clear}
+            style={getHideStyle(!isNetwork)}
+            className="w-remove-menu w-remove-menu-list"
+            title="Ctrl[Command] + X"
+            draggable="false"
           >
-            <a
-              onClick={this.clear}
-              className="w-remove-menu"
-              title="Ctrl[Command] + X"
-              draggable="false"
-            >
-              <span className="glyphicon glyphicon-remove"></span>Clear
-            </a>
-            <MenuItem
-              options={REMOVE_OPTIONS}
-              className="w-remove-menu-item"
-              onClickOption={this.handleNetwork}
-            />
-          </div>
+            <Icon name="remove" />Clear
+          </a>
           <a
             onClick={this.onClickMenu}
             className="w-save-menu"
@@ -4414,7 +4336,7 @@ var Index = React.createClass({
             draggable="false"
             title="Ctrl[Command] + S"
           >
-            <span className="glyphicon glyphicon-save-file"></span>Save
+            <Icon name="save-file" />Save
           </a>
           <a
             className="w-create-menu"
@@ -4422,7 +4344,7 @@ var Index = React.createClass({
             draggable="false"
             onClick={this.handleCreate}
           >
-            <span className="glyphicon glyphicon-plus"></span>Create
+            <Icon name="plus" />Create
           </a>
           <a
             onClick={this.onClickMenu}
@@ -4430,12 +4352,12 @@ var Index = React.createClass({
             style={editMenuStyle}
             draggable="false"
           >
-            <span className="glyphicon glyphicon-transfer"></span>Rename
+            <Icon name="transfer" />Rename
           </a>
           <div
             onMouseEnter={this.showAbortOptions}
             onMouseLeave={this.hideAbortOptions}
-            style={{ display: isNetwork ? '' : 'none' }}
+            style={getHideStyle(!isNetwork)}
             className={
               'w-menu-wrapper w-abort-menu-list w-menu-auto' +
               (state.showAbortOptions ? ' w-menu-wrapper-show' : '')
@@ -4446,7 +4368,7 @@ var Index = React.createClass({
               className="w-replay-menu"
               draggable="false"
             >
-              <span className="glyphicon glyphicon-repeat"></span>Replay
+              <Icon name="repeat" />Replay
             </a>
             <MenuItem
               options={ABORT_OPTIONS}
@@ -4456,11 +4378,11 @@ var Index = React.createClass({
           </div>
           <a
             onClick={this.composer}
-            className="w-composer-menu"
-            style={{ display: isNetwork ? '' : 'none' }}
+            className="w-com-menu"
+            style={getHideStyle(!isNetwork)}
             draggable="false"
           >
-            <span className="glyphicon glyphicon-send"></span>Edit
+            <Icon name="send" />Edit
           </a>
           <a
             onClick={this.onClickMenu}
@@ -4470,15 +4392,7 @@ var Index = React.createClass({
             style={editMenuStyle}
             draggable="false"
           >
-            <span className="glyphicon glyphicon-trash"></span>Delete
-          </a>
-          <a
-            onClick={this.addWidget}
-            className="w-add-widget"
-            style={accountMenuStyle}
-            draggable="false"
-          >
-            <span className="glyphicon glyphicon-plus"></span>Widget
+            <Icon name="trash" />Delete
           </a>
           <FilterBtn
             onClick={this.showSettings}
@@ -4487,14 +4401,7 @@ var Index = React.createClass({
             isNetwork={isNetwork}
             hide={isPlugins}
           />
-          <a
-              onClick={this.showFiles}
-              className="w-files-menu"
-              style={showAccount ? null : HIDE_STYLE}
-              draggable="false"
-            >
-              <span className="glyphicon glyphicon-file" />Files
-          </a>
+          <ServiceBtn name={name} />
           <div
             onMouseEnter={this.showWeinreOptions}
             onMouseLeave={this.hideWeinreOptions}
@@ -4509,12 +4416,13 @@ var Index = React.createClass({
               className="w-weinre-menu"
               draggable="false"
             >
-              <span className="glyphicon glyphicon-console" />
+              <Icon name="console" />
               <span className="w-weinre-name">Weinre</span>
             </a>
             <MenuItem
               ref="weinreMenuItem"
               name="anonymous"
+              icon="console"
               options={state.weinreOptions}
               className="w-weinre-menu-item"
               onClick={this.showAnonymousWeinre}
@@ -4525,14 +4433,9 @@ var Index = React.createClass({
             onClick={this.showHttpsSettingsDialog}
             className="w-https-menu"
             draggable="false"
-            style={{ color: dataCenter.hasInvalidCerts ? 'red' : undefined }}
+            style={{ color: dataCenter.hasInvalidCerts ? 'var(--c-error)' : undefined }}
           >
-            <span
-              className={
-                'glyphicon glyphicon-' +
-                (state.interceptHttpsConnects ? 'ok' : 'lock')
-              }
-            />
+            <Icon name={state.interceptHttpsConnects ? 'ok-circle' : 'lock'} />
             <span className="w-https-name">HTTPS</span>
           </a>
           <div
@@ -4543,32 +4446,27 @@ var Index = React.createClass({
             }
           >
             <a
-              className={
-                'w-help-menu' + (state.hasNewVersion ? ' w-menu-enable' : '')
-              }
               onClick={this.showAboutDialog}
               title={
                 state.hasNewVersion
-                  ? 'There is a new version of whistle'
+                  ? 'A new version is available, click to see details'
                   : undefined
               }
-              href={
-                state.hasNewVersion
-                  ? undefined
-                  : 'https://github.com/avwo/whistle#whistle'
-              }
-              target={state.hasNewVersion ? undefined : '_blank'}
+              href="https://github.com/avwo/whistle#whistle"
+              target="_blank"
             >
               {state.hasNewVersion ? <i className="w-new-version-icon" /> : null}
-              <span className="glyphicon glyphicon-question-sign" />
+              <Icon name="question-sign" />
               <span className="w-help-name">Help</span>
             </a>
             <MenuItem
               ref="helpMenuItem"
               options={state.helpOptions}
+              onClickOption={this.onClickHelpMenu}
               name={
                 <About
                   ref="aboutDialog"
+                  clientVersion={clientVersion}
                   onClick={this.hideHelpOptions}
                   onCheckUpdate={this.showHasNewVersion}
                 />
@@ -4576,11 +4474,11 @@ var Index = React.createClass({
               className="w-help-menu-item"
             />
           </div>
-          <Online name={name} />
+          <Online name={name} clientVersion={clientVersion} />
           <div
             onMouseDown={this.preventBlur}
             style={{ display: state.showCreateRules ? 'block' : 'none' }}
-            className="shadow w-input-menu-item w-create-rules-input"
+            className="w-shadow w-input-menu-item w-create-rules-input"
           >
             <input
               ref="createRulesInput"
@@ -4588,7 +4486,7 @@ var Index = React.createClass({
               onBlur={this.hideRulesInput}
               type="text"
               maxLength="64"
-              placeholder="Input the name"
+              placeholder="Enter name"
             />
             <button
               type="button"
@@ -4617,7 +4515,7 @@ var Index = React.createClass({
           <div
             onMouseDown={this.preventBlur}
             style={{ display: state.showCreateValues ? 'block' : 'none' }}
-            className="shadow w-input-menu-item w-create-values-input"
+            className="w-shadow w-input-menu-item w-create-values-input"
           >
             <input
               ref="createValuesInput"
@@ -4625,7 +4523,7 @@ var Index = React.createClass({
               onBlur={this.hideValuesInput}
               type="text"
               maxLength="64"
-              placeholder="Input the name"
+              placeholder="Enter name"
             />
             <button
               type="button"
@@ -4646,7 +4544,7 @@ var Index = React.createClass({
           <div
             onMouseDown={this.preventBlur}
             style={{ display: state.showEditRules ? 'block' : 'none' }}
-            className="shadow w-input-menu-item w-edit-rules-input"
+            className="w-shadow w-input-menu-item w-edit-rules-input"
           >
             <input
               ref="editRulesInput"
@@ -4666,7 +4564,7 @@ var Index = React.createClass({
           <div
             onMouseDown={this.preventBlur}
             style={{ display: state.showEditValues ? 'block' : 'none' }}
-            className="shadow w-input-menu-item w-edit-values-input"
+            className="w-shadow w-input-menu-item w-edit-values-input"
           >
             <input
               ref="editValuesInput"
@@ -4693,7 +4591,7 @@ var Index = React.createClass({
             className={
               'w-left-menu' + (forceShowLeftMenu ? ' w-hover-left-menu' : '') + hideStyle
             }
-            style={(!showAccount && networkMode) || mustHideLeftMenu ? HIDE_STYLE : null}
+            style={getHideStyle(networkMode || mustHideLeftMenu)}
             onMouseEnter={forceShowLeftMenu}
             onMouseLeave={forceHideLeftMenu}
           >
@@ -4702,10 +4600,10 @@ var Index = React.createClass({
               className={
                 'w-network-menu' + (isNetwork ? ' w-menu-selected' : '')
               }
-              style={{ display: rulesMode ? 'none' : undefined }}
+              style={getHideStyle(rulesMode)}
               draggable="false"
             >
-              <span className={'glyphicon glyphicon-' + networkType}></span>
+              <Icon name={networkType} />
               <i className="w-left-menu-name">Network</i>
             </a>
             <a
@@ -4717,18 +4615,11 @@ var Index = React.createClass({
               style={hideEditorStyle}
               draggable="false"
             >
-              <span
-                className={
-                  'glyphicon glyphicon-list' +
-                  (disabledAllRules ? ' w-disabled' : '')
-                }
-              ></span>
+              <Icon name="list" className={disabledAllRules ? 'w-disabled' : ''} />
               <i className="w-left-menu-name">Rules</i>
               <i
                 className="w-menu-changed"
-                style={{
-                  display: state.rules.hasChanged() ? undefined : 'none'
-                }}
+                style={getHideStyle(!state.rules.hasChanged())}
               >
                 *
               </i>
@@ -4742,13 +4633,11 @@ var Index = React.createClass({
               style={hideEditorStyle}
               draggable="false"
             >
-              <span className="glyphicon glyphicon-folder-close"></span>
+              <Icon name="folder-close" />
               <i className="w-left-menu-name">Values</i>
               <i
                 className="w-menu-changed"
-                style={{
-                  display: state.values.hasChanged() ? undefined : 'none'
-                }}
+                style={getHideStyle(!state.values.hasChanged())}
               >
                 *
               </i>
@@ -4761,21 +4650,8 @@ var Index = React.createClass({
               style={pluginsStyle}
               draggable="false"
             >
-              <span
-                className={
-                  'glyphicon glyphicon-list-alt' +
-                  (disabledAllPlugins ? ' w-disabled' : '')
-                }
-              ></span>
+              <Icon name="th-large" className={disabledAllPlugins ? 'w-disabled' : ''} />
               <i className="w-left-menu-name">Plugins</i>
-            </a>
-            <a
-              onClick={this.showAccount}
-              className={'w-account-menu' + (isAccount ? ' w-menu-selected' : '')}
-              draggable="false"
-            >
-              <span className="glyphicon glyphicon-user" />
-              <i className="w-left-menu-name">Account</i>
             </a>
           </div>
           {state.hasRules ? (
@@ -4809,14 +4685,12 @@ var Index = React.createClass({
               foldGutter={state.foldGutter}
             />
           ) : undefined}
-          {hasAccount ? (
-            <Account hide={!isAccount} />
-          ) : undefined}
           {state.hasNetwork ? (
             <Network
               ref="network"
               hide={!isNetwork}
               modal={modal}
+              rulesModal={state.rules}
             />
           ) : undefined}
           {state.hasPlugins ? (
@@ -4838,15 +4712,9 @@ var Index = React.createClass({
           <div className="modal-dialog">
             <div className="modal-content">
               <div className="modal-body">
-                <button
-                  type="button"
-                  className="close"
-                  data-dismiss="modal"
-                  aria-label="Close"
-                >
-                  <span aria-hidden="true">&times;</span>
-                </button>
+                <CloseBtn />
                 <EditorSettings
+                  name="rules"
                   theme={rulesTheme}
                   fontSize={rulesFontSize}
                   lineNumbers={showRulesLineNumbers}
@@ -4858,7 +4726,7 @@ var Index = React.createClass({
                 />
                 {!state.drm && (
                   <p className="w-editor-settings-box">
-                    <label style={{ color: multiEnv ? '#aaa' : undefined }}>
+                    <label className="w-align-items" style={{ color: multiEnv ? 'var(--c-disabled)' : undefined }}>
                       <input
                         type="checkbox"
                         disabled={multiEnv}
@@ -4871,7 +4739,7 @@ var Index = React.createClass({
                 )}
                 {!state.drb && (
                   <p className="w-editor-settings-box">
-                    <label>
+                    <label className="w-align-items">
                       <input
                         type="checkbox"
                         checked={state.backRulesFirst}
@@ -4881,13 +4749,6 @@ var Index = React.createClass({
                     </label>
                   </p>
                 )}
-                {accountRules && accountRules.trim() ? <fieldset className="w-fieldset">
-                  <legend>
-                    Account Rules
-                    <span className="glyphicon glyphicon-edit" />
-                  </legend>
-                  <pre>{accountRules}</pre>
-                </fieldset> : null }
               </div>
               <div className="modal-footer">
                 <button
@@ -4896,6 +4757,20 @@ var Index = React.createClass({
                   data-dismiss="modal"
                 >
                   Close
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={this.importRulesSettings}
+                >
+                  Import
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-info"
+                  onClick={this.exportRulesSettings}
+                >
+                  Export
                 </button>
               </div>
             </div>
@@ -4908,14 +4783,7 @@ var Index = React.createClass({
           <div className="modal-dialog">
             <div className="modal-content">
               <div className="modal-body">
-                <button
-                  type="button"
-                  className="close"
-                  data-dismiss="modal"
-                  aria-label="Close"
-                >
-                  <span aria-hidden="true">&times;</span>
-                </button>
+                <CloseBtn />
                 <EditorSettings
                   theme={valuesTheme}
                   fontSize={valuesFontSize}
@@ -4927,7 +4795,7 @@ var Index = React.createClass({
                   onLineNumberChange={this.onValuesLineNumberChange}
                 />
                 <p className="w-editor-settings-box">
-                  <label>
+                  <label className="w-align-items">
                     <input
                       type="checkbox"
                       checked={state.foldGutter}
@@ -4945,111 +4813,36 @@ var Index = React.createClass({
                 >
                   Close
                 </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={this.importValuesSettings}
+                >
+                  Import
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-info"
+                  onClick={this.exportValuesSettings}
+                >
+                  Export
+                </button>
               </div>
             </div>
           </div>
         </div>
         {rulesMode ? null : <NetworkSettings ref="networkSettings" />}
-        <div ref="rootCADialog" className="modal fade w-https-dialog">
-          <div className="modal-dialog">
-            <div className="modal-content">
-              <div className="modal-body">
-                <button
-                  type="button"
-                  className="close"
-                  data-dismiss="modal"
-                  aria-label="Close"
-                >
-                  <span aria-hidden="true">&times;</span>
-                </button>
-                <div>
-                  <a
-                    className="w-help-menu"
-                    title="Click here to learn how to install root ca"
-                    href="https://avwo.github.io/whistle/webui/https.html"
-                    target="_blank"
-                  >
-                    <span className="glyphicon glyphicon-question-sign"></span>
-                  </a>
-                  <a
-                    className="w-download-rootca"
-                    title={caShortUrl}
-                    href={caUrl}
-                    target="downloadTargetFrame"
-                  >
-                    Download RootCA
-                  </a>
-                  <select className="w-root-ca-type" value={caType} onChange={this.selectCAType}>
-                    <option value="crt">rootCA.crt</option>
-                    <option value="cer">rootCA.cer</option>
-                    <option value="pem">rootCA.pem</option>
-                  </select>
-                </div>
-                <a
-                  title={caShortUrl}
-                  href={caUrl}
-                  target="downloadTargetFrame"
-                >
-                  <img src={qrCode} width="300" style={{margin: 10}} />
-                </a>
-                <div className="w-https-settings">
-                  <p>
-                    <label
-                      title={
-                        multiEnv
-                          ? 'Use `pattern enable://capture` in rules to replace global configuration'
-                          : undefined
-                      }
-                    >
-                      <input
-                        disabled={multiEnv}
-                        checked={state.interceptHttpsConnects}
-                        onChange={this.interceptHttpsConnects}
-                        type="checkbox"
-                         className="w-va-mdl"
-                      />
-                      <span className="w-va-mdl w-mrl-5">
-                        Enable HTTPS (Capture Tunnel Connects)
-                      </span>
-                    </label>
-                  </p>
-                  <p>
-                    <label>
-                      <input
-                        checked={dataCenter.supportH2 && state.enableHttp2}
-                        onChange={this.enableHttp2}
-                        type="checkbox"
-                        className="w-va-mdl"
-                      />
-                    <span className="w-va-mdl w-mrl-5">
-                      Enable HTTP/2
-                    </span>
-                    </label>
-                  </p>
-                  <a
-                    draggable="false"
-                    style={{
-                      color: dataCenter.hasInvalidCerts ? 'red' : undefined
-                    }}
-                    onClick={this.showCustomCertsInfo}
-                  >
-                    View all custom certificates
-                  </a>
-                  <CertsInfoDialog ref="certsInfoDialog" />
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button
-                  type="button"
-                  className="btn btn-default"
-                  data-dismiss="modal"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <HttpsSettings
+          ref="httpsSettings"
+          caHash={caHash}
+          port={state.port}
+          caUrlList={state.caUrlList}
+          multiEnv={multiEnv}
+          interceptHttpsConnects={state.interceptHttpsConnects}
+          enableHttp2={state.enableHttp2}
+          onEnableHttps={this.interceptHttpsConnects}
+          onEnableHttp2={this.enableHttp2}
+        />
         <div ref="chooseFileType" className="modal fade w-choose-filte-type">
           <div className="modal-dialog">
             <div className="modal-content">
@@ -5058,8 +4851,10 @@ var Index = React.createClass({
                   Save as:
                   <input
                     ref="sessionsName"
+                    value={state.filename}
+                    onChange={this.filterFilename}
                     onKeyDown={this.exportBySave}
-                    placeholder="Input the filename"
+                    placeholder="Enter filename (optional)"
                     className="form-control"
                     maxLength="64"
                   />
@@ -5074,7 +4869,17 @@ var Index = React.createClass({
                     <option value="har">*.har</option>
                   </select>
                 </label>
-                <a
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-default"
+                  data-dismiss="modal"
+                >
+                  Cancel
+                </button>
+                <SaveToServiceBtn type="network" onComplete={this.hideChooseFileTypeDialog} getFilename={this.getInputValue} data={this.getExportSessions} />
+                <button
                   type="button"
                   onKeyDown={this.exportBySave}
                   tabIndex="0"
@@ -5083,12 +4888,12 @@ var Index = React.createClass({
                   onClick={this.exportBySave}
                 >
                   Export
-                </a>
-              </div>
+                </button>
+                </div>
             </div>
           </div>
         </div>
-        <AccountDialog ref="editorWin" className="w-editor-win" />
+        <LargeDialog ref="editorWin" className="w-editor-win" />
         <Dialog ref="setReplayCount" wstyle="w-replay-count-dialog">
           <div className="modal-body">
             <label>
@@ -5116,96 +4921,6 @@ var Index = React.createClass({
             </button>
           </div>
         </Dialog>
-        <Dialog ref="importRemoteRules" wstyle="w-import-remote-dialog">
-          <div className="modal-body">
-            <input
-              readOnly={pendingRules}
-              ref="rulesRemoteUrl"
-              maxLength="2048"
-              onKeyDown={this.importRemoteRules}
-              placeholder="Input the url"
-              style={{ 'ime-mode': 'disabled' }}
-            />
-          </div>
-          <div className="modal-footer">
-            <button
-              type="button"
-              className="btn btn-default"
-              data-dismiss="modal"
-            >
-              Close
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={pendingRules}
-              onMouseDown={this.preventBlur}
-              onClick={this.importRemoteRules}
-            >
-              {pendingRules ? 'Importing rules' : 'Import rules'}
-            </button>
-          </div>
-        </Dialog>
-        <Dialog ref="importRemoteSessions" wstyle="w-import-remote-dialog">
-          <div className="modal-body">
-            <input
-              readOnly={pendingSessions}
-              ref="sessionsRemoteUrl"
-              maxLength="2048"
-              onKeyDown={this.importRemoteSessions}
-              placeholder="Input the url"
-              style={{ 'ime-mode': 'disabled' }}
-            />
-          </div>
-          <div className="modal-footer">
-            <button
-              type="button"
-              className="btn btn-default"
-              data-dismiss="modal"
-            >
-              Close
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={pendingSessions}
-              onMouseDown={this.preventBlur}
-              onClick={this.importRemoteSessions}
-            >
-              {pendingSessions ? 'Importing sessions' : 'Import sessions'}
-            </button>
-          </div>
-        </Dialog>
-        <Dialog ref="importRemoteValues" wstyle="w-import-remote-dialog">
-          <div className="modal-body">
-            <input
-              readOnly={pendingValues}
-              ref="valuesRemoteUrl"
-              maxLength="2048"
-              onKeyDown={this.importRemoteValues}
-              placeholder="Input the url"
-              style={{ 'ime-mode': 'disabled' }}
-            />
-          </div>
-          <div className="modal-footer">
-            <button
-              type="button"
-              className="btn btn-default"
-              data-dismiss="modal"
-            >
-              Close
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={pendingValues}
-              onMouseDown={this.preventBlur}
-              onClick={this.importRemoteValues}
-            >
-              {pendingValues ? 'Importing values' : 'Import values'}
-            </button>
-          </div>
-        </Dialog>
         <div
           ref="showUpdateTipsDialog"
           className="modal fade w-show-update-tips-dialog"
@@ -5213,27 +4928,16 @@ var Index = React.createClass({
           <div className="modal-dialog">
             <div className="modal-content">
               <div className="modal-body">
-                <button
-                  type="button"
-                  className="close"
-                  data-dismiss="modal"
-                  aria-label="Close"
-                >
-                  <span aria-hidden="true">&times;</span>
-                </button>
+                <CloseBtn />
                 <p className="w-show-update-tips">
-                  whistle has important updates, it is recommended that you
-                  update to the latest version.
+                Whistle has critical updates available.
+                Update to the latest version immediately.
                 </p>
                 <p>Current version: {state.version}</p>
-                <p>The latest stable version: {state.latestVersion}</p>
+                <p>Latest version: {state.latestVersion}</p>
                 <p>
                   View change:{' '}
-                  <a
-                    title="Change log"
-                    href="https://github.com/avwo/whistle/blob/master/CHANGELOG.md"
-                    target="_blank"
-                  >
+                  <a onClick={util.openChangeLog}>
                     CHANGELOG.md
                   </a>
                 </p>
@@ -5245,13 +4949,13 @@ var Index = React.createClass({
                   onClick={this.donotShowAgain}
                   data-dismiss="modal"
                 >
-                  Don't show again
+                  Don't Show Again
                 </button>
                 <a
                   type="button"
                   className="btn btn-primary"
                   onClick={this.hideUpdateTipsDialog}
-                  href="https://avwo.github.io/whistle/update.html"
+                  href={util.UPDATE_URL}
                   target="_blank"
                 >
                   View Update Guide
@@ -5262,9 +4966,7 @@ var Index = React.createClass({
         </div>
         <Dialog ref="confirmReload" wstyle="w-confirm-reload-dialog">
           <div className="modal-body w-confirm-reload">
-            <button type="button" className="close" data-dismiss="modal">
-              <span aria-hidden="true">&times;</span>
-            </button>
+            <CloseBtn />
             <div className="w-reload-data-tips"></div>
           </div>
           <div className="modal-footer">
@@ -5287,7 +4989,8 @@ var Index = React.createClass({
         </Dialog>
         <ListDialog
           ref="deleteRulesDialog"
-          tips="Are you sure to delete all follow rules or group？"
+          title="Delete Rules"
+          tips="Do you confirm the deletion of all follow rules or group?"
           onConfirm={this.removeRulesBatch}
           name="rules"
           isRules="1"
@@ -5295,7 +4998,8 @@ var Index = React.createClass({
         />
         <ListDialog
           ref="deleteValuesDialog"
-          tips="Are you sure to delete all follow values or group？"
+          title="Delete Values"
+          tips="Do you confirm the deletion of all follow values or group?"
           onConfirm={this.removeValuesBatch}
           name="values"
           list={state.values.list}
@@ -5308,14 +5012,15 @@ var Index = React.createClass({
         />
         <ListDialog
           ref="selectValuesDialog"
+          title="Export Values"
           name="values"
           list={state.values.list}
         />
-        <iframe name="downloadTargetFrame" style={{ display: 'none' }} />
+        <iframe name="downloadTargetFrame" style={HIDE_STYLE} />
         <form
           ref="exportSessionsForm"
           action="cgi-bin/sessions/export"
-          style={{ display: 'none' }}
+          style={HIDE_STYLE}
           method="post"
           target="downloadTargetFrame"
         >
@@ -5323,54 +5028,15 @@ var Index = React.createClass({
           <input ref="exportFileType" name="exportFileType" type="hidden" />
           <input ref="sessions" name="sessions" type="hidden" />
         </form>
-        <form
-          ref="importSessionsForm"
-          encType="multipart/form-data"
-          style={{ display: 'none' }}
-        >
-          <input
-            ref="importSessions"
-            onChange={this.uploadSessions}
-            type="file"
-            name="importSessions"
-            accept=".txt,.json,.saz,.har"
-          />
-        </form>
-        <form
-          ref="importRulesForm"
-          encType="multipart/form-data"
-          style={{ display: 'none' }}
-        >
-          <input
-            ref="importRules"
-            onChange={this.uploadRulesForm}
-            name="rules"
-            type="file"
-            accept=".txt,.json"
-          />
-        </form>
-        <form
-          ref="importValuesForm"
-          encType="multipart/form-data"
-          style={{ display: 'none' }}
-        >
-          <input
-            ref="importValues"
-            onChange={this.uploadValuesForm}
-            name="values"
-            type="file"
-            accept=".txt,.json"
-          />
-        </form>
         <SyncDialog ref="syncDialog" />
         <JSONDialog ref="jsonDialog" />
-        <div id="copyTextBtn" style={{display: 'none'}} />
+        <div id="copyTextBtn" style={HIDE_STYLE} />
         <MockDialog ref="mockDialog" />
         <RulesDialog ref="rulesDialog" />
         <form
           ref="downloadForm"
           action="cgi-bin/download"
-          style={{ display: 'none' }}
+          style={HIDE_STYLE}
           method="post"
           target="downloadTargetFrame"
         >
@@ -5379,8 +5045,11 @@ var Index = React.createClass({
           <input ref="content" name="content" type="hidden" />
         </form>
         <IframeDialog ref="iframeDialog" />
+        <ImportDialog ref="importDialog" />
+        <ExportDialog ref="exportDialog" />
         {/* 初始化 EditorDialog 给 Rules 里面的快捷键使用 */}
         <EditorDialog textEditor standalone />
+        <ServiceDialog />
       </div>
     );
   }

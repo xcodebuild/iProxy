@@ -1,40 +1,65 @@
-.w-certs-info-dialog .modal-dialog {
-  width: 1024px;
+.w-certs-dialog {
+  z-index: var(--z-modal);
 }
 
-.w-certs-info-order {
+.w-certs-dialog .w-help-icon {
+  font-size: 15px;
+  margin-top: -2px;
+}
+
+.w-certs-dialog .modal-dialog {
+  width: 1030px;
+}
+
+.w-certs-dialog .w-certs-active {
+  width: 72px;
+  text-align: center;
+}
+
+.w-certs-order {
   width: 50px;
 }
-.w-certs-info-validity {
-  width: 330px;
+.w-certs-validity {
+  width: 338px;
 }
-.w-certs-info-status {
+.w-certs-status {
   width: 100px;
+}
+
+.w-certs-status .glyphicon-ok {
+  color: var(--c-ok);
 }
 .w-cert-invalid th,
 .w-cert-invalid td {
-  color: red;
+  color: var(--c-error);
 }
 
-.w-certs-info-filename a {
+.w-certs-filename a {
   font-size: 12px;
   cursor: pointer;
 }
 
-.w-certs-info-filename .glyphicon-lock {
+.w-certs-filename .glyphicon-lock {
   margin-right: 5px;
 }
 
-.w-certs-info-dialog td {
+.w-certs-dialog td {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.w-certs-info-filename {
-  width: 220px;
+.w-certs-filename {
+  width: 200px;
 }
 
-.w-certs-info-dialog th,
-.w-certs-info-dialog td {
+.w-certs-dialog th,
+.w-certs-dialog td {
   vertical-align: middle !important;
+}
+
+.w-certs-disabled .w-certs-order,
+.w-certs-disabled .w-certs-filename,
+.w-certs-disabled .w-certs-domain,
+.w-certs-disabled .w-certs-validity {
+  color: var(--c-disabled);
 }

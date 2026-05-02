@@ -7,11 +7,13 @@ var FrameData = require('./frame-data');
 var FrameModal = require('./frame-modal');
 var dataCenter = require('./data-center');
 var LazyInit = require('./lazy-init');
+var $ = require('jquery');
 
 var Frames = React.createClass({
   getInitialState: function () {
     return {
-      modal: new FrameModal()
+      modal: new FrameModal(),
+      framesCtx: $({})
     };
   },
   componentDidMount: function () {
@@ -20,10 +22,7 @@ var Frames = React.createClass({
       self.setState({});
     });
   },
-  shouldComponentUpdate: function (nextProps) {
-    var hide = util.getBoolean(this.props.hide);
-    return hide != util.getBoolean(nextProps.hide) || !hide;
-  },
+  shouldComponentUpdate: util.shouldComponentUpdate,
   onClickFrame: function (frame) {
     var modal = this.state.modal;
     modal.setActive(frame);
@@ -38,6 +37,7 @@ var Frames = React.createClass({
   render: function () {
     var props = this.props;
     var modal = this.state.modal;
+    var framesCtx = this.state.framesCtx;
     var frames = modal.reset(props.frames);
     var reqData = props.data || '';
     var curFrame = modal.getActive();
@@ -48,7 +48,7 @@ var Frames = React.createClass({
     return (
       <div
         className={
-          'fill orient-vertical-box w-frames' + (props.hide ? ' hide' : '')
+          'fill v-box w-frames' + (props.hide ? ' hide' : '')
         }
       >
         <LazyInit inited={!hide}>
@@ -60,12 +60,13 @@ var Frames = React.createClass({
           >
             <FrameList
               ref="frameList"
+              framesCtx={framesCtx}
               reqData={reqData}
               modal={modal}
               onUpdate={this.onUpdate}
               onClickFrame={this.onClickFrame}
             />
-            <FrameData data={reqData} frame={curFrame} />
+            <FrameData framesCtx={framesCtx} data={reqData} frame={curFrame} />
           </Divider>
         </LazyInit>
         <div className={'w-no-frames' + (frames ? ' hide' : '')}>No Frames</div>

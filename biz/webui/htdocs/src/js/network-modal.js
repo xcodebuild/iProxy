@@ -10,8 +10,14 @@ var dataCenter;
 var WIN_NAME_PRE =
   '__whistle_' + location.href.replace(/\/[^/]*([#?].*)?$/, '/') + '__';
 var KW_RE =
-  /^(e|error|style|url|domain|d|u|composer|fc|content|c|b|body|headers|h|ip|i|status|result|s|r|method|m|mark|type|t):(.*)$/i;
+  /^(e|error|style|url|host|h|domain|d|u|composer|fc|content|c|b|body|headers|h|ip|i|status|a|app|result|s|r|method|m|mark|type|t):(.*)$/i;
 var KW_LIST_RE = /([^\s]+)(?:\s+([^\s]+)(?:\s+([\S\s]+))?)?/;
+var WS_RE = /^wss?:\/\//;
+var FONT_RE = /font\//i;
+var MEDIA_RE = /audio\/|video\/|application\/vnd.apple.mpegurl|application\/dash+xml/i;
+var WASM_RE = /application\/wasm/i;
+var TYPES = ['Img', 'HTML', 'CSS', 'JS', 'JSON'];
+var RAW_TYPES = ['Font', 'Media', 'Wasm'];
 
 function NetworkModal(list) {
   this.list = updateOrder(list);
@@ -56,7 +62,7 @@ function parseKeyword(keyword) {
   if (not) {
     keyword = keyword.substring(1);
   }
-  var type = 'url';
+  var type;
   if (KW_RE.test(keyword)) {
     type = RegExp.$1.toLowerCase();
     keyword = RegExp.$2.trim();
@@ -70,7 +76,7 @@ function parseKeyword(keyword) {
   }
   return {
     not: not,
-    type: type,
+    type: type || 'url',
     keyword: keyword.toLowerCase(),
     regexp: util.toRegExp(keyword)
   };
@@ -105,6 +111,12 @@ proto.search = function (keyword) {
   this._keyword = parseKeywordList(keyword);
   this.filter();
   return keyword;
+};
+
+proto.setFilterType = function (type) {
+  this._filterType = type;
+  this.filter();
+  return type;
 };
 
 function checkKeywork(str, opts) {
@@ -157,6 +169,12 @@ function setNot(flag, not) {
   return not ? !flag : flag;
 }
 
+function hasError(item) {
+  var statusCode = item.res && item.res.statusCode;
+  return item.reqError || item.resError || (item.customData && item.customData.error) ||
+    (statusCode && (!/^\d+$/.test(statusCode) || statusCode >= 400));
+}
+
 function checkItem(item, opts) {
   switch (opts.type) {
   case 'mark':
@@ -186,7 +204,9 @@ function checkItem(item, opts) {
         opts.not
       );
   case 'domain':
+  case 'host':
   case 'd':
+  case 'H':
     return setNot(!checkKeywork(item.isHttps ? item.url : util.getHost(item.url), opts), opts.not);
   case 'ip':
   case 'i':
@@ -206,12 +226,12 @@ function checkItem(item, opts) {
   case 'method':
   case 'm':
     return setNot(!checkKeywork(item.req.method, opts), opts.not);
+  case 'app':
+  case 'a':
+    return setNot(!checkKeywork(item.appName, opts), opts.not);
   case 'e':
   case 'error':
-    var statusCode = item.res && item.res.statusCode;
-    var isError = item.reqError || item.resError || (item.customData && item.customData.error) ||
-    (statusCode && (!/^\d+$/.test(statusCode) || statusCode >= 400));
-    return !isError || checkData(item, opts);
+    return !hasError(item) || checkData(item, opts);
   case 'style':
     return !item.style ||  checkData(item, opts);
   case 'fc':
@@ -258,14 +278,108 @@ function toStr(val) {
   return val + '';
 }
 
+function checkFilterType(item, filterType) {
+  if (!filterType) {
+    return true;
+  }
+  var isOther = filterType === 'Other';
+  if (isOther || filterType === 'WS') {
+    if (WS_RE.test(item.url)) {
+      return !isOther;
+    }
+    if (!isOther) {
+      return false;
+    }
+  }
+  if (isOther || filterType === 'Tunnel') {
+    if (item.isHttps) {
+      return !isOther;
+    }
+    if (!isOther) {
+      return false;
+    }
+  }
+  if (isOther || filterType === 'Rules') {
+    if (item[dataCenter.HAS_RULES_KEY]) {
+      return !isOther;
+    }
+    if (!isOther) {
+      return false;
+    }
+  }
+  var rawType = util.getRawType(item.res.headers);
+  var type;
+  for (var i = 0, len = RAW_TYPES.length; i < len; i++) {
+    type = RAW_TYPES[i];
+    if (isOther || filterType === type) {
+      var p = type === 'Font' ? FONT_RE : type === 'Media' ? MEDIA_RE : WASM_RE;
+      if (p.test(rawType)) {
+        return !isOther;
+      }
+      if (!isOther) {
+        return false;
+      }
+    }
+  }
+
+  var curType = util.getContentType(rawType);
+  for (i = 0, len = TYPES.length; i < len; i++) {
+    type = TYPES[i];
+    if (isOther || filterType === type) {
+      if (curType === (i ? type : 'IMG')) {
+        return !isOther;
+      }
+      if (!isOther) {
+        return false;
+      }
+    }
+  }
+  if (isOther || filterType === 'Error') {
+    if (hasError(item)) {
+      return !isOther;
+    }
+    if (!isOther) {
+      return false;
+    }
+  }
+  if (isOther || filterType === 'Mock') {
+    var rules = item.rules || '';
+    if (rules.rule && rules.rule.isLoc) {
+      return !isOther;
+    }
+    if (!isOther) {
+      return false;
+    }
+  }
+  if (isOther || filterType === 'Import') {
+    if (item.importedData) {
+      return !isOther;
+    }
+    if (!isOther) {
+      return false;
+    }
+  }
+  if (isOther || filterType === 'Composer') {
+    if (item.fc) {
+      return !isOther;
+    }
+    if (!isOther) {
+      return false;
+    }
+  }
+  return true;
+}
+
 proto.filter = function () {
   var self = this;
   var list = self.list;
   var keyword = self._keyword;
+  var filterType = self._filterType;
   list.forEach(function (item) {
-    if (keyword) {
-      item.hide =
-        checkItem(item, keyword[0]) ||
+    if (!checkFilterType(item, filterType)) {
+      item.hide = true;
+    } else if (keyword) {
+      item.hide = checkItem(item, keyword[0]) ||
         (keyword[1] && checkItem(item, keyword[1])) ||
         (keyword[2] && checkItem(item, keyword[2]));
     } else {
@@ -280,8 +394,9 @@ proto.filter = function () {
       for (var i = 0; i < len; i++) {
         var column = columns[i];
         var isBody = column.name === 'body';
-        var prevVal = isBody ? prev.bodySize : util.getCellValue(prev, column);
-        var nextVal = isBody ? next.bodySize : util.getCellValue(next, column);
+        var name = column.name === 'app' ? 'appName' : null;
+        var prevVal = isBody ? prev.bodySize : util.getCellValue(prev, column, name);
+        var nextVal = isBody ? next.bodySize : util.getCellValue(next, column, name);
         if (isBody) {
           if (prevVal === nextVal) {
             return 0;
@@ -354,7 +469,7 @@ function inObject(obj, opts) {
       return true;
     }
     var value = obj[i];
-    if (typeof value == 'string' && checkKeywork(value, opts)) {
+    if (checkKeywork(value == null ? '' : String(value), opts)) {
       return true;
     }
   }
@@ -588,6 +703,26 @@ proto.next = function () {
 
   for (i = 0; i < index; i++) {
     item = list[i];
+    if (!item.hide) {
+      return item;
+    }
+  }
+};
+
+proto.start = function () {
+  var list = this.getList();
+  for (var i = 0, len = list.length; i < len; i++) {
+    var item = list[i];
+    if (!item.hide) {
+      return item;
+    }
+  }
+};
+
+proto.end = function () {
+  var list = this.getList();
+  for (var i = list.length - 1; i >= 0; i++) {
+    var item = list[i];
     if (!item.hide) {
       return item;
     }

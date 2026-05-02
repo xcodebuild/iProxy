@@ -1,6 +1,4 @@
-require('./base-css.js');
 require('../css/res-detail.css');
-var $ = require('jquery');
 var React = require('react');
 var Table = require('./table');
 var Properties = require('./properties');
@@ -39,6 +37,7 @@ var ResDetail = React.createClass({
       initedRaw: false,
       initPlugins: false,
       btns: [
+        { name: 'Raw' },
         { name: 'Headers' },
         { name: 'Preview' },
         { name: 'TextView', display: 'Body' },
@@ -46,7 +45,6 @@ var ResDetail = React.createClass({
         { name: 'HexView' },
         { name: 'Cookies' },
         { name: 'Trailers' },
-        { name: 'Raw' },
         { name: 'Plugins', hide: true }
       ]
     };
@@ -57,10 +55,7 @@ var ResDetail = React.createClass({
       self.setState({});
     });
   },
-  shouldComponentUpdate: function (nextProps) {
-    var hide = util.getBoolean(this.props.hide);
-    return hide != util.getBoolean(nextProps.hide) || !hide;
-  },
+  shouldComponentUpdate: util.shouldComponentUpdate,
   onClickBtn: function (btn) {
     this.selectBtn(btn);
     this.setState({});
@@ -109,7 +104,7 @@ var ResDetail = React.createClass({
       json = util.getJson(res);
       if (headers && headers['set-cookie']) {
         cookies = headers['set-cookie'];
-        if (!$.isArray(cookies)) {
+        if (!Array.isArray(cookies)) {
           cookies = typeof cookies == 'string' ? [cookies] : [];
         }
         cookies = cookies.map(function (cookie) {
@@ -161,20 +156,10 @@ var ResDetail = React.createClass({
       var imgSrc, data, isJson;
       var isText = true;
       var status = res.statusCode;
-      var showImg = name === btns[1].name;
+      var showImg = name === btns[2].name;
       if (status != null) {
-        headersStr = util.objectToString(headers, res.rawHeaderNames);
-        trailerStr = trailers
-          ? util.objectToString(trailers, res.rawTrailerNames)
-          : '';
-        headersStr =
-          [
-            'HTTP/' + (modal.req.httpVersion || '1.1'),
-            status,
-            util.getStatusMessage(res)
-          ].join(' ') +
-          '\r\n' +
-          headersStr;
+        headersStr = util.getResRawHeaders(modal);
+        trailerStr = trailers ? util.objectToString(trailers, res.rawTrailerNames) : '';
         raw = headersStr + '\r\n\r\n' + body;
         var rawType = !modal.resError && util.getRawType(headers);
         var type = util.getContentType(rawType);
@@ -202,7 +187,7 @@ var ResDetail = React.createClass({
         data = modal;
       }
       if (modal.frames) {
-        tips = { isFrames: true };
+        tips = { isFrames: true, inComposer: modal.inComposer };
       } else if (modal.isHttps) {
         tips = !body && { isHttps: true };
       } else if (
@@ -215,10 +200,10 @@ var ResDetail = React.createClass({
       ) {
         tips = { url: modal.url };
         if (res.size < 5120) {
-          tips.message = 'No response body data';
+          tips.message = 'Empty response body';
         } else {
-          raw += '(Response data too large to show)';
-          tips.message = 'Response data too large to show';
+          raw += '(Response body exceeds display limit)';
+          tips.message = 'Response body exceeds display limit';
         }
       }
       if (trailerStr) {
@@ -255,16 +240,28 @@ var ResDetail = React.createClass({
     return (
       <div
         className={
-          'fill orient-vertical-box w-detail-content w-detail-response' +
-          (util.getBoolean(this.props.hide) ? ' hide' : '')
+          'fill v-box w-detail-ctn w-detail-res' +
+          (util.getBool(this.props.hide) ? ' hide' : '')
         }
       >
         <BtnGroup onClick={this.onClickBtn} btns={btns} />
+        {state.initedRaw ? (
+          <Textarea
+            reqData={modal}
+            reqType="resRaw"
+            defaultName={defaultName}
+            value={raw}
+            headers={headersStr}
+            base64={base64}
+            className="fill w-detail-res-raw"
+            hide={name != btns[0].name}
+          />
+        ) : undefined}
         {state.initedHeaders ? (
           <div
             className={
-              'fill w-detail-response-headers' +
-              (name == btns[0].name ? '' : ' hide')
+              'fill w-detail-res-headers' +
+              (name == btns[1].name ? '' : ' hide')
             }
           >
             <Properties modal={rawHeaders || headers} enableViewSource="1" />
@@ -281,8 +278,8 @@ var ResDetail = React.createClass({
             tips={tips}
             base64={base64}
             value={body}
-            className="fill w-detail-response-textview"
-            hide={name != btns[2].name}
+            className="fill w-detail-res-textview"
+            hide={name != btns[3].name}
           />
         ) : undefined}
         {state.initedJSONView ? (
@@ -292,7 +289,7 @@ var ResDetail = React.createClass({
             defaultName={defaultName}
             data={json}
             tips={tips}
-            hide={name != btns[3].name}
+            hide={name != btns[4].name}
           />
         ) : undefined}
         {state.initedHexView ? (
@@ -304,15 +301,15 @@ var ResDetail = React.createClass({
             base64={base64}
             tips={tips}
             value={bin}
-            className="fill n-monospace w-detail-response-hex"
-            hide={name != btns[4].name}
+            className="fill n-monospace w-detail-res-hex"
+            hide={name != btns[5].name}
           />
         ) : undefined}
         {state.initedCookies ? (
           <div
             className={
-              'fill w-detail-response-cookies' +
-              (name == btns[5].name ? '' : ' hide')
+              'fill w-detail-res-cookies' +
+              (name == btns[6].name ? '' : ' hide')
             }
           >
             {cookies && cookies.length ? (
@@ -323,24 +320,12 @@ var ResDetail = React.createClass({
         {state.initedTrailers ? (
           <div
             className={
-              'fill w-detail-response-headers' +
-              (name == btns[6].name ? '' : ' hide')
+              'fill w-detail-res-headers' +
+              (name == btns[7].name ? '' : ' hide')
             }
           >
             <Properties modal={rawTrailers || trailers} enableViewSource="1" />
           </div>
-        ) : undefined}
-        {state.initedRaw ? (
-          <Textarea
-            reqData={modal}
-            reqType="resRaw"
-            defaultName={defaultName}
-            value={raw}
-            headers={headersStr}
-            base64={base64}
-            className="fill w-detail-response-raw"
-            hide={name != btns[7].name}
-          />
         ) : undefined}
         {state.initedPlugins ? (
           <PluginsTabs

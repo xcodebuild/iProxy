@@ -1,4 +1,3 @@
-require('./base-css.js');
 require('../css/list.css');
 require('../css/files-dialog.css');
 var $ = require('jquery');
@@ -15,7 +14,11 @@ var events = require('./events');
 var iframes = require('./iframes');
 var storage = require('./storage');
 var RecycleBinDialog = require('./recycle-bin');
+var EnabledRulesDialog = require('./enabled-rules');
+var Icon = require('./icon');
 
+var findDOMNode = ReactDOM.findDOMNode;
+var hideEnableHTTPSTips = window.location.href.indexOf('hideEnableHTTPSTips=1') !== -1;
 var disabledEditor = window.location.href.indexOf('disabledEditor=1') !== -1;
 var rulesCtxMenuList = [
   {
@@ -29,14 +32,8 @@ var rulesCtxMenuList = [
   },
   { name: 'Rename' },
   { name: 'Delete' },
+  { name: 'Import' },
   { name: 'Export' },
-  {
-    name: 'Import',
-    list: [
-      { name: 'Local' },
-      { name: 'Remote' }
-    ]
-  },
   { name: 'Trash' },
   {
     name: 'Others',
@@ -65,14 +62,8 @@ var valuesCtxMenuList = [
       { name: 'Inspect' }
     ]
   },
+  { name: 'Import' },
   { name: 'Export' },
-  {
-    name: 'Import',
-    list: [
-      { name: 'Local' },
-      { name: 'Remote' }
-    ]
-  },
   { name: 'Trash' },
   {
     name: 'Others',
@@ -110,7 +101,7 @@ function getName(name) {
 function getDragInfo(e, list) {
   var target = getTarget(e);
   if (list && !target) {
-    target = $(ReactDOM.findDOMNode(list)).find('a:last')[0];
+    target = $(findDOMNode(list)).find('a:last')[0];
   }
   var name = target && target.getAttribute('data-name');
   if (!name) {
@@ -168,7 +159,7 @@ var List = React.createClass({
       .keydown(function (e) {
         if (visible && (e.ctrlKey || e.metaKey)) {
           var modal = self.props.modal;
-          if (e.keyCode === 83) {
+          if (e.keyCode === 83 && util.hasShortcut('save' + (self.isRules() ? 'Rules' : 'Values') + 'Changes')) {
             modal.getChangedList().forEach(trigger);
             return false;
           }
@@ -188,7 +179,7 @@ var List = React.createClass({
     var modal = self.props.modal;
     this.curListLen = modal.list.length;
     this.curActiveItem = modal.getActive();
-    $(ReactDOM.findDOMNode(self.refs.list))
+    $(findDOMNode(self.refs.list))
       .focus()
       .on('keydown', function (e) {
         var item;
@@ -216,6 +207,13 @@ var List = React.createClass({
         events.trigger('save' + comName, activeItem);
       }
     });
+    if (self.isRules()) {
+      events.on('enabledRulesCountChange', function() {
+        self.setState({});
+      });
+    }
+
+
     events.on('reload' + comName + 'RecycleBin', function () {
       self.reloadRecycleBin(comName);
     });
@@ -223,11 +221,14 @@ var List = React.createClass({
       var group = self.getGroupByName(groupName);
       group && self.expandGroup(group.name);
     });
+    events.on('reqTabsChange', function() {
+      self.setState({});
+    });
     var scrollToBottom = function() {
-      ReactDOM.findDOMNode(self.refs.list).scrollTop = 1000000000;
+      findDOMNode(self.refs.list).scrollTop = 1000000000;
     };
     var focusList = function() {
-      ReactDOM.findDOMNode(self.refs.list).focus();
+      findDOMNode(self.refs.list).focus();
     };
     events.on('scroll' + comName + 'Bottom', function() {
       scrollToBottom();
@@ -246,7 +247,10 @@ var List = React.createClass({
         storage.set(self.getCollapseKey(), JSON.stringify(self.collapseGroups));
       }
     });
-    this.ensureVisible(true);
+    events.on('focus' + (self.isRules() ? 'Rules' : 'Values') + 'FilterInput', function() {
+      self.refs.filterInput.focus();
+    });
+    self.ensureVisible(true);
   },
   expandGroup: function(groupName) {
     var index = this.collapseGroups.indexOf(groupName);
@@ -255,10 +259,7 @@ var List = React.createClass({
       storage.set(this.getCollapseKey(), JSON.stringify(this.collapseGroups));
     }
   },
-  shouldComponentUpdate: function (nextProps) {
-    var hide = util.getBoolean(this.props.hide);
-    return hide != util.getBoolean(nextProps.hide) || !hide;
-  },
+  shouldComponentUpdate: util.shouldComponentUpdate,
   componentDidUpdate: function () {
     var modal = this.props.modal;
     var curListLen = modal.list.length;
@@ -279,8 +280,8 @@ var List = React.createClass({
   ensureVisible: function (init, activeItem) {
     activeItem = activeItem || this.props.modal.getActive();
     if (activeItem) {
-      var elem = ReactDOM.findDOMNode(this.refs[activeItem.name]);
-      var con = ReactDOM.findDOMNode(this.refs.list);
+      var elem = findDOMNode(this.refs[activeItem.name]);
+      var con = findDOMNode(this.refs.list);
       util.ensureVisible(elem, con, init);
     }
   },
@@ -290,8 +291,10 @@ var List = React.createClass({
       typeof self.props.onActive != 'function' ||
       self.props.onActive(item) !== false
     ) {
-      self.props.modal.setActive(item.name);
+      var modal = self.props.modal;
+      modal.setActive(item.name);
       self.setState({ activeItem: item });
+      self.expandGroup(modal.getGroupName(item.name));
     }
   },
   toggleGroup: function (item) {
@@ -368,7 +371,7 @@ var List = React.createClass({
     var info = getDragInfo(e);
     if (info) {
       curTarget = info.target;
-      curTarget.style.background = '#ddd';
+      curTarget.style.background = 'var(--b-active)';
     }
   },
   onDragLeave: function (e) {
@@ -446,7 +449,7 @@ var List = React.createClass({
         return;
       }
       if (!data.list.length) {
-        return message.info('Trash is empty.');
+        return message.info('Trash is empty');
       }
       self.refs.recycleBinDialog.show({ name: name, list: data.list });
     });
@@ -489,13 +492,10 @@ var List = React.createClass({
       events.trigger('createValues', [self.getCurGroup(), self.currentFocusItem]);
       break;
     case 'Export':
-      events.trigger('export' + name);
+      events.trigger('exportData');
       break;
-    case 'Local':
-      events.trigger('import' + name);
-      break;
-    case 'Remote':
-      events.trigger('import' + name, {shiftKey: true});
+    case 'Import':
+      events.trigger('showImportDialog');
       break;
     case 'Trash':
       self.showRecycleBin(name);
@@ -506,17 +506,15 @@ var List = React.createClass({
         if (JSON_RE.test(item.value)) {
           try {
             JSON.parse(item.value);
-            message.success('Good JSON Object.');
+            message.success('Valid JSON object');
           } catch (e) {
             message.error(
-                'Warning: the value of ' +
-                  item.name +
-                  ' can`t be parsed into json. ' +
-                  e.message
+                'Warning: Invalid JSON format in the value of \'' +
+                item.name + '\'. ' +  e.message
               );
           }
         } else {
-          message.error('Bad JSON Object.');
+          message.error('Invalid JSON format');
         }
       }
       break;
@@ -529,11 +527,7 @@ var List = React.createClass({
       }
       break;
     case 'Help':
-      window.open(
-          'https://avwo.github.io/whistle/webui/' +
-            (self.props.name || 'values') +
-            '.html'
-        );
+      window.open(util.getDocUrl('gui/' + (self.props.name || 'values') + '.html'));
       break;
     case 'Plugins':
       var modal = self.props.modal;
@@ -655,6 +649,9 @@ var List = React.createClass({
     $('.w-enable-rules-menu').trigger('click');
     events.trigger('disableAllRules');
   },
+  showHttpsSettingsDialog: function() {
+    events.trigger('showHttpsSettingsDialog');
+  },
   parseList: function() {
     var isRules = this.isRules();
     var modal = this.props.modal;
@@ -712,18 +709,43 @@ var List = React.createClass({
       e.preventDefault();
     }
   },
+  switchTab: function(e) {
+    var name = e.target.getAttribute('data-name');
+    if (!name || name === this.state.activeTab) {
+      return;
+    }
+    this.setState({ activeTab: name });
+  },
+  showEnabledRules: function() {
+    var self = this;
+    dataCenter.rules.getEnabledRules(function (data, xhr) {
+      if (!data) {
+        util.showSystemError(xhr);
+        return;
+      }
+      var enabledRules = [];
+      data.list.forEach(function(line) {
+        var file = line[1] ? util.SOURCE_SEP + line[1] + ')' : '';
+        enabledRules.push(line[0] + file);
+      });
+      self.refs.enabledRulesDialog.show(enabledRules);
+    });
+  },
   render: function () {
     var self = this;
     var modal = self.props.modal;
     var list = modal.list;
     var data = modal.data;
     var props = self.props;
+    var disabled = props.disabled;
+    var filterText = self.state.filterText;
     var activeItem = modal.getActive(true) || '';
     var isSub, isHide;
     var isRules = self.isRules();
     var draggable = false;
     var activeName = activeItem ? activeItem.name : '';
     var selected = activeItem.selected;
+    var enabledRulesCount = dataCenter.enabledRulesCount || 0;
     list = self.parseList();
     if (isRules) {
       draggable = list.length > 2;
@@ -735,30 +757,36 @@ var List = React.createClass({
 
     //不设置height为0，滚动会有问题
     return (
-      <div className={'orient-vertical-box fill' +
+      <div className={'v-box fill' +
         (selected && isRules ? ' w-has-selected-rules' : '') +
-        (props.disabled ? ' w-has-selected-disabled' : '') +
+        (disabled ? ' w-has-selected-disabled' : '') +
         (props.hide ? ' hide' : '')}>
-        {props.disabled ? (
+        {disabled || (dataCenter.needEnableHttps() && !hideEnableHTTPSTips && !dataCenter.isPureProxy()) ? (
           <div className="w-record-status">
-            All rules is disabled
-            <button className="btn btn-primary" onClick={self.enableAllRules}>
-              Enable
+            {disabled ? 'All rules are currently disabled' :
+            'Full functionality of the rules requires activation of the \'Enable HTTPS (Capture Tunnel Traffic)\' option'}
+            <button className="btn btn-primary" onClick={disabled ? self.enableAllRules : self.showHttpsSettingsDialog}>
+              {disabled ? 'Enable' : 'Settings'}
             </button>
           </div>
         ) : null}
         <Divider leftWidth="230">
-          <div className="fill orient-vertical-box w-list-left">
+          <div className="fill v-box w-list-left">
+            {isRules ? <div className={'w-enabled-rules-btn' + (enabledRulesCount ? '' : ' w-disabled')} onClick={enabledRulesCount ? self.showEnabledRules : null}>
+              <Icon name="ok" data-name="enabledRules" />
+              Enabled Rules ({enabledRulesCount})
+            </div> : null}
             <div
               ref="list"
               tabIndex="0"
               onContextMenu={this.onContextMenu}
               onDrop={self.onDrop}
               className={
-                'fill orient-vertical-box w-list-data ' +
+                'fill v-box w-list-data ' +
                 (props.className || '') +
-                (props.disabled ? ' w-disabled' : '')
+                (disabled ? ' w-disabled' : '')
               }
+              style={{ background: filterText ? 'var(--b-filtered)' : undefined }}
             >
               {list.map(function (name, i) {
                 var item = data[name];
@@ -767,7 +795,7 @@ var List = React.createClass({
                 var title = isGroup ? name.substring(1) : name;
                 isSub = isSub || isGroup;
                 if (isGroup) {
-                  isHide = self.collapseGroups.indexOf(name) !== -1;
+                  isHide = !filterText && self.collapseGroups.indexOf(name) !== -1;
                 }
                 return (
                   <a
@@ -801,19 +829,20 @@ var List = React.createClass({
                       'w-group-empty': isGroup && !item.childCount
                     })}
                   >
-                    {isGroup ? <span className={'glyphicon glyphicon-triangle-' + (isHide ? 'right' : 'bottom')} /> : null}
+                    {isGroup ? <Icon name={'triangle-' + (isHide ? 'right' : 'bottom')} /> : null}
                     {title}
                     {isGroup ? <span className={util.getClasses({
                       'w-group-child-num': true,
                       'w-exists-selected': item.selectedCount > 0
-                    })}>({item.selectedCount > 0 ? item.selectedCount + '/' : ''}{item.childCount})</span> : <span className="glyphicon glyphicon-ok"></span>}
+                    })}>({item.selectedCount > 0 ? item.selectedCount + '/' : ''}{item.childCount})</span> : <Icon name="ok" />}
                   </a>
                 );
               })}
             </div>
-            <FilterInput onChange={this.onFilterChange} />
+            <FilterInput ref="filterInput" onChange={this.onFilterChange} />
             <ContextMenu onClick={this.onClickContextMenu} ref="contextMenu" />
             <RecycleBinDialog ref="recycleBinDialog" />
+            <EnabledRulesDialog ref="enabledRulesDialog" />
           </div>
           <Editor
             {...self.props}

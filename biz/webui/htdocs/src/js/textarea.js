@@ -9,17 +9,18 @@ var message = require('./message');
 var win = require('./win');
 var events = require('./events');
 var Tips = require('./panel-tips');
+var Icon = require('./icon');
 
 var MAX_LENGTH = 1024 * 6;
-
+var findDOMNode = ReactDOM.findDOMNode;
 
 var Textarea = React.createClass({
   getInitialState: function () {
     return {};
   },
   shouldComponentUpdate: function (nextProps) {
-    var hide = util.getBoolean(this.props.hide);
-    var nextHide = util.getBoolean(nextProps.hide);
+    var hide = util.getBool(this.props.hide);
+    var nextHide = util.getBool(nextProps.hide);
     if (this._isCaptured !== dataCenter.isCapture) {
       this._isCaptured = dataCenter.isCapture;
       return true;
@@ -55,7 +56,7 @@ var Textarea = React.createClass({
     self.state.showDownloadInput = /w-download/.test(e.target.className);
     self.state.showNameInput = true;
     self.forceUpdate(function () {
-      var nameInput = ReactDOM.findDOMNode(self.refs.nameInput);
+      var nameInput = findDOMNode(self.refs.nameInput);
       var defaultName = !nameInput.value && self.props.defaultName;
       if (defaultName) {
         nameInput.value = defaultName;
@@ -65,16 +66,16 @@ var Textarea = React.createClass({
     });
   },
   download: function () {
-    var target = ReactDOM.findDOMNode(this.refs.nameInput);
+    var target = findDOMNode(this.refs.nameInput);
     var name = target.value.trim();
     target.value = '';
     var base64 = this.props.base64;
-    ReactDOM.findDOMNode(this.refs.filename).value = name;
-    ReactDOM.findDOMNode(this.refs.type).value = base64 ? 'base64' : '';
-    ReactDOM.findDOMNode(this.refs.headers).value = this.props.headers || '';
-    ReactDOM.findDOMNode(this.refs.content).value =
+    findDOMNode(this.refs.filename).value = name;
+    findDOMNode(this.refs.type).value = base64 ? 'base64' : '';
+    findDOMNode(this.refs.headers).value = this.props.headers || '';
+    findDOMNode(this.refs.content).value =
       base64 != null ? base64 : this.props.value || '';
-    ReactDOM.findDOMNode(this.refs.downloadForm).submit();
+    findDOMNode(this.refs.downloadForm).submit();
     this.hideNameInput();
   },
   submit: function (e) {
@@ -85,7 +86,7 @@ var Textarea = React.createClass({
     if (!modal) {
       return;
     }
-    var target = ReactDOM.findDOMNode(this.refs.nameInput);
+    var target = findDOMNode(this.refs.nameInput);
     var name = target.value.trim();
     var self = this;
     if (self.state.showDownloadInput) {
@@ -93,12 +94,12 @@ var Textarea = React.createClass({
       return;
     }
     if (!name) {
-      message.error('The key cannot be empty.');
+      message.error('The key is required');
       return;
     }
 
     if (/\s/.test(name)) {
-      message.error('The key cannot have spaces.');
+      message.error('Spaces are not allowed in the key');
       return;
     }
     var handleSubmit = function (sure) {
@@ -120,14 +121,14 @@ var Textarea = React.createClass({
       return handleSubmit(true);
     }
     win.confirm(
-      'The key \'' + name + '\' already exists.\nDo you want to override it.',
+      'The key \'' + name + '\' is already in use. Overwrite?',
       handleSubmit
     );
   },
   hideNameInput: function () {
     this.state.showNameInput = false;
     this.forceUpdate(function () {
-      var nameInput = ReactDOM.findDOMNode(this.refs.nameInput);
+      var nameInput = findDOMNode(this.refs.nameInput);
       var defaultName = this.props.defaultName;
       if (defaultName === nameInput.value) {
         nameInput.value = '';
@@ -142,25 +143,28 @@ var Textarea = React.createClass({
       value = value.substring(0, MAX_LENGTH) +
         '...\r\n\r\n(' +
         exceed +
-        ' characters left, you can click on the ViewAll button in the upper right corner to view all)\r\n';
+        ' characters remaining (click View All in top-right corner)\r\n';
     }
     var isHexView = props.isHexView;
     this.state.value = value;
     return (
       <div
         className={
-          'fill orient-vertical-box w-textarea' +
+          'fill v-box w-textarea' +
           (props.hide ? ' hide' : '')
         }
       >
         <Tips data={props.tips} />
         <div className={'w-textarea-bar' + (value ? '' : ' hide')}>
+          {props.reqType === 'reqRaw' ? <a onClick={props.onEdit}>
+            <Icon name="send" />
+            Edit
+          </a> : undefined}
           <CopyBtn value={props.value} />
           {isHexView ? (
             <CopyBtn name="AsHex" value={util.getHexText(props.value)} />
           ) : undefined}
           <a
-            className="w-download"
             onDoubleClick={this.download}
             onClick={this.showNameInput}
             draggable="false"
@@ -170,13 +174,13 @@ var Textarea = React.createClass({
           <a style={{display: dataCenter.hideMockMenu ? 'none' : null}} className="w-add" onClick={this.showMockDialog} draggable="false">
             { props.reqData ? 'Mock' : '+Key' }
           </a>
-          <a className="w-edit" onClick={this.edit} draggable="false">
+          <a onClick={this.edit} draggable="false">
             ViewAll
           </a>
           <div
             onMouseDown={this.preventBlur}
             style={{ display: this.state.showNameInput ? 'block' : 'none' }}
-            className="shadow w-textarea-input"
+            className="w-shadow w-textarea-input"
           >
             <input
               ref="nameInput"
@@ -186,8 +190,8 @@ var Textarea = React.createClass({
               maxLength="64"
               placeholder={
                 this.state.showDownloadInput
-                  ? 'Input the filename'
-                  : 'Input the key'
+                  ? 'Enter filename'
+                  : 'Enter key name'
               }
             />
             <button

@@ -1,4 +1,3 @@
-require('./base-css.js');
 var React = require('react');
 var ReactDOM = require('react-dom');
 var Dialog = require('./dialog');
@@ -7,7 +6,10 @@ var dataCenter = require('./data-center');
 var util = require('./util');
 var message = require('./message');
 var win = require('./win');
+var Icon = require('./icon');
+var CloseBtn = require('./close-btn');
 
+var findDOMNode = ReactDOM.findDOMNode;
 var MAX_LEN = 1024 * 1024 * 11;
 var fakeIframe = 'javascript:"<style>html,body{padding:0;margin:0}</style><textarea></textarea>"';
 var iframeStyle = {
@@ -36,6 +38,9 @@ function getTempFile(tempFile, cb) {
       }
     }
     cb(result.value || '');
+    if (result.forbidden) {
+      message.warn('Without a username and password for Whistle, local non-temporary files cannot be accessed');
+    }
   });
 }
 
@@ -73,7 +78,7 @@ var EditorDialog = React.createClass({
     events.on('uploadTempFile', function(_, file) {
       self.readFile(file);
     });
-    var iframe = ReactDOM.findDOMNode(self.refs.iframe);
+    var iframe = findDOMNode(self.refs.iframe);
     var initTextArea = function() {
       var textarea = iframe.contentWindow.document.querySelector('textarea');
       var style = textarea && textarea.style;
@@ -83,10 +88,10 @@ var EditorDialog = React.createClass({
         style.width = iframeStyle.width + 'px';
         style.height = iframeStyle.height + 'px';
         style.padding = '5px';
-        style.border = '1px solid #ccc';
+        style.border = '1px solid var(--c-border, #ccc)';
         style.borderRadius = '3px';
         textarea.maxLength = MAX_LEN;
-        textarea.placeholder = self.props.placeholder || 'Input the text';
+        textarea.placeholder = self.props.placeholder || 'Enter text';
         textarea.onkeydown = function(e) {
           if ((e.ctrlKey || e.metaKey) && e.keyCode === 83) {
             e.preventDefault();
@@ -106,7 +111,7 @@ var EditorDialog = React.createClass({
         self._keyName = data.name;
         self.show({
           value: value,
-          title: (item ? 'Modify the key value' : 'Create a new key') + ' in Values (key: ' + data.name + ')',
+          title: item ? 'Update value for key \'' + data.name + '\' in Values' : 'Create a new key \'' + data.name + '\' to Values',
           isTempFile: false
         });
       } else {
@@ -121,7 +126,7 @@ var EditorDialog = React.createClass({
           getTempFile(tempFile, function(value) {
             self.show({
               value: value,
-              title: (isBlank ? 'Create a' : 'Modify the') + ' temp file' + (isBlank ? '' : ' (temp/' + tempFile + ')'),
+              title: (isBlank ? 'Create' : 'Modify') + ' temp file' + (isBlank ? '' : ' (temp/' + tempFile + ')'),
               isTempFile: true
             });
           });
@@ -243,7 +248,7 @@ var EditorDialog = React.createClass({
   },
   onUpload: function () {
     if (!this.reading) {
-      ReactDOM.findDOMNode(this.refs.readLocalFile).click();
+      findDOMNode(this.refs.readLocalFile).click();
     }
   },
   readFile: function(file) {
@@ -255,13 +260,13 @@ var EditorDialog = React.createClass({
     });
   },
   readLocalFile: function () {
-    var form = new FormData(ReactDOM.findDOMNode(this.refs.readLocalFileForm));
+    var form = new FormData(findDOMNode(this.refs.readLocalFileForm));
     var file = form.get('localFile');
     if (file.size > MAX_LEN) {
-      return win.alert('The size of all files cannot exceed 10m.');
+      return win.alert('Total file size must not exceed 10MB');
     }
     this.readFile(file);
-    ReactDOM.findDOMNode(this.refs.readLocalFile).value = '';
+    findDOMNode(this.refs.readLocalFile).value = '';
   },
   render: function () {
     var state = this.state;
@@ -275,20 +280,19 @@ var EditorDialog = React.createClass({
       <Dialog ref="editorDialog" wstyle={'w-editor-dialog' + (textEditor ? ' w-big-editor-dialog' : '') +
       (showUpload ? ' w-show-upload-temp-file' : '')}>
         <div className="modal-header">
-          {title || 'Edit the copied text'}
-          <button type="button" className="close" data-dismiss="modal">
-            <span aria-hidden="true">&times;</span>
-          </button>
+          <h4>{title || 'Edit copied text'}</h4>
+          <CloseBtn />
         </div>
         <div className="modal-body">
           {
-            textEditor ? <div className="w-mock-inline-action">
+            textEditor ? <div className="w-mock-action">
               {props.hideFormat ? null : <a onClick={this.formatValue}>Format</a>}
               <a onClick={this.clearValue}>Clear</a>
             </div> : null
           }
           {
-            textEditor ? <iframe ref="iframe" src={fakeIframe} style={iframeStyle}/> :
+            textEditor ? <div className="w-fake-iframe w-fix-drag"><iframe ref="iframe" data-type="fake"
+              src={fakeIframe} onLoad={dataCenter.handleIframeLoad} style={iframeStyle}/></div> :
               <textarea onChange={this.onChange} value={value} />
           }
         </div>
@@ -302,9 +306,10 @@ var EditorDialog = React.createClass({
           </button>
           {props.onConfirm ? null : <button
             type="button"
-            className="btn btn-warning"
+            className="btn btn-info"
             onClick={this.onUpload}
           >
+            <Icon name="folder-open" />
             Upload
           </button>}
           <button

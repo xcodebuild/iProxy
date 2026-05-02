@@ -1,3 +1,4 @@
+var util = require('./util');
 var events = require('./events');
 var PROTOCOLS = [
   'rule',
@@ -30,6 +31,7 @@ var PROTOCOLS = [
   'replaceStatus',
   'reqScript',
   'resScript',
+  'frameScript',
   'reqDelay',
   'resDelay',
   'reqSpeed',
@@ -76,7 +78,7 @@ var PROTOCOLS = [
   'reqWriteRaw',
   'resWriteRaw',
   'trailers',
-  'cipher'
+  'tlsOptions'
 ];
 
 var innerRules = [
@@ -91,7 +93,6 @@ var innerRules = [
   'statusCode'
 ];
 var pluginRules = [];
-var pluginNameList = [];
 var pluginVarList = [];
 var allPluginNameList = [];
 var forwardRules = innerRules.slice();
@@ -116,18 +117,18 @@ var groupRules = [
   ['Map Remote', ['https://', 'http://', 'wss://', 'ws://', 'tunnel://']],
   ['DNS Spoofing', ['host://', 'xhost://', 'proxy://', 'xproxy://', 'http-proxy://', 'xhttp-proxy://',
     'https-proxy://', 'xhttps-proxy://', 'socks://', 'xsocks://', 'pac://']],
-  ['Rewrite Request', ['urlParams://', 'pathReplace://','sniCallback://', 'method://', 'cipher://', 'reqHeaders://', 'forwardedFor://',
-    'ua://', 'auth://', 'cache://', 'referer://', 'attachment://', 'reqCharset://', 'reqCookies://',
-    'reqCors://', 'reqType://', 'reqBody://', 'reqMerge://', 'reqPrepend://', 'reqAppend://', 'reqReplace://', 'reqWrite://',
-    'reqWriteRaw://', 'trailers://']],
+  ['Rewrite Request', ['urlParams://', 'pathReplace://','sniCallback://', 'method://', 'tlsOptions://', 'reqHeaders://', 'forwardedFor://',
+    'ua://', 'auth://', 'cache://', 'referer://', 'reqType://', 'reqCharset://', 'reqCookies://',
+    'reqCors://', 'reqBody://', 'reqMerge://', 'reqPrepend://', 'reqAppend://', 'reqReplace://', 'reqWrite://',
+    'reqWriteRaw://', 'reqRules://', 'reqScript://']],
   ['Rewrite Response', ['statusCode://', 'replaceStatus://', 'redirect://', 'locationHref://', 'resHeaders://', 'responseFor://',
-    'resCharset://', 'resCookies://', 'resCors://', 'resType://', 'resBody://', 'resMerge://', 'resPrepend://', 'resAppend://', 'resReplace://',
+    'resCharset://', 'resType://', 'resCookies://', 'attachment://', 'resCors://', 'resBody://', 'resMerge://', 'resPrepend://', 'resAppend://', 'resReplace://',
     'htmlPrepend://', 'htmlBody://', 'htmlAppend://', 'cssPrepend://', 'cssBody://', 'cssAppend://', 'jsPrepend://', 'jsBody://',
-    'jsAppend://', 'resWrite://', 'resWriteRaw://']],
-  ['Common', ['pipe://', 'delete://', 'headerReplace://', 'reqScript://', 'resScript://', 'reqRules://', 'resRules://']],
+    'jsAppend://', 'trailers://', 'resWrite://', 'resWriteRaw://', 'resRules://', 'resScript://', 'frameScript://']],
+  ['General', ['pipe://', 'delete://', 'headerReplace://']],
   ['Throttle', ['reqDelay://', 'resDelay://', 'reqSpeed://', 'resSpeed://']],
   ['Tools', ['weinre://', 'log://']],
-  ['Settings', ['style://', 'lineProps://', 'enable://', 'disable://']],
+  ['Settings', ['style://', 'enable://', 'disable://', 'lineProps://']],
   ['Filters', ['ignore://', 'skip://', 'excludeFilter://', 'includeFilter://']],
   ['Plugins', []]
 ];
@@ -138,7 +139,6 @@ exports.setPlugins = function (pluginsState) {
   var disabledPlugins = pluginsState.disabledPlugins;
   pluginsOptions = pluginsState.pluginsOptions;
   pluginRules = [];
-  pluginNameList = [];
   pluginVarList = [];
   allPluginNameList = [];
   forwardRules = innerRules.slice();
@@ -155,7 +155,6 @@ exports.setPlugins = function (pluginsState) {
       if (!disabledPlugins[name]) {
         var vars = plugin.pluginVars;
         if (vars) {
-          pluginNameList.push(name);
           var hintSuffix = vars.hintSuffix;
           if (hintSuffix) {
             hintSuffix.forEach(function(suffix) {
@@ -199,11 +198,6 @@ exports.getPluginRules = function () {
   return pluginRules;
 };
 
-
-exports.getPluginNameList = function () {
-  return pluginNameList;
-};
-
 exports.getPluginVarList = function() {
   return pluginVarList;
 };
@@ -226,40 +220,40 @@ function getPlugin(rule) {
   }
 }
 
-var ROOT_HELP_URL = 'https://avwo.github.io/whistle/rules/';
 exports.getHelpUrl = function (rule) {
   if (!rule || rule === 'rule') {
-    return ROOT_HELP_URL;
+    return util.getDocUrl('rules/protocols.html');
   }
   if (rule === 'includeFilter' || rule === 'excludeFilter') {
-    return ROOT_HELP_URL + 'filter.html';
+    return util.getDocUrl('rules/filters.html');
   }
   if (rule === 'skip') {
-    return ROOT_HELP_URL + 'ignore.html';
+    return util.getDocUrl('rules/skip.html');
   }
   if (rule === 'lineProps') {
-    return ROOT_HELP_URL + 'lineProps.html';
+    return util.getDocUrl('rules/lineProps.html');
   }
   if (rule === 'reqRules') {
-    return ROOT_HELP_URL + 'reqScript.html';
+    return util.getDocUrl('rules/reqRules.html');
   }
   if (rule === 'resRules') {
-    return ROOT_HELP_URL + 'resScript.html';
+    return util.getDocUrl('rules/resRules.html');
   }
-  if (innerRules.indexOf(rule) !== -1) {
-    return ROOT_HELP_URL + 'rule/' + rule.replace(/^x/, '') + '.html';
-  }
-  if (webProtocols.indexOf(rule) !== -1) {
-    return ROOT_HELP_URL + 'rule/replace.html';
-  }
-  if (PROTOCOLS.indexOf(rule) !== -1) {
-    return ROOT_HELP_URL + rule.replace(/^x/, '') + '.html';
+  if (innerRules.indexOf(rule) !== -1 || webProtocols.indexOf(rule) !== -1 || PROTOCOLS.indexOf(rule) !== -1) {
+    if (rule === 'http-proxy') {
+      rule = 'proxy';
+    } else if (rule === 'xhttp-proxy') {
+      rule = 'xproxy';
+    } else if (rule === 'tlsOptions') {
+      rule = 'cipher';
+    }
+    return util.getDocUrl('rules/' + rule + '.html');
   }
   rule = getPlugin(rule);
   if (rule && rule.homepage) {
     return rule.homepage;
   }
-  return ROOT_HELP_URL;
+  return util.getDocUrl('rules/protocols.html');
 };
 
 exports.getPlugin = getPlugin;

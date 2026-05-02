@@ -1,9 +1,11 @@
-var gzip = require('zlib').gzip;
 var util = require('../../../lib/util');
 var config = require('../../../lib/config');
 var proc = require('../../../lib/util/process');
-var properties = require('../../../lib/rules/util').properties;
+var rulesUtil = require('../../../lib/rules/util');
+var padLeft = require('../../../lib/util/common').padLeft;
 
+var properties = rulesUtil.properties;
+var rules = rulesUtil.rules;
 var PID = process.pid;
 var MAX_OBJECT_SIZE = 1024 * 1024 * 6;
 var index = 0;
@@ -23,6 +25,9 @@ exports.getServerInfo = function(req) {
     baseDir = config.baseDirHash;
   }
   var info = {
+    whistleId: config.whistleId,
+    hasUpdater: config.hasUpdater,
+    hasWhistleToken: config.hasWhistleToken,
     pid: PID,
     pInfo: proc,
     verbatim: config.verbatim,
@@ -30,6 +35,7 @@ exports.getServerInfo = function(req) {
     ipv6Only: config.ipv6Only,
     dcc: config.disableCustomCerts,
     dns: dnsOverHttps || config.dnsServer,
+    rulesMFlag: rules.getMFlag(),
     doh: doh,
     bip: config.host,
     df: config.dnsOptional,
@@ -47,10 +53,13 @@ exports.getServerInfo = function(req) {
     rulesMode: config.rulesMode,
     strictMode: config.strict,
     multiEnv: config.multiEnv,
+    pureProxy: config.pureProxy,
+    notHTTPS: config.notAllowedEnableHTTPS,
     baseDir: baseDir,
     username: config.whistleName && config.username ? config.username + ' (' + config.whistleName + ')' : (config.username || config.whistleName),
     nodeVersion: process.version,
     latestVersion: properties.getLatestVersion('latestVersion'),
+    latestClientVersion: properties.getLatestVersion('latestClientVersion'),
     host: util.hostname(),
     isWin: util.isWin,
     port: config.port,
@@ -84,7 +93,7 @@ exports.getReqData = function(req, callback) {
     result = result ? Buffer.concat([result, chunk]) : chunk;
     if (result.length > MAX_OBJECT_SIZE) {
       req.removeAllListeners('data');
-      callback(new Error('The file size can not exceed 6m.'));
+      callback(new Error('The file size can not exceed 6MB'));
     }
   });
   req.on('error', callback);
@@ -110,30 +119,16 @@ exports.getReqData = function(req, callback) {
   });
 };
 
-function padding(num) {
-  return num < 10 ? '0' + num : num;
-}
-
-function paddingMS(ms) {
-  if (ms > 99) {
-    return ms;
-  }
-  if (ms > 9) {
-    return '0' + ms;
-  }
-  return '00' + ms;
-}
-
 function formatDate() {
   var date = new Date();
   var result = [];
   result.push(date.getFullYear());
-  result.push(padding(date.getMonth() + 1));
-  result.push(padding(date.getDate()));
-  result.push(padding(date.getHours()));
-  result.push(padding(date.getMinutes()));
-  result.push(padding(date.getSeconds()));
-  result.push(paddingMS(date.getMilliseconds()));
+  result.push(padLeft(date.getMonth() + 1));
+  result.push(padLeft(date.getDate()));
+  result.push(padLeft(date.getHours()));
+  result.push(padLeft(date.getMinutes()));
+  result.push(padLeft(date.getSeconds()));
+  result.push(padLeft(date.getMilliseconds(), 3));
   return result.join('');
 }
 
@@ -142,30 +137,12 @@ exports.formatDate = formatDate;
 exports.getClientIp = util.getClientIp;
 
 function sendError(res, err) {
-  res.status(500).send(config.debugMode ?
+  util.sendRes(res, 500, config.debugMode ?
     '<pre>' + util.encodeHtml(util.getErrorStack(err)) + '</pre>' : 'Internal Server Error');
 }
 
 exports.sendError = sendError;
 
-exports.sendGzip = function(req, res, data) {
-  if (!util.canGzip(req)) {
-    return res.json(data);
-  }
-  gzip(JSON.stringify(data), function(err, result) {
-    if (err) {
-      try {
-        res.json(data);
-      } catch (e) {
-        sendError(res, e);
-      }
-      return;
-    }
-    res.writeHead(200, {
-      'Content-Type': 'application/json; charset=utf-8',
-      'Content-Encoding': 'gzip',
-      'Content-Length': result.length
-    });
-    res.end(result);
-  });
-};
+exports.sendGzip = util.sendGzip;
+
+exports.sendGzipText = util.sendGzipText;

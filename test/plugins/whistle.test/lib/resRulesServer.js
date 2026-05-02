@@ -3,7 +3,6 @@ var app = express();
 var util = require('./util');
 
 module.exports = function(server, options) {
-  util.init(options);
   server.on('request', app);
   app.use(function(req, res, next) {
     req.on('error', next);
@@ -86,7 +85,7 @@ module.exports = function(server, options) {
 
     if (/values2.test.com/.test(fullUrl)) {
       rules.push(JSON.stringify({
-        rules: '/./ resHeaders://{resHeaders}',
+        rules: '* resHeaders://{resHeaders}',
         values: {
           resHeaders: {
             'x-res-test2': 'res'

@@ -1,4 +1,3 @@
-require('./base-css.js');
 require('../css/divider.css');
 var $ = require('jquery');
 var React = require('react');
@@ -26,6 +25,9 @@ var Divider = React.createClass({
   componentDidMount: function () {
     this.reset();
   },
+  componentDidUpdate: function () {
+    this._needReset && this.reset();
+  },
   triggerDOMReady: function () {
     if (this.__inited) {
       return;
@@ -36,15 +38,17 @@ var Divider = React.createClass({
   reset: function () {
     var self = this;
     var divider = ReactDOM.findDOMNode(self.refs.divider);
-    var vertical = util.getBoolean(self.props.vertical);
+    if (!divider.offsetHeight) {
+      self._needReset = true;
+      return;
+    }
+    self._needReset = false;
+    var vertical = util.getBool(self.props.vertical);
     var prop = vertical ? 'height' : 'width';
     var con = $(divider);
     var leftElem = con.children('.w-divider-left');
     var rightElem = con.children('.w-divider-right');
-    leftElem.add(rightElem).css({
-      height: 'auto',
-      width: 'auto'
-    });
+    leftElem.add(rightElem).css({ height: 'auto', width: 'auto' });
     if (self._leftWidth > 0) {
       leftElem[prop](self._leftWidth);
       self.triggerDOMReady();
@@ -67,8 +71,8 @@ var Divider = React.createClass({
     self.triggerDOMReady();
   },
   render: function () {
-    var vertical = util.getBoolean(this.props.vertical);
-    var divider = <div className="w-divider"></div>;
+    var vertical = util.getBool(this.props.vertical);
+    var divider = <div className="w-divider" onDoubleClick={this.reset} />;
     var hideLeft = this.props.hideLeft;
     var hideRight = this.props.hideRight;
     var leftWidth = parseInt(this.props.leftWidth, 10);
@@ -83,17 +87,17 @@ var Divider = React.createClass({
       <div
         ref="divider"
         className={
-          (vertical ? 'orient-vertical-box' : 'box') +
+          (vertical ? 'v-box' : 'box') +
           ' fill w-divider-con ' +
           (this.props.className || '') +
-          (util.getBoolean(this.props.hide) ? ' hide' : '')
+          (util.getBool(this.props.hide) ? ' hide' : '')
         }
       >
         <div
           style={hideLeft ? HIDE : undefined}
           className={
             (leftWidth ? '' : 'fill ') +
-            'w-divider-left orient-vertical-box ' +
+            'w-divider-left v-box ' +
             (this.props.leftClassName || '')
           }
         >
@@ -104,7 +108,7 @@ var Divider = React.createClass({
           style={hideRight ? HIDE : undefined}
           className={
             (noLeft ? 'fill ' : '') +
-            'w-divider-right orient-vertical-box ' +
+            'w-divider-right v-box ' +
             (this.props.rightClassName || '')
           }
         >

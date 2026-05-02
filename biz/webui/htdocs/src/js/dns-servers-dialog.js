@@ -1,6 +1,6 @@
-require('./base-css.js');
 var React = require('react');
 var Dialog = require('./dialog');
+var CloseBtn = require('./close-btn');
 
 var DNSDialog = React.createClass({
   getInitialState: function () {
@@ -39,25 +39,29 @@ var DNSDialog = React.createClass({
     var state = this.state;
     var title;
     if (state.doh) {
-      title = 'Resolve IP address from follow URL:';
+      title = 'Resolve IP address from follow URL';
     } else {
       title =
         'Resolve ' +
         (state.ipv6 ? 'IPv6' : 'IPv4') +
         ' address from follow DNS servers' +
-        (state.useDefault ? ' first' : '') +
-        ':';
+        (state.useDefault ? ' first' : '');
     }
     return (
       <Dialog ref="dnsServersDialog" wstyle="w-dns-servers-dialog">
         <div className="modal-header">
           {title}
-          <button type="button" className="close" data-dismiss="modal">
-            <span aria-hidden="true">&times;</span>
-          </button>
+          <CloseBtn />
         </div>
         <pre className="modal-body">{state.servers}</pre>
         <div className="modal-footer">
+          <button
+            type="button"
+            className="btn btn-default"
+            data-dismiss="modal"
+          >
+            Close
+          </button>
           <button
             type="button"
             data-dismiss="modal"
@@ -65,13 +69,6 @@ var DNSDialog = React.createClass({
             data-clipboard-text={state.servers}
           >
             Copy
-          </button>
-          <button
-            type="button"
-            className="btn btn-default"
-            data-dismiss="modal"
-          >
-            Close
           </button>
         </div>
       </Dialog>

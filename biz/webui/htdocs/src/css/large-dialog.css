@@ -1,0 +1,74 @@
+.w-large-dialog .modal-dialog {
+  width: calc(100% - 100px);
+  height: calc(100% - 60px);
+  min-width: 960px;
+  min-height: 520px;
+}
+
+.w-large-dialog {
+  overflow: auto!important;
+}
+
+.w-service-dialog {
+  z-index: var(--z-modal);
+}
+
+.w-editor-win {
+  z-index: var(--z-modal-max);
+}
+
+.w-large-dialog button.close, .w-custom-dialog button.close {
+  font-size: 20px;
+  line-height: 6px;
+  padding: 4px 3px 8px;
+  border-radius: 20px;
+  border: 1px solid var(--c-border);
+  background: var(--b-default);
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  z-index: 1;
+}
+
+.w-large-dialog button.close:hover, .w-custom-dialog button.close:hover {
+  color: var(--c-heavy);
+}
+
+.w-large-dialog .w-open-win-btn {
+  position: absolute;
+  top: -23px;
+  right: 15px;
+  z-index: 1;
+  font-size: 12px;
+  padding: 3px 10px;
+  display: inline-block;
+  background: var(--b-title);
+  color: var(--c-heavy);
+  border-top-left-radius: 3px;
+  border-top-right-radius: 3px;
+  text-decoration: none;
+}
+
+.w-large-dialog .w-open-win-btn:hover {
+  color: var(--c-default);
+}
+
+.w-large-dialog .modal-content, .w-custom-dialog .modal-content {
+  border-radius: 5px;
+  height: 100%;
+  padding: 0;
+  border: none;
+}
+
+.w-large-dialog iframe, .w-custom-dialog iframe {
+  border-radius: 5px;
+}
+
+.w-large-dialog .modal-body, .w-custom-dialog .modal-body {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  padding: 0;
+}

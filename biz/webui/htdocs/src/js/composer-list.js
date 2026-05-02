@@ -6,6 +6,7 @@ var dataCenter = require('./data-center');
 var events = require('./events');
 var TabMgr = require('./tab-mgr');
 var storage = require('./storage');
+var Icon = require('./icon');
 
 var DEFAULT_TAB = ' ';
 
@@ -13,10 +14,7 @@ var ComposerList = React.createClass({
   getInitialState: function () {
     return { activeName: storage.get('activeComposerTab') || DEFAULT_TAB };
   },
-  shouldComponentUpdate: function (nextProps) {
-    var hide = util.getBoolean(this.props.hide);
-    return hide != util.getBoolean(nextProps.hide) || !hide;
-  },
+  shouldComponentUpdate: util.shouldComponentUpdate,
   componentDidMount: function () {
     var self = this;
     events.on('comTabsChange', function () {
@@ -47,15 +45,17 @@ var ComposerList = React.createClass({
         activeTab = true;
         hasActive = true;
       }
+      var icon = util.getTabIcon(tab);
       return (
         <button
           key={pluginName}
           onClick={function () {
             self.showTab(pluginName);
           }}
-          className={'btn btn-default' + (activeTab ? ' active' : '')}
+          className={'w-custom-tab-btn btn btn-default' + (activeTab ? ' active' : '')}
           title={pluginName}
         >
+          {icon ? <img className="w-tab-icon" src={icon} /> : null}
           {tab.name}
         </button>
       );
@@ -67,11 +67,11 @@ var ComposerList = React.createClass({
     return (
       <div
         className={
-          'fill orient-vertical-box w-composer-list' + (hide ? ' hide' : '')
+          'fill v-box w-com-list' + (hide ? ' hide' : '')
         }
       >
         {tabs.length ? (
-          <div className="box w-composer-tab-list">
+          <div className="box w-com-tab-list">
             <button
               type="button"
               onClick={function () {
@@ -79,7 +79,7 @@ var ComposerList = React.createClass({
               }}
               className={'btn btn-default' + (activeDefalut ? ' active' : '')}
             >
-              <span className="glyphicon glyphicon-send"></span>Default
+              <Icon name="send" />Default
             </button>
             <div className="fill w-custom-tabs">{elem}</div>
           </div>

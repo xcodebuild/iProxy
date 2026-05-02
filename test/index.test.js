@@ -15,7 +15,7 @@ var config = require('./config.test');
 var events = require('./events');
 var values = util.getValues();
 var testList = fs.readdirSync(path.join(__dirname, './units'));
-var defaultRules = fs.readFileSync(path.join(__dirname, 'rules.txt'), {encoding: 'utf8'});
+var defaultRules = util.readText('rules.txt');
 var options = {
   key: fs.readFileSync(path.join(__dirname, 'assets/certs/root.key')),
   cert: fs.readFileSync(path.join(__dirname, 'assets/certs/_root.crt'))
@@ -26,6 +26,10 @@ var WebSocketServer = require('ws').Server;
 var wss = new WebSocketServer({ port: config.wsPort });
 var WHISTLE_PATH = process.env.WHISTLE_PATH = __dirname;
 var PLUGINS_PATH = path.join(WHISTLE_PATH, '.whistle/node_modules');
+var mockRules = util.setPath(util.readText('assets/rules/mock.txt'));
+var serviceRules = util.setPath(util.readText('assets/rules/service.txt'));
+var shadowRules = util.setPath(util.readText('assets/rules/shadow.txt'));
+
 //Node7及以下使用非SNI Server
 if (process.versions.modules <= 51) {
   require('hagent').serverAgent.existsServer = function() {
@@ -84,19 +88,20 @@ values['options.html'] = {
 var proxy = startWhistle({
   port: config.port,
   storage: 'test_',
-  mode: 'strict',
   httpPort: config.httpServerPort,
   httpsPort: config.httpsServerPort,
   certDir: path.join(__dirname, 'assets/certs'),
   debugMode: true,
   localUIHost: 'local.whistle.com|local2.whistle.com&localn.whistle.com',
   pluginHost: 'test=test.local.whistle.com|b.test.local.whistle.com&test3.local.whistle.com,',
+  mode: 'enableRequestHeaderRules', // 允许通过请求头带规则，主要用于第三方扩张
   rules: {
     Default: defaultRules,
     test: {
       rules: 'test.options.com file://{options.html}\n@'
         + path.join(__dirname, 'assets/files/rules.txt')
-        + '\n@https://127.0.0.1:' + config.httpsPort + '/test-remote.rules',
+        + '\n@https://127.0.0.1:' + config.httpsPort + '/test-remote.rules'
+        + '\ntest.key.test.w2.org/test file://{test.txt}\n``` test.txt\ntest\n```',
       enable: true
     },
     abc: '123'
@@ -125,11 +130,11 @@ var socksServer = socks.createServer(function(info, accept, deny) {
     }
     return;
   }
-  if (info.dstPort === 8081) {
+  if (info.dstPort === 18081) {
     if (socket = accept(true)) {
       client = net.connect({
         host: '127.0.0.1',
-        port: 8081
+        port: 18081
       }, function() {
         socket.pipe(client).pipe(socket);
       });
@@ -221,6 +226,10 @@ function startTest() {
   if (--count > 0) {
     return;
   }
+
+  proxy.rulesUtil.setMockRules(mockRules);
+  proxy.rulesUtil.setServiceRules(serviceRules);
+  proxy.setShadowRules(shadowRules);
 
   var done;
   function testAll() {

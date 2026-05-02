@@ -1,19 +1,20 @@
 var React = require('react');
 var events = require('./events');
 var EnableHttpsBtn = require('./enable-https-btn');
+var util = require('./util');
 
-
-function showFrames() {
-  events.trigger('showFrames');
-}
 
 var Tips = React.createClass({
+  showFrames: function() {
+    var data = this.props.data || {};
+    events.trigger('showFrames' + (data.inComposer ? 'InComposer' : ''));
+  },
   render: function () {
     var data = this.props.data || { hide: true };
     var className = 'w-textview-tips' + (data.hide ? ' hide' : '');
     if (data.isFrames) {
       return (
-        <a className={className} onClick={showFrames}>
+        <a className={className} onClick={this.showFrames}>
           View Frames
         </a>
       );
@@ -22,11 +23,11 @@ var Tips = React.createClass({
       return (
         <div className={className}>
           <p>
-            <EnableHttpsBtn />
+            {data.importedData ? null : <EnableHttpsBtn />}
             Tunnel
           </p>
           <a
-            href="https://avwo.github.io/whistle/webui/https.html"
+            href={util.getDocUrl('gui/https.html')}
             target="_blank"
           >
             Click here for more information
@@ -39,7 +40,7 @@ var Tips = React.createClass({
         <p>{data.message}</p>
         {data.url ? (
           <a href={data.url} target="_blank">
-            Open the URL in a new window
+            Open the URL in new window
           </a>
         ) : undefined}
       </div>

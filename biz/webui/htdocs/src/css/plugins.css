@@ -1,9 +1,10 @@
 .w-nav-tabs {
-  padding-top: 5px;
   font-size: 13px;
 }
 .w-nav-tabs > .nav-tabs {
   padding-left: 2px;
+  padding-top: 5px;
+  background: var(--b-bar);
 }
 .w-nav-tabs > .nav > li > a {
   padding: 5px 20px 5px 10px;
@@ -14,30 +15,44 @@
   min-width: 60px;
   min-height: 30px;
   position: relative;
+  display: flex;
+  align-items: center;
 }
 .w-nav-tabs > .nav > li > a > .w-close-icon {
   display: block;
   position: absolute;
   top: 5px;
   right: 5px;
-  color: #999;
+  color: var(--c-gray);
   cursor: pointer;
 }
 .w-nav-tabs > .nav > li > a > .w-close-icon:hover {
-  color: #000;
+  color: var(--c-default);
 }
 .w-plugin-tab-disabled {
-  color: #ccc !important;
+  color: var(--c-disabled) !important;
 }
 .w-plugin-tab-disabled .glyphicon-ban-circle {
   vertical-align: text-top;
   margin-right: 3px;
-  color: #ccc !important;
+  color: var(--c-disabled) !important;
 }
+
+.w-custom-tab-btn {
+  display: inline-flex;
+  align-items: center;
+}
+
+.w-plugins-tab img, .w-custom-tab-btn img {
+  width: 13px;
+  max-height: 13px;
+  margin: 0 3px 0 0;
+}
+
 .w-nav-tabs iframe {
   border: none;
   display: block;
-  background-color: #fff;
+  background-color: var(--b-default);
   margin: 0;
   padding: 0;
   width: 100%;
@@ -47,12 +62,17 @@
 .w-nav-tabs .w-nav-tab-panel > div {
   overflow: hidden;
 }
-.w-nav-tabs > .nav > .w-nav-home-tab > a {
+.w-nav-tabs > .nav > .w-nav-normal-tab > a {
   padding-right: 10px !important;
 }
 
-.w-nav-tabs > .nav > .w-nav-home-tab > a span {
+.w-nav-tabs > .nav > .w-nav-normal-tab > a span {
   margin-right: 5px;
+  top: 0;
+}
+
+.w-nav-tabs > .nav > .w-nav-normal-tab > a .glyphicon-cloud {
+  top: 2px;
 }
 
 .w-plugins th,
@@ -61,14 +81,14 @@
   font-weight: normal;
 }
 .w-plugins-headers {
-  border-bottom: 1px solid #ccc;
+  border-bottom: 1px solid var(--c-border);
   overflow: hidden;
 }
 .w-plugins-headers .table th {
   border: none !important;
   padding: 6px;
-  color: #000;
-  background: #fafafa;
+  color: var(--c-default);
+  background: var(--b-bar);
   font-weight: bold;
 }
 .w-plugins-list {
@@ -79,7 +99,7 @@
 .w-plugins-list th,
 .w-plugins-list td {
   border-top: none !important;
-  border-bottom: 1px solid #ddd;
+  border-bottom: 1px solid var(--c-border);
   padding: 8px 6px !important;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -88,7 +108,7 @@
 .w-plugins-disable,
 .w-plugins-disable a,
 .w-plugins-disable td {
-  color: #aaa;
+  color: var(--c-disabled);
 }
 
 .w-plugins-order {
@@ -105,20 +125,24 @@
   width: 160px;
 }
 .w-plugins-version {
-  width: 140px;
+  width: 150px;
 }
-.w-plugins-list .w-has-new-version .w-plugins-version .w-new-version,
-.w-plugins-list .w-has-new-version .w-plugin-update-btn,
-.w-plugins-menu.w-plugin-update-btn {
-  color: #f66 !important;
+.w-has-new-version .w-plugins-version .w-new-version,
+.w-has-new-version .w-plugin-update-btn,
+.w-plugins-menu.w-plugin-update-btn,
+.w-about-dialog .w-new-version {
+  color: var(--c-risk) !important;
 }
-.w-plugins-list .w-has-new-version .w-plugins-version span {
-  margin-left: 3px;
+
+.w-about-dialog .w-new-version {
+  margin-left: 5px;
 }
-.w-plugins-list .w-has-new-version .w-plugins-version span:hover,
-.w-plugins-list .w-has-new-version .w-plugin-update-btn:hover,
-.w-plugins-menu.w-plugin-update-btn:hover {
-  color: #f33 !important;
+
+.w-has-new-version .w-plugins-version .w-new-version:hover,
+.w-has-new-version .w-plugin-update-btn:hover,
+.w-plugins-menu.w-plugin-update-btn:hover,
+.w-about-dialog .w-new-version:hover {
+  color: var(--c-risk) !important;
 }
 .w-plugins-date {
   width: 190px;
@@ -135,19 +159,19 @@
   margin-right: 0;
 }
 .w-plugins-operation span.disabled {
-  color: #ccc;
+  color: var(--c-disabled);
 }
 
 .w-plugin-rules-dialog .modal-dialog {
-  width: 640px;
+  width: 680px;
 }
 .w-plugin-rules-dialog .modal-dialog pre {
-  max-height: 220px;
+  max-height: 230px;
   overflow: auto;
   padding: 10px;
 }
 .w-plugin-rules-dialog fieldset {
-  border: 1px solid #ddd;
+  border: 1px solid var(--c-border);
 }
 .w-plugin-rules-dialog fieldset legend {
   font-size: 13px;
@@ -168,34 +192,37 @@
   right: 10px;
   top: 16px;
 }
-
+.w-plugin-update-dialog {
+  z-index: var(--z-modal-max);
+}
 .w-plugin-update-dialog .modal-dialog {
   width: 600px;
 }
 .w-plugin-update-cmd {
-  background: #002240;
-  color: #ddd;
+  background: var(--b-editor);
+  color: var(--c-editor);
   padding: 10px;
   margin-top: 10px;
   font-size: 14px;
   display: block;
   width: 578px;
   height: 220px;
+  border-radius: 3px;
 }
 .w-plugin-install {
   padding: 5px;
 }
 .w-plugin-btn {
-  color: #337ab7 !important;
+  color: var(--c-link) !important;
 }
 .w-plugin-btn:hover {
-  color: #23527c !important;
+  color: var(--c-link-hover) !important;
 }
 .w-plugin-update-dialog .modal-footer {
   white-space: nowrap;
 }
 .w-registry-list {
-  margin-right: 25px;
+  margin-right: 15px;
 }
 .w-registry-list select {
   border-radius: 0;
@@ -205,4 +232,28 @@
   height: 30px;
   padding: 0 5px;
   width: 350px;
+}
+
+.w-plugin-copy-cmd {
+  display: inline-block;
+  position: absolute;
+  z-index: 1;
+  text-decoration: none!important;
+  color: var(--c-heavy);
+  padding: 0 6px;
+  background: var(--b-heavy);
+  font-size: 12px;
+  top: 28px;
+  right: 10px;
+  border-top-left-radius: 3px;
+  border-top-right-radius: 3px;
+}
+
+.w-copied-text {
+  color: var(--c-disabled) !important;
+  cursor: not-allowed;
+}
+
+.w-plugin-copy-cmd:hover {
+  color: var(--c-default);
 }

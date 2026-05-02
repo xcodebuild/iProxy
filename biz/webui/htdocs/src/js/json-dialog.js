@@ -4,6 +4,7 @@ var JSONView = require('./json-viewer');
 var FilterInput = require('./filter-input');
 var util = require('./util');
 var FbBtn = require('./forward-back-btn');
+var CloseBtn = require('./close-btn');
 
 var KV_RE = /^(k|v):/;
 
@@ -15,13 +16,30 @@ var JSONDialog = React.createClass({
     keyword = keyword.trim();
     var self = this;
     self._type = 0;
+    var not = keyword[0] === '!';
+    if (not) {
+      keyword = keyword.substring(1).trim();
+    }
     if (KV_RE.test(keyword)) {
       self._type = RegExp.$1 === 'k' ? 1 : 2;
       keyword = keyword.substring(2);
     }
     clearTimeout(self.filterTimer);
-    if (self._keyword !== keyword) {
+    if (self._keyword !== keyword || self._not !== not) {
       self._keyword = keyword;
+      self._not = not;
+      if (self._type && keyword[0] === '!') {
+        not = true;
+        keyword = keyword.substring(1).trim();
+      }
+      if (keyword) {
+        keyword = {
+          not: not,
+          keyword: keyword.toLowerCase(),
+          regexp: util.toRegExp(keyword)
+        };
+      }
+      self._keywordObj = keyword;
       if (!keyword) {
         return self.setState({ curData: null });
       }
@@ -32,10 +50,10 @@ var JSONDialog = React.createClass({
     }, 600);
   },
   filterJson: function(data) {
-    if (!this._keyword) {
+    if (!this._keywordObj) {
       return;
     }
-    var json = util.filterJsonText(data.str, this._keyword, this._type);
+    var json = util.filterJsonText(data.str, this._keywordObj, this._type);
     if (!json) {
       return;
     }
@@ -138,12 +156,10 @@ var JSONDialog = React.createClass({
             onBack={this.onBack}
             onForward={this.onForward}
           />
-          <button type="button" className="close" data-dismiss="modal">
-            <span aria-hidden="true">&times;</span>
-          </button>
+          <CloseBtn />
           <div
-            className="orient-vertical-box"
-            style={{ width: 880, height: 560, marginTop: 22, background: this._keyword ? 'lightyellow' : undefined }}
+            className="v-box"
+            style={{ width: 880, height: 560, marginTop: 22, background: this._keywordObj ? 'var(--b-filtered)' : undefined }}
           >
             <JSONView keyPath={state.keyPath} dialog data={state.curData || state.data} viewSource={true} />
           </div>

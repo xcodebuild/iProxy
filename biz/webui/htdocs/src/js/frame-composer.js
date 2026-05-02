@@ -2,13 +2,14 @@ var React = require('react');
 var ReactDOM = require('react-dom');
 var dataCenter = require('./data-center');
 var util = require('./util');
-var events = require('./events');
 var message = require('./message');
 var storage = require('./storage');
 var win = require('./win');
+var Icon = require('./icon');
 
 var MAX_FILE_SIZE = 1024 * 1025;
 var MAX_LENGTH = 1024 * 64;
+var findDOMNode = ReactDOM.findDOMNode;
 
 var FrameComposer = React.createClass({
   getInitialState: function () {
@@ -19,9 +20,10 @@ var FrameComposer = React.createClass({
   },
   componentDidMount: function () {
     var self = this;
-    self.dataField = ReactDOM.findDOMNode(self.refs.uploadData);
-    self.dataForm = ReactDOM.findDOMNode(self.refs.uploadDataForm);
-    events.on('composeFrame', function (e, frame) {
+    var framesCtx = this.props.framesCtx;
+    self.dataField = findDOMNode(self.refs.uploadData);
+    self.dataForm = findDOMNode(self.refs.uploadDataForm);
+    framesCtx.on('composeFrame', function (e, frame) {
       if (frame) {
         var body;
         if (self.state.isHexText) {
@@ -31,15 +33,15 @@ var FrameComposer = React.createClass({
         }
         self.setTextarea(body);
         setTimeout(function() {
-          ReactDOM.findDOMNode(self.refs.textarea).focus();
+          findDOMNode(self.refs.textarea).focus();
         }, 60);
       }
     });
-    events.on('replayFrame', function (e, frame) {
+    framesCtx.on('replayFrame', function (e, frame) {
       if (!frame) {
         return;
       }
-      events.trigger('enableRecordFrame');
+      framesCtx.trigger('enableRecordFrame');
       self.send(
         {
           target: frame.isClient ? 'server' : 'client',
@@ -47,17 +49,14 @@ var FrameComposer = React.createClass({
           base64: frame.base64
         },
         function () {
-          events.trigger('autoRefreshFrames');
+          framesCtx.trigger('autoRefreshFrames');
         }
       );
     });
     var text = storage.get('composeFrameData');
     this.setTextarea(String(text || ''));
   },
-  shouldComponentUpdate: function (nextProps) {
-    var hide = util.getBoolean(this.props.hide);
-    return hide != util.getBoolean(nextProps.hide) || !hide;
-  },
+  shouldComponentUpdate: util.shouldComponentUpdate,
   uploadTextToServer: function () {
     this.target = 'server';
     this.dataType = 'text';
@@ -85,7 +84,7 @@ var FrameComposer = React.createClass({
   uploadForm: function (form) {
     var file = form.get('uploadData');
     if (file.size > MAX_FILE_SIZE) {
-      return win.alert('The file size cannot exceed 1m.');
+      return win.alert('Maximum file size: 1MB');
     }
     var self = this;
     var params = {
@@ -104,13 +103,13 @@ var FrameComposer = React.createClass({
       return;
     }
     params.reqId = data.id;
-    events.trigger('enableRecordFrame');
+    this.props.framesCtx.trigger('enableRecordFrame');
     dataCenter.socket.send(params, function (data, xhr) {
       if (!data) {
         return util.showSystemError(xhr);
       }
       if (data.ec !== 0) {
-        return message.error('Server busy, try again later.');
+        return message.error('Server temporarily unavailable. Please try again shortly');
       }
       cb && cb();
     });
@@ -143,7 +142,7 @@ var FrameComposer = React.createClass({
     self.send(params, function () {
       clearTimeout(self.sendTimer);
       self.sendTimer = null;
-      events.trigger('autoRefreshFrames');
+      self.props.framesCtx.trigger('autoRefreshFrames');
       self.setState({});
     });
   },
@@ -199,11 +198,11 @@ var FrameComposer = React.createClass({
       <div
         onDrop={this.onDrop}
         className={
-          'fill orient-vertical-box w-frames-composer' +
+          'fill v-box w-frames-com' +
           (this.props.hide ? ' hide' : '')
         }
       >
-        <div className="w-frames-composer-action">
+        <div className="w-frames-com-action">
           <label
             className={
               'w-frames-hex-data' + (isHexText ? ' w-frames-checked' : '')
@@ -239,8 +238,8 @@ var FrameComposer = React.createClass({
               type="button"
               className="btn btn-default btn-sm"
             >
-              <span className="glyphicon glyphicon-arrow-left"></span>
-              Send to client
+              <Icon name="arrow-left" />
+              Send To Client
             </button>
             <button
               disabled={disabled}
@@ -258,15 +257,15 @@ var FrameComposer = React.createClass({
               className={'dropdown-menu' + (closed ? ' hide' : '')}
             >
               <li style={displayStyle}>
-                <a onClick={this.onSend}>Send binary data</a>
+                <a onClick={this.onSend}>Send Binary Data</a>
               </li>
               <li>
                 <a onClick={this.uploadTextToClient}>
-                  {isHttps ? 'Upload to client' : 'Upload text data'}
+                  {isHttps ? 'Upload ' : 'Upload Text Data'}
                 </a>
               </li>
               <li style={displayStyle}>
-                <a onClick={this.uploadBinToClient}>Upload binary data</a>
+                <a onClick={this.uploadBinToClient}>Upload Binary Data</a>
               </li>
             </ul>
           </div>
@@ -280,8 +279,8 @@ var FrameComposer = React.createClass({
               type="button"
               className="btn btn-default btn-sm"
             >
-              <span className="glyphicon glyphicon-arrow-right"></span>
-              Send to server
+              <Icon name="arrow-right" />
+              Send To Server
             </button>
             <button
               disabled={disabled}
@@ -300,16 +299,16 @@ var FrameComposer = React.createClass({
             >
               <li style={displayStyle}>
                 <a data-target="server" onClick={this.onSend}>
-                  Send binary data
+                  Send Binary Data
                 </a>
               </li>
               <li>
                 <a onClick={this.uploadTextToServer}>
-                  {isHttps ? 'Upload to server' : 'Upload text data'}
+                  {isHttps ? 'Upload ' : 'Upload Text Data'}
                 </a>
               </li>
               <li style={displayStyle}>
-                <a onClick={this.uploadBinToServer}>Upload binary data</a>
+                <a onClick={this.uploadBinToServer}>Upload Binary Data</a>
               </li>
             </ul>
           </div>
@@ -329,7 +328,7 @@ var FrameComposer = React.createClass({
           value={text}
           onKeyDown={this.onForamt}
           onChange={this.onTextareaChange}
-          placeholder={'Input the ' + (isHexText ? 'hex ' : '') + 'text'}
+          placeholder={'Enter ' + (isHexText ? 'hex ' : '') + 'text'}
           className="fill"
         />
         <form

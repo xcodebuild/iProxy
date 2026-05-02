@@ -7,6 +7,8 @@ var util = require('./util');
 var message = require('./message');
 var events = require('./events');
 var win = require('./win');
+var Icon = require('./icon');
+var CloseBtn = require('./close-btn');
 
 var TIMESTAMP_RE = /^(\d+)\.([\s\S]+)$/;
 
@@ -64,7 +66,7 @@ var RecycleBinDialog = React.createClass({
     }
     if (data.ec === 3) {
       var self = this;
-      message.error('The file does not exist.');
+      message.error('File not found');
       dataCenter[this.state.name.toLowerCase()].recycleList(function (
         result,
         xhr
@@ -89,7 +91,7 @@ var RecycleBinDialog = React.createClass({
           return;
         }
         if (!data.data) {
-          return message.warn('No content.');
+          return message.info('Empty content');
         }
         util.openEditor(data.data);
       }
@@ -113,7 +115,7 @@ var RecycleBinDialog = React.createClass({
     var origName = decode(name.substring(name.indexOf('.') + 1));
     var self = this;
     win.confirm(
-      'Are you sure to delete \'' + origName + '\' completely.',
+      'Do you confirm the deletion of \'' + origName + '\' completely?',
       function (sure) {
         if (sure) {
           dataCenter[self.state.name.toLowerCase()].recycleRemove(
@@ -139,11 +141,11 @@ var RecycleBinDialog = React.createClass({
     var list = state.list || [];
     return (
       <Dialog ref="recycleBinDialog" wstyle="w-files-dialog">
-        <div className="modal-body" ref="recycleBinBody">
-          <button type="button" className="close" data-dismiss="modal">
-            <span aria-hidden="true">&times;</span>
-          </button>
+        <div className="modal-header">
           <h4>{state.name} Trash</h4>
+          <CloseBtn />
+        </div>
+        <div className="modal-body" ref="recycleBinBody">
           <table className="table">
             <thead>
               <th className="w-files-order">#</th>
@@ -151,7 +153,7 @@ var RecycleBinDialog = React.createClass({
               <th className="w-files-path">Filename</th>
               <th className="w-files-operation">Operation</th>
             </thead>
-            <tbody>
+            <tbody className="w-hover-body">
               {list.length ? (
                 list.map(function (item, i) {
                   return (
@@ -159,7 +161,7 @@ var RecycleBinDialog = React.createClass({
                       <th className="w-files-order">{i + 1}</th>
                       <td className="w-files-date">{item.date}</td>
                       <td className="w-files-path" title={item.filename}>
-                        {util.isGroup(item.filename) ? <span className="glyphicon glyphicon-triangle-right w-list-group-icon" /> : null}
+                        {util.isGroup(item.filename) ? <Icon name="triangle-right" className="w-list-group-icon" /> : null}
                         {item.filename}
                       </td>
                       <td className="w-files-operation">

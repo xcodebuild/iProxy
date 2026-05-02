@@ -1,24 +1,19 @@
 .w-menu {
   height: 34px;
-  border-top: 1px solid #fcfcfc;
-  border-bottom: 1px solid #ccc;
-  background: #f1f3f4;
+  border-bottom: 1px solid var(--c-border);
+  background: var(--b-title);
   padding-right: 80px;
   position: relative;
-  z-index: 1001;
+  z-index: var(--z-menu);
   white-space: nowrap;
 }
-.w-menu a,
-.w-history-bar a {
+.w-menu a {
   text-decoration: none !important;
-  color: #000;
-  padding: 0 5px;
+  color: var(--c-heavy);
+  padding: 0 8px;
   line-height: 26px;
   height: 26px;
-  margin-right: 5px;
   display: inline-block;
-}
-.w-menu a {
   height: 31px;
   line-height: 31px;
   overflow: hidden;
@@ -40,23 +35,25 @@
 .w-menu a:hover,
 .w-left-menu a:hover,
 .w-left-menu a:hover .w-disabled {
-  color: #337ab7;
+  color: var(--c-link);
+}
+.w-left-menu a:hover, .w-menu a:hover {
+  background: var(--b-btn-hover);
 }
 .w-menu .w-offline {
-  color: #ccc !important;
+  color: var(--c-disabled) !important;
   cursor: default;
 }
 .w-menu .w-disabled,
-.w-frames-action .w-disabled,
-.w-history-bar .w-disabled {
-  color: #aaa !important;
+.w-frames-action .w-disabled {
+  color: var(--c-disabled) !important;
   cursor: not-allowed !important;
 }
 .w-left-menu .w-disabled {
-  color: #aaa;
+  color: var(--c-disabled);
 }
 .w-menu .w-menu-enable .glyphicon-cog {
-  color: #ff6666 !important;
+  color: var(--c-risk) !important;
 }
 .w-menu .w-new-version-icon {
   position: absolute;
@@ -65,7 +62,7 @@
   width: 5px;
   height: 5px;
   border-radius: 5px;
-  background: red;
+  background: var(--c-error);
 }
 .w-menu .w-menu-wrapper {
   display: inline-block;
@@ -80,8 +77,8 @@
 .w-input-menu-item {
   display: block;
   position: absolute;
-  background: #fff;
-  border: 1px solid #ccc;
+  background: var(--b-default);
+  border: 1px solid var(--c-border);
   border-radius: 2px;
   z-index: 101;
   top: 33px;
@@ -91,7 +88,7 @@
 .w-input-menu-item input {
   width: 246px;
   height: 32px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--c-border);
   border-radius: 0!important;
   border-radius: 2px;
   padding: 0 5px;
@@ -105,7 +102,7 @@
   border-top-right-radius: 2px;
   border-bottom-right-radius: 2px;
   margin-left: 1px;
-  border-color: #ccc;
+  border-color: var(--c-border);
 }
 
 .w-create-rules-input {
@@ -149,7 +146,7 @@
 }
 .w-disabled .glyphicon-ok,
 .w-disabled .glyphicon-stop {
-  color: #ccc !important;
+  color: var(--c-disabled) !important;
 }
 
 .w-rules-settings-dialog .modal-dialog {
@@ -165,7 +162,7 @@
   margin-bottom: 5px;
 }
 .w-https-dialog .modal-dialog {
-  width: 340px;
+  width: 342px;
 }
 .w-https-help {
   margin-left: 150px;
@@ -194,14 +191,14 @@
 }
 
 .w-choose-filte-type .modal-dialog {
-  width: 456px;
+  width: 435px;
 }
 .w-choose-filte-type-label {
   white-space: nowrap;
 }
 .w-choose-filte-type-label .form-control {
   margin-left: 10px;
-  width: 200px;
+  width: 260px;
   display: inline-block;
   font-weight: normal;
 }
@@ -215,18 +212,14 @@
   font-weight: bold;
 }
 
-.w-show-left-menu .w-menu  .w-account-menu {
-  display: none!important;
-}
-
-.w-show-left-menu-btn {
+.w-switch-layout {
   padding: 0 15px !important;
   margin-right: 0 !important;
 }
 .w-left-menu {
-  background: #f1f3f4;
-  border-left: 1px solid #ccc;
-  border-right: 1px solid #ccc;
+  background: var(--b-title);
+  border-left: 1px solid var(--c-border);
+  border-right: 1px solid var(--c-border);
   display: none;
 }
 .w-show-left-menu .w-left-menu {
@@ -244,7 +237,7 @@
   overflow: hidden;
   text-align: center;
   text-decoration: none !important;
-  color: #000;
+  color: var(--c-default);
 }
 .w-left-menu a span {
   margin-right: 5px;
@@ -270,10 +263,10 @@
 }
 .w-left-menu a:hover .w-left-menu-tips {
   display: block;
-  color: #000;
-  background-color: #f1f3f4;
+  color: var(--c-default);
+  background-color: var(--b-title);
   font-weight: bold;
-  border: 1px solid #ccc;
+  border: 1px solid var(--c-border);
 }
 .w-left-menu a .w-left-menu-tips:hover {
   display: none;
@@ -293,7 +286,7 @@
   position: absolute;
   top: 2px;
   left: 5px;
-  color: red;
+  color: var(--c-error);
 }
 .w-replay-count-dialog .modal-content {
   width: 236px!important;
@@ -319,11 +312,11 @@
   height: 30px;
   line-height: 30px;
   padding: 5px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--c-border);
 }
 
 .w-enable-https-btn, .w-https-menu .glyphicon-lock {
-  color: #9e9e26;
+  color: var(--c-forbidden);
 }
 
 .w-enable-https-btn {
@@ -334,27 +327,46 @@
   position: absolute;
   z-index: 1;
   height: auto;
-  border-bottom: 1px solid #ccc;
+  border-bottom: 1px solid var(--c-border);
   min-height: 0;
 }
 
 .w-menu .w-tree-view-active {
-  color: #337ab7;
+  color: var(--c-link);
 }
 
 .w-menu-selected {
-  background-color: #ddd;
+  background-color: var(--b-active)!important;
+  color: var(--c-default)!important;
 }
 
-.w-root-ca-type {
-  width: 100px;
-  float: right;
-  margin: 3px 15px 0 0;
-  border: 1px solid #ccc;
+.w-https-dialog select {
+  border: 1px solid var(--c-border);
   border-radius: 3px;
   height: 24px;
   font-size: 12px;
-  padding-left: 8px;
+  padding-left: 5px;
+}
+
+.w-root-ca-type {
+  width: 92px;
+  float: right;
+  margin: 3px 15px 0 0;
+}
+
+.w-root-ca-url-wrap {
+  display: flex;
+  align-items: center;
+  margin: -3px 0 10px;
+}
+
+.w-root-ca-url-wrap .glyphicon {
+  margin-top: -2px;
+}
+
+.w-root-ca-url {
+  display: block;
+  width: 292px;
 }
 
 
@@ -364,7 +376,7 @@
   padding: 10px;
 }
 .w-fieldset {
-  border: 1px solid #ddd;
+  border: 1px solid var(--c-border);
 }
 .w-fieldset legend {
   font-size: 12px;
@@ -380,55 +392,14 @@
   cursor: pointer;
 }
 
-@media screen and (max-width: 1210px) {
-  .w-show-account.w-show-editor .w-help-name {
-    display: none;
-  }
-}
-@media screen and (max-width: 1190px) {
-  .w-show-account.w-show-rules .w-https-name {
-      display: none;
-  }
-  .w-show-account.w-show-rules-mode span.w-help-name,
-  .w-show-account.w-show-rules-mode span.w-https-name,
-  .w-show-account.w-show-rules-mode span.w-weinre-name {
-    display: inline;
-  }
-}
-
-@media screen and (max-width: 1160px) {
-  .w-show-account.w-show-editor span.w-help-name {
-    display: none;
-  }
-  .w-show-account.w-show-editor .w-https-name {
-    display: none;
-  }
-}
-
-@media screen and (max-width: 1130px) {
-  .w-show-account.w-show-rules .w-weinre-name {
-    display: none;
-  }
-}
-
-@media screen and (max-width: 1090px) {
-  .w-show-account.w-show-rules .w-weinre-menu,
-  .w-show-account.w-show-rules .w-https-menu,
-  .w-show-account.w-show-rules .w-help-menu {
-    padding: 0 3px;
+@media screen and (max-width: 1105px) {
+  .w-menu.w-top a {
+    padding: 0 7px;
   }
 }
 
 .w-show-left-menu .w-help-name, .w-show-left-menu .w-https-name {
   display: inline!important;
-}
-
-.w-account-menu {
-  display: none!important;
-}
-
-.w-show-account .w-account-menu {
-  display: inline-block!important;
 }
 
 .w-va-mdl {
@@ -439,24 +410,23 @@
   margin-left: 5px;
 }
 
-.w-json-history-bar {
+.w-json-bar {
   position: absolute;
   top: 5px;
   left: 10px;
   font-size: 18px;
-  color: #474747;
 }
 
-.w-json-history-bar .w-disabled {
-  color: #ccc!important;
+.w-json-bar .w-disabled {
+  color: var(--c-disabled)!important;
   background: transparent!important;
 }
 
-.w-json-history-bar .glyphicon-menu-right {
+.w-json-bar .glyphicon-menu-right {
   margin-left: 15px;
 }
 
-.w-json-history-bar .glyphicon {
+.w-json-bar .glyphicon {
   display: inline-block;
   width: 30px;
   height: 30px;
@@ -464,7 +434,56 @@
   text-align: center;
 }
 
-.w-json-history-bar .glyphicon:hover {
+.w-json-bar .glyphicon:hover {
   border-radius: 30px;
-  background: #f2f2f2;
+  background: var(--b-title);
+}
+
+.w-import-remote-dialog .glyphicon-cloud {
+  vertical-align: middle;
+  padding-bottom: 1px;
+  margin-right: 5px;
+}
+
+.w-qrcode-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: var(--c-thin);
+  cursor: default;
+}
+
+.w-qrcode-wrap img {
+  width: 100%;
+  height: 100%;
+}
+
+
+.w-hover-body tr:hover th, .w-hover-body tr:hover td {
+  background: var(--b-hover);
+}
+
+.w-req-table .w-hover-body tr:hover th, .w-req-table .w-hover-body tr:hover td {
+  background: var(--b-list-hover) !important;
+}
+
+.w-hover-body tr.warning:hover th, .w-hover-body tr.warning:hover td {
+  background: var(--b-list-warn) !important;
+}
+.w-hover-body tr.info:hover th, .w-hover-body tr.info:hover td {
+  background: var(--b-list-info) !important;
+}
+.w-hover-body tr.success:hover th, .w-hover-body tr.success:hover td {
+  background: var(--b-success-hover) !important;
+}
+.w-hover-body tr.danger:hover th, .w-hover-body tr.danger:hover td {
+  background: var(--b-list-danger-hover) !important;
+}
+.w-hover-body tr.w-mark:hover th, .w-hover-body tr.w-mark:hover td {
+  background: var(--b-list-mark) !important;
+}
+
+.w-confim-reload-note {
+  color: var(--c-error);
+  margin: 0;
 }

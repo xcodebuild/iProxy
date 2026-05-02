@@ -1,7 +1,8 @@
-require('./base-css.js');
 require('../css/tools.css');
 var React = require('react');
-var Console = require('./console');
+var ReactDOM = require('react-dom');
+var $ = require('jquery');
+var Console = require('./console-log');
 var ServerLog = require('./server-log');
 var ToolBox = require('./tool-box');
 var events = require('./events');
@@ -15,12 +16,12 @@ var util = require('./util');
 var BTNS = [
   {
     name: 'Console',
-    icon: 'file',
+    icon: 'console',
     active: true
   },
   {
     name: 'Server',
-    icon: 'exclamation-sign'
+    icon: 'file'
   },
   {
     name: 'Toolbox',
@@ -40,8 +41,8 @@ var Tools = React.createClass({
     });
   },
   shouldComponentUpdate: function (nextProps) {
-    var hide = util.getBoolean(this.props.hide);
-    if (hide != util.getBoolean(nextProps.hide)) {
+    var hide = util.getBool(this.props.hide);
+    if (hide != util.getBool(nextProps.hide)) {
       return true;
     }
     if (hide) {
@@ -54,6 +55,16 @@ var Tools = React.createClass({
   toggleTabs: function (btn) {
     this.changeTab = true;
     this.setState({ name: btn.name, plugin: null });
+  },
+  showTab: function(index, id) {
+    this.refs.tabs.handleClick(BTNS[index]);
+    if (typeof id === 'string') {
+      this.refs.console.showLogId(id);
+      this.shakeTab();
+    }
+  },
+  shakeTab: function() {
+    util.shakeElem($(ReactDOM.findDOMNode(this.refs.tabs)).find('button.active'));
   },
   clearLogs: function () {
     if (BTNS[0].active) {
@@ -100,15 +111,17 @@ var Tools = React.createClass({
         {
           tabs.map(function(tab) {
             var pluginName = tab.plugin;
+            var icon = util.getTabIcon(tab);
             return (
               <button
                 key={'_' + pluginName}
                 onClick={function () {
                   self.showCustomTab(tab);
                 }}
-                className={self.getStyle(pluginName)}
+                className={'w-custom-tab-btn ' + self.getStyle(pluginName)}
                 title={pluginName}
               >
+              {icon ? <img className="w-tab-icon" src={icon} /> : null}
               {tab.name}
               </button>
             );
@@ -123,8 +136,8 @@ var Tools = React.createClass({
     return (
       <div
         className={
-          'fill orient-vertical-box w-detail-log' +
-          (util.getBoolean(this.props.hide) ? ' hide' : '')
+          'fill v-box w-tools' +
+          (util.getBool(this.props.hide) ? ' hide' : '')
         }
       >
         <BtnGroup
@@ -146,7 +159,7 @@ var Tools = React.createClass({
         </LazyInit>
         <TabMgr
           active={state.plugin && state.plugin.plugin}
-          hide={util.getBoolean(this.props.hide)}
+          hide={util.getBool(this.props.hide)}
           tabs={dataCenter.getToolTabs()}
           className="w-custom-tab-panel"
         />

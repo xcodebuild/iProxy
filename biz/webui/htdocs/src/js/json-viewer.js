@@ -9,12 +9,13 @@ var ContextMenu = require('./context-menu');
 var win = require('./win');
 var Tips = require('./panel-tips');
 
+var findDOMNode = ReactDOM.findDOMNode;
 var JSONTree = require('./components/react-json-tree')['default'];
 var dataCenter = require('./data-center');
 var util = require('./util');
 var events = require('./events');
 var MAX_LENGTH = 1024 * 16;
-var STR_SELECTOR = 'span[style="color: rgb(133, 153, 0);"]';
+var STR_SELECTOR = 'span[style="color: var(--c-jb);"]';
 var LINK_RE = /^"(https?:)?(\/\/[^/]\S+)"$/i;
 var contextMenuList = [
   { name: 'Copy Object' },
@@ -32,10 +33,7 @@ var JsonViewer = React.createClass({
   getInitialState: function () {
     return { lastData: {} };
   },
-  shouldComponentUpdate: function (nextProps) {
-    var hide = util.getBoolean(this.props.hide);
-    return hide != util.getBoolean(nextProps.hide) || !hide;
-  },
+  shouldComponentUpdate: util.shouldComponentUpdate,
   preventBlur: function (e) {
     e.target.nodeName != 'INPUT' && e.preventDefault();
   },
@@ -90,7 +88,7 @@ var JsonViewer = React.createClass({
     self.state.showDownloadInput = /w-download/.test(e.target.className);
     self.state.showNameInput = true;
     self.forceUpdate(function () {
-      var nameInput = ReactDOM.findDOMNode(self.refs.nameInput);
+      var nameInput = findDOMNode(self.refs.nameInput);
       var defaultName = !nameInput.value && self.props.defaultName;
       if (defaultName) {
         nameInput.value = defaultName;
@@ -102,7 +100,7 @@ var JsonViewer = React.createClass({
   hideNameInput: function () {
     this.state.showNameInput = false;
     this.forceUpdate(function () {
-      var nameInput = ReactDOM.findDOMNode(this.refs.nameInput);
+      var nameInput = findDOMNode(this.refs.nameInput);
       var defaultName = this.props.defaultName;
       if (defaultName === nameInput.value) {
         nameInput.value = '';
@@ -117,7 +115,7 @@ var JsonViewer = React.createClass({
     if (!modal) {
       return;
     }
-    var target = ReactDOM.findDOMNode(this.refs.nameInput);
+    var target = findDOMNode(this.refs.nameInput);
     var name = target.value.trim();
     var self = this;
     if (self.state.showDownloadInput) {
@@ -125,12 +123,12 @@ var JsonViewer = React.createClass({
       return;
     }
     if (!name) {
-      message.error('The key cannot be empty.');
+      message.error('The key is required');
       return;
     }
 
     if (/\s/.test(name)) {
-      message.error('The key cannot have spaces.');
+      message.error('Spaces are not allowed in the key');
       return;
     }
     var handleSubmit = function (sure) {
@@ -152,25 +150,25 @@ var JsonViewer = React.createClass({
       return handleSubmit(true);
     }
     win.confirm(
-      'The key \'' + name + '\' already exists.\nDo you want to override it.',
+      'The key \'' + name + '\' is already in use. Overwrite?',
       handleSubmit
     );
   },
   download: function () {
-    var target = ReactDOM.findDOMNode(this.refs.nameInput);
+    var target = findDOMNode(this.refs.nameInput);
     var name = target.value.trim();
     target.value = '';
     var data = this.props.data || {};
-    ReactDOM.findDOMNode(this.refs.filename).value = name;
-    ReactDOM.findDOMNode(this.refs.content).value = data.str || '';
-    ReactDOM.findDOMNode(this.refs.downloadForm).submit();
+    findDOMNode(this.refs.filename).value = name;
+    findDOMNode(this.refs.content).value = data.str || '';
+    findDOMNode(this.refs.downloadForm).submit();
     this.hideNameInput();
   },
   toggle: function () {
     this.setState({ viewSource: !this.state.viewSource });
   },
   componentDidMount: function () {
-    var viewer = $(ReactDOM.findDOMNode(this.refs.jsonViewer));
+    var viewer = $(findDOMNode(this.refs.jsonViewer));
     viewer
       .on('mouseenter', STR_SELECTOR, function (e) {
         if (!(e.ctrlKey || e.metaKey)) {
@@ -226,7 +224,7 @@ var JsonViewer = React.createClass({
     var props = this.props;
     var data = props.data;
     var tips = props.tips;
-    var className = 'fill orient-vertical-box w-properties-wrap w-json-viewer';
+    var className = 'fill v-box w-props-wrap w-json-viewer';
     var noData = !data;
     if (noData) {
       data = state.lastData || {};
@@ -255,7 +253,6 @@ var JsonViewer = React.createClass({
         <div className="w-textarea-bar">
           <CopyBtn value={data.str} />
           <a
-            className="w-download"
             onDoubleClick={this.download}
             onClick={this.showNameInput}
             draggable="false"
@@ -266,19 +263,19 @@ var JsonViewer = React.createClass({
             { props.reqData ? 'Mock' : '+Key' }
           </a>
           {viewSource ? (
-            <a className="w-edit" onClick={this.edit} draggable="false">
+            <a onClick={this.edit} draggable="false">
               ViewAll
             </a>
-          ) : (props.dialog ? undefined : <a className="w-edit" onClick={this.search} draggable="false">
+          ) : (props.dialog ? undefined : <a onClick={this.search} draggable="false">
                 Search
               </a>)}
-          <a onClick={this.toggle} className="w-properties-btn">
+          <a onClick={this.toggle}>
             {viewSource ? 'JSON' : 'Text'}
           </a>
           <div
             onMouseDown={this.preventBlur}
             style={{ display: state.showNameInput ? 'block' : 'none' }}
-            className="shadow w-textarea-input"
+            className="w-shadow w-textarea-input"
           >
             <input
               ref="nameInput"
@@ -287,7 +284,7 @@ var JsonViewer = React.createClass({
               type="text"
               maxLength="64"
               placeholder={
-                state.showDownloadInput ? 'Input the filename' : 'Input the key'
+                state.showDownloadInput ? 'Enter filename' : 'Enter key name'
               }
             />
             <button

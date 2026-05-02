@@ -2,6 +2,9 @@ require('../css/iframe-dialog.css');
 var React = require('react');
 var Dialog = require('./dialog');
 var getBridge = require('./bridge');
+var dataCenter = require('./data-center');
+var Icon = require('./icon');
+var CloseBtn = require('./close-btn');
 
 function onWhistlePluginOptionModalReady(init, win) {
   if (typeof init === 'function') {
@@ -32,32 +35,24 @@ var IframeDialog = React.createClass({
     var disabled = state.disabled;
     var name = state.name;
     var url = state.url;
-    var homepage = state.homepage;
+    var favicon = state.favicon ? <img src={state.favicon} /> : null;
+    var className = 'w-plugins-tab inline-align-items' + (disabled ? ' w-plugin-tab-disabled' : '');
 
     window.onWhistlePluginOptionModalReady = onWhistlePluginOptionModalReady;
-  
+
     return (
       <Dialog ref="iframeDialog" wstyle="w-iframe-dialog" width={state.width || 'max(calc(100% - 240px), 720px)'}>
         <div className="modal-header">
-          {
-            homepage ? <a
-              className={disabled ? 'w-plugin-tab-disabled' : null}
-              href={homepage}
-              target='_blank'
-            >
-              {disabled ? <span data-name={name} className="glyphicon glyphicon-ban-circle" /> : undefined}
+          <h4>
+            <span className={className}>
+              {disabled ? <Icon data-name={name} name="ban-circle" /> : favicon}
               {name || 'Untitled'}
-            </a> : <span className={disabled ? 'w-plugin-tab-disabled' : null}>
-            {disabled ? <span data-name={name} className="glyphicon glyphicon-ban-circle" /> : undefined}
-            {name || 'Untitled'}
-          </span>
-          }
-          <button type="button" className="close" data-dismiss="modal">
-            <span aria-hidden="true">&times;</span>
-          </button>
+            </span>
+          </h4>
+          <CloseBtn />
         </div>
-        <div className="modal-body" style={{height: state.height || 'max(calc(100vh - 120px), 600px)'}}>
-         <iframe src={url} />
+        <div className="modal-body w-fix-drag" style={{height: state.height || 'max(calc(100vh - 120px), 600px)'}}>
+        <iframe src={url} onLoad={dataCenter.handleIframeLoad} />
         </div>
       </Dialog>
     );

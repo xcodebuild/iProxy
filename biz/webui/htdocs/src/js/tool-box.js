@@ -1,12 +1,12 @@
 var React = require('react');
 var ReactDOM = require('react-dom');
-var $ = require('jquery');
 var util = require('./util');
 var QRCodeDialog = require('./qrcode-dialog');
 var TextDialog = require('./text-dialog');
 var storage = require('./storage');
 var win = require('./win');
 var events = require('./events');
+var Icon = require('./icon');
 
 var URL_RE = /^(?:(?:[\w.-]+:)?\/\/)?([\w.-]+)/i;
 var NOT_EMPTY_RE = /[^\s]/;
@@ -14,7 +14,8 @@ var MAX_QRCODE_LEN = 2048;
 var MAX_JSON_LEN = 32768;
 var MAX_SAVE_LEN = 5120;
 var MAX_TEXT_LEN = 5120;
-var MAX_IMAGE_SIZE = 1024 * 1024;
+var MAX_IMAGE_SIZE = 1024 * 1024 * 3;
+var findDOMNode = ReactDOM.findDOMNode;
 
 var ToolBox = React.createClass({
   getInitialState: function () {
@@ -91,51 +92,33 @@ var ToolBox = React.createClass({
   },
   encode: function () {
     try {
-      var value = encodeURIComponent(this.state.codecText);
+      var value = util.toBase64(this.state.codecText);
       this.refs.textDialog.show(value);
-    } catch (e) {
-      win.alert(e.message);
-    }
-  },
-  showShadowRules: function () {
-    try {
-      var value = encodeURIComponent(this.state.codecText);
-      this.refs.textDialog.show('"' + value + '"');
     } catch (e) {
       win.alert(e.message);
     }
   },
   decode: function () {
     try {
-      var value = decodeURIComponent(this.state.codecText);
+      var value = util.decodeBase64(this.state.codecText).text;
       this.refs.textDialog.show(value);
     } catch (e) {
       win.alert(e.message);
     }
   },
-  toQuery: function () {
-    try {
-      var value = util.parseJSON2(this.state.codecText) || '';
-      this.refs.textDialog.show(value && $.param(value, true));
-    } catch (e) {
-      win.alert(e.message);
-    }
+  uploadFile: function () {
+    findDOMNode(this.refs.uploadFile).click();
   },
-  uploadImg: function () {
-    ReactDOM.findDOMNode(this.refs.uploadImg).click();
-  },
-  readImg: function () {
+  readFile: function () {
     var self = this;
-    var image = new FormData(ReactDOM.findDOMNode(this.refs.uploadImgForm)).get(
-      'image'
-    );
-    if (!(image.size <= MAX_IMAGE_SIZE)) {
-      return win.alert('The file size cannot exceed 1m.');
+    var file = new FormData(findDOMNode(this.refs.uploadFileForm)).get('file');
+    if (!(file.size <= MAX_IMAGE_SIZE)) {
+      return win.alert('Maximum file size: 3MB');
     }
-    var type = 'data:' + image.type + ';base64,';
-    util.readFileAsBase64(image, function (base64) {
-      ReactDOM.findDOMNode(self.refs.uploadImg).value = '';
-      self.refs.textDialog.show(type + base64, base64, image.name);
+    var type = 'data:' + file.type + ';base64,';
+    util.readFileAsBase64(file, function (base64) {
+      findDOMNode(self.refs.uploadFile).value = '';
+      self.refs.textDialog.show(type + base64, base64, file.name);
     });
   },
   onQRCodeChange: function (e) {
@@ -157,10 +140,7 @@ var ToolBox = React.createClass({
       'downloadTargetFrame'
     );
   },
-  shouldComponentUpdate: function (nextProps) {
-    var hide = util.getBoolean(this.props.hide);
-    return hide != util.getBoolean(nextProps.hide) || !hide;
-  },
+  shouldComponentUpdate: util.shouldComponentUpdate,
   render: function () {
     var state = this.state;
     var qrcodeValue = state.qrcodeValue;
@@ -168,16 +148,17 @@ var ToolBox = React.createClass({
     var domainValue = state.domainValue;
     var codecText = state.codecText;
     var emptyJson = !NOT_EMPTY_RE.test(jsonValue);
+    var emptyCodec = !NOT_EMPTY_RE.test(codecText);
 
     return (
       <div
         className={
-          'fill orient-vertical-box w-tool-box ' +
+          'fill v-box w-tool-box ' +
           (this.props.hide ? 'hide' : '')
         }
       >
         <div className="w-detail-inspectors-title">
-          <span className="glyphicon glyphicon-qrcode"></span>QRCode
+          <Icon name="qrcode" />QRCode
           <button
             className="btn btn-primary"
             disabled={!NOT_EMPTY_RE.test(qrcodeValue)}
@@ -192,10 +173,10 @@ var ToolBox = React.createClass({
           value={qrcodeValue}
           className="w-tool-box-ctn"
           maxLength={MAX_QRCODE_LEN}
-          placeholder="Input the URL or text"
+          placeholder="Enter URL or text"
         />
         <div className="w-detail-inspectors-title">
-          <span className="glyphicon glyphicon-pencil"></span>JSONView
+          <Icon name="pencil" />JSON
           <button
             className="btn btn-primary"
             disabled={emptyJson}
@@ -217,40 +198,32 @@ var ToolBox = React.createClass({
           value={jsonValue}
           className="w-tool-box-ctn"
           maxLength={MAX_JSON_LEN}
-          placeholder="Input the JSON text"
+          placeholder="Enter JSON text"
           onKeyDown={this.onForamt}
         />
         <div className="w-detail-inspectors-title" style={{ height: 20 }}>
-          <button
-            className="btn btn-default"
-            style={{ float: 'left' }}
-            disabled={!NOT_EMPTY_RE.test(codecText)}
-            onClick={this.encode}
-          >
-            EncodeURIComponent
-          </button>
-          <button
-            className="btn btn-default"
-            style={{ float: 'left', marginLeft: 10 }}
-            disabled={!NOT_EMPTY_RE.test(codecText)}
-            onClick={this.decode}
-          >
-            DecodeURIComponent
-          </button>
-          <button
-            className="btn btn-default"
-            style={{ float: 'left', marginLeft: 10 }}
-            disabled={!NOT_EMPTY_RE.test(codecText)}
-            onClick={this.toQuery}
-          >
-            Query
-          </button>
+          <Icon name="eye-close" />Base64
           <button
             className="btn btn-primary"
-            disabled={!NOT_EMPTY_RE.test(codecText)}
-            onClick={this.showShadowRules}
+            style={{marginLeft: 10}}
+            onClick={this.uploadFile}
           >
-            ShadowRules
+            Upload
+          </button>
+          <button
+            className="btn btn-default"
+            style={{marginLeft: 10}}
+            disabled={emptyCodec}
+            onClick={this.encode}
+          >
+            Encode
+          </button>
+          <button
+            className="btn btn-default"
+            disabled={emptyCodec}
+            onClick={this.decode}
+          >
+            Decode
           </button>
         </div>
         <textarea
@@ -259,29 +232,16 @@ var ToolBox = React.createClass({
           value={codecText}
           className="w-tool-box-ctn"
           maxLength={MAX_TEXT_LEN}
-          placeholder="Input the text"
+          placeholder="Enter text"
         />
         <div className="w-detail-inspectors-title">
-          <span className="glyphicon glyphicon-picture"></span>Base64
-          <button className="btn btn-primary" onClick={this.uploadImg}>
-            Upload
-          </button>
-        </div>
-        <button
-          className="w-tool-box-ctn w-tool-box-base64"
-          onClick={this.uploadImg}
-        >
-          <span className="glyphicon glyphicon-arrow-up"></span>
-          Click here to upload image (size &lt;= 1m)
-        </button>
-        <div className="w-detail-inspectors-title">
-          <span className="glyphicon glyphicon-certificate"></span>Certificate
+          <Icon name="certificate" />Certificate
         </div>
         <div className="box w-generate-cert">
           <input
             className="fill"
             maxLength="256"
-            placeholder="Input the domain name of the certificate"
+            placeholder="Enter certificate domain name"
             value={domainValue}
             onChange={this.onDomainChange}
           />
@@ -296,16 +256,15 @@ var ToolBox = React.createClass({
         <QRCodeDialog ref="qrcodeDialog" />
         <TextDialog ref="textDialog" />
         <form
-          ref="uploadImgForm"
+          ref="uploadFileForm"
           encType="multipart/form-data"
           style={{ display: 'none' }}
         >
           <input
-            ref="uploadImg"
-            onChange={this.readImg}
-            name="image"
+            ref="uploadFile"
+            onChange={this.readFile}
+            name="file"
             type="file"
-            accept="image/*"
           />
         </form>
       </div>

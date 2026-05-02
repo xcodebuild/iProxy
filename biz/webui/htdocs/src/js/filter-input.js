@@ -1,4 +1,3 @@
-require('./base-css.js');
 require('../css/filter-input.css');
 var util = require('./util');
 var React = require('react');
@@ -6,8 +5,24 @@ var ReactDOM = require('react-dom');
 var $ = require('jquery');
 var storage = require('./storage');
 var win = require('./win');
+var Icon = require('./icon');
+var CloseBtn = require('./close-btn');
 
+var findDOMNode = ReactDOM.findDOMNode;
 var MAX_LEN = 128;
+var TYPES = ['JSON', 'HTML', 'CSS', 'JS', 'Font', 'Img', 'Media', 'WS', 'Tunnel', 'Wasm', 'Mock', 'Rules', 'Import', 'Composer', 'Error', 'Other'];
+var TITLES = {
+  JS: 'JavaScript',
+  Img: 'Image',
+  WS: 'WebSocket',
+  Wasm: 'WebAssembly',
+  Mock: 'Show mock requests',
+  Error: 'Show error requests',
+  Import: 'Show import sessions',
+  Composer: 'Show composer requests',
+  Rules: 'Show requests matched rules'
+};
+
 var FilterInput = React.createClass({
   getInitialState: function () {
     var hintKey = this.props.hintKey;
@@ -32,19 +47,23 @@ var FilterInput = React.createClass({
         }
       } catch (e) {}
     }
-    return { hintList: [] };
+    return { hintList: [], filterType: '' };
   },
   componentDidMount: function () {
     var self = this;
-    self.hintElem = $(ReactDOM.findDOMNode(this.refs.hints));
+    self.hintElem = $(findDOMNode(this.refs.hints));
     $(document.body).on('mousedown', function(e) {
       if (self.state.hintList !== null && !$(e.target).closest('.w-filter-con').length) {
         self.hideHints();
       }
     });
+    var onFilterTypeChange = this.props.onFilterTypeChange;
+    if (typeof onFilterTypeChange === 'function') {
+      onFilterTypeChange(self.state.filterType);
+    }
   },
   focus: function() {
-    var input = ReactDOM.findDOMNode(this.refs.input);
+    var input = findDOMNode(this.refs.input);
     input.select();
     input.focus();
   },
@@ -67,12 +86,13 @@ var FilterInput = React.createClass({
     }
   },
   filterHints: function (keyword) {
-    keyword = keyword && keyword.trim();
+    keyword = keyword ? keyword.trim() : '';
     var count = 10;
     var addonHints = this.props.addonHints || [];
     if (!keyword) {
       return addonHints.concat(this.allHintList.slice(-count));
     }
+    addonHints = addonHints.slice(1);
     count += addonHints.length;
     var allHintList = addonHints.concat(this.allHintList);
     var list = [];
@@ -113,8 +133,16 @@ var FilterInput = React.createClass({
     this.setState({ hintList: null });
     this.addHint();
   },
-  showHints: function () {
-    this.setState({ hintList: this.filterHints(this.state.filterText) });
+  showHints: function (e) {
+    var self = this;
+    if (!self.props.hintKey) {
+      return;
+    }
+    self.setState({ hintList: this.filterHints(this.state.filterText) }, e && function() {
+      self.hintElem.scrollTop(1000000000);
+    });
+    var top = findDOMNode(self.refs.input).getBoundingClientRect().y - 130;
+    findDOMNode(self.refs.hints).style.setProperty('--h-hints', Math.max(Math.min(top, 360), 200) + 'px');
   },
   onFilterKeyDown: function (e) {
     var elem;
@@ -192,7 +220,7 @@ var FilterInput = React.createClass({
   clearFilterText: function () {
     this.props.onChange && this.props.onChange('');
     var hintList = null;
-    if (document.activeElement === ReactDOM.findDOMNode(this.refs.input)) {
+    if (document.activeElement === findDOMNode(this.refs.input)) {
       hintList = this.filterHints();
     }
     var hasChanged = this.state.filterText;
@@ -203,15 +231,44 @@ var FilterInput = React.createClass({
       }
     });
   },
+  handleFilterType: function (e) {
+    var target = e.target;
+    if (target.nodeName !== 'SPAN') {
+      return;
+    }
+    var type = target.textContent;
+    var filterType = type === 'All' ? '' : type;
+    if (filterType === this.state.filterType) {
+      return;
+    }
+    this.setState({ filterType: filterType });
+    this.props.onFilterTypeChange(filterType);
+  },
+  renderTypes: function () {
+    var filterType = this.state.filterType;
+    if (TYPES.indexOf(filterType) === -1) {
+      filterType = '';
+    }
+    return (
+      <div className="w-filter-type-bar" onClick={this.handleFilterType} onMouseDown={util.preventBlur}>
+        <span className={filterType ? undefined : 'w-active'}>All</span>
+        {TYPES.map(function (type) {
+          return <span key={type} title={TITLES[type] || type} className={filterType === type ? 'w-active' : undefined}>{type}</span>;
+        })}
+      </div>
+    );
+  },
   render: function () {
     var self = this;
+    var props = self.props;
     var filterText = self.state.filterText || '';
-    var hintKey = self.props.hintKey;
+    var hintKey = props.hintKey;
     var hintList = self.state.hintList;
-    var addonHints = this.props.addonHints || [];
+    var addonHints = props.addonHints || [];
+    var showTypes = typeof props.onFilterTypeChange === 'function';
 
     return (
-      <div className="w-filter-con" style={self.props.wStyle}>
+      <div className={'w-filter-con' + (showTypes ? ' w-filter-show-types' : '')} style={props.wStyle}>
         {hintKey ? (
           <div
             className="w-filter-hint"
@@ -220,12 +277,10 @@ var FilterInput = React.createClass({
           >
             <div className="w-filter-bar">
               <a onClick={this.clear}>
-                <span className="glyphicon glyphicon-trash"></span>
+                <Icon name="trash" />
                 Clear history
               </a>
-              <span onClick={self.hideHints} aria-hidden="true">
-                &times;
-              </span>
+              <CloseBtn onClick={self.hideHints} />
             </div>
             <ul ref="hints">
               {hintList &&
@@ -243,6 +298,7 @@ var FilterInput = React.createClass({
             </ul>
           </div>
         ) : undefined}
+        {showTypes ? self.renderTypes() : undefined}
         <input
           type="text"
           ref="input"
@@ -252,21 +308,18 @@ var FilterInput = React.createClass({
           onFocus={self.showHints}
           onDoubleClick={self.showHints}
           onBlur={self.hideHints}
-          style={{ background: filterText.trim() ? '#000' : undefined }}
           className="w-filter-input"
           maxLength={MAX_LEN}
-          placeholder={'Type filter text' + (this.props.placeholder || '')}
+          placeholder={'Type filter text' + (props.placeholder || '')}
         />
         <button
           onMouseDown={util.preventBlur}
           onClick={self.clearFilterText}
           style={{ display: self.state.filterText ? 'block' : 'none' }}
           type="button"
-          className="close"
+          className="close w-clear-input"
           title="Ctrl[Command]+D"
-        >
-          <span aria-hidden="true">&times;</span>
-        </button>
+        >&times;</button>
       </div>
     );
   }

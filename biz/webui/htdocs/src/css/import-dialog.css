@@ -1,0 +1,24 @@
+.w-ie-dialog {
+  z-index: var(--z-modal);
+}
+
+.w-ie-dialog .modal-dialog {
+  width: 600px;
+}
+
+.w-ie-dialog .modal-body {
+  background-color: var(--b-bar);
+  padding: 20px 10px;
+}
+
+.w-ie-dialog input {
+  width: 578px;
+  height: 36px;
+  line-height: 36px;
+  padding: 5px;
+  border: 1px solid var(--c-border);
+}
+
+.w-ie-dialog .modal-footer {
+  white-space: nowrap;
+}

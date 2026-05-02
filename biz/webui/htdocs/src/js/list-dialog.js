@@ -1,4 +1,3 @@
-require('./base-css.js');
 require('../css/list-dialog.css');
 var React = require('react');
 var ReactDOM = require('react-dom');
@@ -9,7 +8,11 @@ var RuleList = require('./rule-list');
 var $ = require('jquery');
 var parseRules = require('./parse-rules');
 var dataCenter = require('./data-center');
+var ShareViaURLBtn = require('./share-via-url-btn');
+var Icon = require('./icon');
+var CloseBtn = require('./close-btn');
 
+var findDOMNode = ReactDOM.findDOMNode;
 var TEMP_LINK_RE_G = /(?:^|\s)(?:[\w-]+:\/\/)?temp\/([\da-z]{64})(?:\.[\w-]+)?(?:$|\s)/mg;
 
 var ListDialog = React.createClass({
@@ -18,24 +21,22 @@ var ListDialog = React.createClass({
       checkedItems: {},
       checkedRuleList: [],
       ruleListLen: 0,
+      filename: '',
       tabs: [
         {
           icon: 'file',
-          name: 'File List',
+          name: 'Rules Files',
           active: true
         },
         {
           icon: 'list',
-          name: 'Rule List'
+          name: 'Rules Items'
         }
       ]
     };
   },
-  componentDidMount: function () {
-    this.dialogElem = $(ReactDOM.findDOMNode(this.refs.dialog));
-  },
   shouldComponentUpdate: function () {
-    return this.dialogElem.has('.in');
+    return this.refs.dialog.isVisible();
   },
   onChange: function (e) {
     var target = e.target;
@@ -49,14 +50,20 @@ var ListDialog = React.createClass({
     this.setState({ checkedItems: checkedItems });
   },
   donwload: function(data) {
-    var input = ReactDOM.findDOMNode(this.refs.filename);
-    var form = ReactDOM.findDOMNode(this.refs.exportData);
-    ReactDOM.findDOMNode(this.refs.exportName).value = input.value.trim();
-    ReactDOM.findDOMNode(this.refs.data).value = JSON.stringify(data);
+    var input = findDOMNode(this.refs.filename);
+    var form = findDOMNode(this.refs.exportData);
+    findDOMNode(this.refs.exportName).value = input.value.trim();
+    findDOMNode(this.refs.data).value = JSON.stringify(data);
     form.submit();
     input.value = '';
   },
-  exportRuleList: function () {
+  filterFilename: function (e) {
+    this.setState({ filename: util.formatFilename(e.target.value) });
+  },
+  getInputValue: function () {
+    return util.formatFilename(findDOMNode(this.refs.filename).value.trim());
+  },
+  getRuleList: function (cb) {
     var rulesModal = this.state.rulesModal;
     var allValues = {};
     var checkedList = this.state.checkedRuleList;
@@ -94,9 +101,9 @@ var ListDialog = React.createClass({
       rules += '\n\n' + values;
     }
     var newVals;
-    var filename = ReactDOM.findDOMNode(this.refs.filename).value.trim() || 'rules_' + util.formatDate() + '.txt';
-    var dl = function() {
-      util.download([rules, newVals || {}], filename);
+    var filename = this.getInputValue() || 'mock_' + util.formatDate() + '.txt';
+    var execCb = function() {
+      cb([rules, newVals || {}], filename);
     };
     if (files.length) {
       dataCenter.getTempFile({ files: files.join() }, function (result) {
@@ -108,23 +115,36 @@ var ListDialog = React.createClass({
             list: list
           };
         }
-        dl();
+        execCb();
       });
     } else {
-      dl();
+      execCb();
     }
+  },
+  exportRuleList: function () {
+    this.getRuleList(function (data, filename) {
+      util.download(data, filename);
+    });
+  },
+  isRuleList: function () {
+    return this.state.tabs[1].active;
   },
   onConfirm: function (e) {
     if (e.target.disabled) {
       return;
     }
     this.refs.dialog.hide();
-    if (this.state.tabs[1].active) {
+    if (this.isRuleList()) {
       return this.exportRuleList();
     }
-    var exportAll = e.target.className.indexOf('btn-warning') !== -1;
-    var items = exportAll ? this.getAllItems() : this.state.checkedItems;
+    var items = this.state.checkedItems;
     this.donwload(items);
+  },
+  getExportData: function(cb) {
+    if (this.isRuleList()) {
+      return this.getRuleList(cb);
+    }
+    cb(this.state.checkedItems);
   },
   getAllItems: function () {
     var list = this.props.list || [];
@@ -156,7 +176,9 @@ var ListDialog = React.createClass({
       self.setState({ checkedItems: checkedItems });
     }
     !this.props.onConfirm && setTimeout(function () {
-      ReactDOM.findDOMNode(self.refs.filename).focus();
+      var input = findDOMNode(self.refs.filename);
+      input.focus();
+      input.select();
     }, 500);
 
     if (rulesModal) {
@@ -204,6 +226,29 @@ var ListDialog = React.createClass({
   onCheckedRuleChange: function (list) {
     this.setState({checkedRuleList: list});
   },
+  checkAll: function (e) {
+    var list = this.props.list;
+    if (!list || !list.length) {
+      return;
+    }
+    var checkedItems = {};
+    if (e.target.checked) {
+      list.forEach(function (name) {
+        checkedItems[name] = 1;
+      });
+    }
+    this.setState({ checkedItems: checkedItems });
+  },
+  checkItem: function(e, item) {
+    item.checked = e.target.checked;
+    this.setState({});
+  },
+  onShare: function(err) {
+    if (!err) {
+      this.refs.dialog.hide();
+      findDOMNode(this.refs.filename).value = '';
+    }
+  },
   render: function () {
     var self = this;
     var state = self.state;
@@ -212,6 +257,7 @@ var ListDialog = React.createClass({
     var ruleListLen = state.ruleListLen;
     var rulesModal = state.rulesModal;
     var list = props.list || [];
+    var listLen = list.length;
     var checkedItems = state.checkedItems;
     var checkedNames = Object.keys(checkedItems);
     var selectedCount = rulesModal && tabs[1].active ? state.checkedRuleList.length : checkedNames.length;
@@ -219,13 +265,18 @@ var ListDialog = React.createClass({
     var tips = selectedCount ? props.tips : null;
     var onConfirm = props.onConfirm;
     var isRules = props.isRules;
+    var checkedAll = listLen && list.every(function (name) {
+      return checkedNames.indexOf(name) !== -1;
+    });
 
     return (
       <Dialog ref="dialog" wclassName="w-list-dialog">
+        { props.title ? <div className="modal-header">
+                <h4>{props.title}</h4>
+                <CloseBtn />
+              </div> : null }
         <div className="modal-body">
-          <button type="button" className="close" data-dismiss="modal">
-            <span aria-hidden="true">&times;</span>
-          </button>
+          {props.title ? null : <CloseBtn />}
           {rulesModal ? <Tabs tabs={tabs} onChange={self.onTabChange} /> : null}
           <div className={tabs[0].active ? '' : ' hide'} style={{marginTop: 10}}>
             <div className="w-list-wrapper">
@@ -240,7 +291,7 @@ var ListDialog = React.createClass({
                       type="checkbox"
                       checked={!!checkedItems[name]}
                     />
-                    {util.isGroup(name) ? <span className="glyphicon glyphicon-triangle-right w-list-group-icon" /> : null}
+                    {util.isGroup(name) ? <Icon name="triangle-right" className="w-list-group-icon" /> : null}
                     {name}
                   </label>
                 );
@@ -254,7 +305,7 @@ var ListDialog = React.createClass({
                 checkedNames.map(function(name) {
                   return (
                     <span key={name}>
-                      {util.isGroup(name) ? <span className="glyphicon glyphicon-triangle-right w-list-group-icon" /> : null}
+                      {util.isGroup(name) ? <Icon name="triangle-right" className="w-list-group-icon" /> : null}
                       {name}
                     </span>
                   );
@@ -264,13 +315,19 @@ var ListDialog = React.createClass({
                 Filename:
                 <input
                   ref="filename"
+                  value={state.filename}
+                  onChange={self.filterFilename}
                   style={{ width: 812, display: 'inline-block', marginLeft: 5 }}
                   className="form-control"
-                  placeholder="Input the filename"
+                  placeholder="Enter filename (optional)"
                 />
               </p>)}
         </div>
         <div className="modal-footer">
+        {onConfirm ? null : <label className={'w-kv-check-all' + (tabs[1].active ? ' hide' : '')}>
+          <input type="checkbox" checked={checkedAll} onChange={this.checkAll} disabled={!listLen} />
+          Select all
+        </label>}
           <button
             type="button"
             className="btn btn-default"
@@ -278,14 +335,9 @@ var ListDialog = React.createClass({
           >
             Cancel
           </button>
-          {onConfirm ? null : <button
-            type="button"
-            className={'btn btn-warning' + (tabs[1].active ? ' hide' : '')}
-            onMouseDown={this.preventDefault}
-            onClick={this.onConfirm}
-          >
-            Export All
-          </button>}
+          {onConfirm ? null : <ShareViaURLBtn getFilename={this.getInputValue} disabled={!selectedCount}
+            type={this.isRuleList() ? 'mock' : props.name}
+            getData={this.getExportData} onComplete={this.onShare} />}
           <button
             type="button"
             className="btn btn-primary"
@@ -295,7 +347,7 @@ var ListDialog = React.createClass({
               onConfirm(checkedNames);
             } : this.onConfirm}
           >
-            {onConfirm ? 'Confirm' : 'Export Selected' + (onConfirm ? '' : ' (' + selectedCount + ' / ' + (tabs[1].active ?  ruleListLen : list.length) + ')')}
+            {onConfirm ? 'Confirm' : 'Export' + ' (' + selectedCount + ' / ' + (tabs[1].active ?  ruleListLen : listLen) + ')'}
           </button>
         </div>
         <form

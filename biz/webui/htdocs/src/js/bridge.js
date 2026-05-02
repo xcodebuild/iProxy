@@ -36,23 +36,46 @@ function getPlugin(win) {
   } catch (e) {}
 }
 
-function getBridge(win) {
+function getBridge(win, api) {
   var plugin = getPlugin(win);
-  return {
+  var result = {
     updateUI: function() {
       events.trigger('updateUIThrottle');
     },
     pageId: dataCenter.getPageId(),
+    getWhistleId: function() {
+      return dataCenter.whistleId;
+    },
+    hasWhistleToken: function() {
+      return dataCenter.hasWhistleToken;
+    },
     escapeHtml: util.escape,
     compose: dataCenter.compose,
+    createComposeInterrupt: dataCenter.createComposeInterrupt,
     importSessions: dataCenter.importAnySessions,
     exportSessions: dataCenter.exportSessions,
     msgBox: message,
     qrCode: qrCode,
     qrcode: qrCode,
     decodeBase64: util.decodeBase64,
+    joinBase64: util.joinBase64,
+    getReqId: dataCenter.getReqId,
+    onComposeData: dataCenter.onComposeData,
+    offComposeData: dataCenter.offComposeData,
     alert: mockWin.alert,
     confirm: mockWin.confirm,
+    showNetwork: function () {
+      events.trigger('showNetwork');
+    },
+    showRules: function (name) {
+      events.trigger('showRules', name);
+    },
+    showValues: function () {
+      events.trigger('showValues');
+    },
+    showPlugins: function () {
+      events.trigger('showPlugins');
+    },
     getActiveSession: function () {
       return dataModal.getActive();
     },
@@ -63,7 +86,7 @@ function getBridge(win) {
       return util.handleImportData(data);
     },
     download: function(data) {
-      events.trigger('download', data);
+      events.trigger('download', [data]);
     },
     showOption: function() {
       events.trigger('showPluginOption', plugin);
@@ -74,14 +97,39 @@ function getBridge(win) {
     setNetworkSettings: function(data) {
       events.trigger('setNetworkSettings', data);
     },
+    setRulesSettings: function(data) {
+      events.trigger('setRulesSettings', data);
+    },
+    setValuesSettings: function(data) {
+      events.trigger('setValuesSettings', data);
+    },
     setComposerData: function(data) {
       events.trigger('setComposerData', data);
     },
+    readFileAsText: util.readFileAsText,
+    readFileAsBase64: util.readFileAsBase64,
     showHttpsSettings: function() {
       events.trigger('showHttpsSettingsDialog');
     },
     showCustomCerts: function() {
       events.trigger('showCustomCerts');
+    },
+    uploadCustomCerts: function(data, cb) {
+      return dataCenter.uploadCerts(data, cb);
+    },
+    showService: util.showService,
+    hideService: util.hideService,
+    getInstalledPlugins: function() {
+      return dataCenter.getInstalledPlugins();
+    },
+    showInstallPlugins: function(list, registry) {
+      events.trigger('showInstallPlugins', [list, registry]);
+    },
+    showUpdatePlugins: function(list, registry) {
+      events.trigger('showUpdatePlugins', [list, registry]);
+    },
+    getVersion: function() {
+      return dataCenter.version;
     },
     copyText: util.copyText,
     syncData: function(cb) {
@@ -113,6 +161,29 @@ function getBridge(win) {
       events.trigger('handleImportValues', data);
     }
   };
+  if (api) {
+    Object.keys(api).forEach(function (key) {
+      result[key] = api[key];
+    });
+  }
+  return result;
 }
 
 module.exports = getBridge;
+
+getBridge.getServiceBridge = function(closeDialog) {
+  var bridgeApi = getBridge(null, {
+    login: function(data, cb) {
+      if (typeof data !== 'string') {
+        data = JSON.stringify(data);
+      }
+      dataCenter.login(data, cb);
+    },
+    logout: function(cb) {
+      dataCenter.logout(cb);
+    }
+  });
+  bridgeApi.closeDialog = closeDialog;
+  bridgeApi.installPlugins = dataCenter.installPluginsFromService;
+  return bridgeApi;
+};
