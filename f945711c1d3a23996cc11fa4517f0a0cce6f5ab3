@@ -1,0 +1,26 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.6",
+  "base_commit_sha": "f945711c1d3a23996cc11fa4517f0a0cce6f5ab3",
+  "prompts": {
+    "700eec8472aa71cc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019de8bc-614c-7311-bb32-73f40fb8312d",
+        "model": "gpt-5.5"
+      },
+      "human_author": "xcodebuild",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 36,
+      "accepted_lines": 0,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "scripts/run.js": {
+          "deletions": 36
+        }
+      }
+    }
+  }
+}
