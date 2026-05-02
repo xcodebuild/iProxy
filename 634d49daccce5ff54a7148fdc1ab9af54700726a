@@ -1,0 +1,134 @@
+src/renderer/extensions/rule-editor/components/editor/rule-language/protocols.ts
+  47df91798a68e873 90
+src/renderer/extensions/rule-editor/index.tsx
+  47df91798a68e873 6,102-112
+src/renderer/extensions/weinre/index.tsx
+  47df91798a68e873 32,55-57,64-66
+src/main/main.ts
+  47df91798a68e873 24-26,41,137-142,169-172,185-323,335,338,341-342,344,349-350,352-353,357,554,556-576,602,604,606,608,610,612
+src/renderer/extensions/phone-proxy/index.tsx
+  47df91798a68e873 47,52,89,98
+src/renderer/extensions/whistle-panel/index.tsx
+  47df91798a68e873 62
+src/main/splash.ts
+  47df91798a68e873 14,16,23,32,42,48,57,67,73,79,85-124,130,135,139,151,155,159,163,167,171,176,183,196-204,207-223,225
+src/renderer/extensions/setting/components/setting-form/index.tsx
+  47df91798a68e873 29,164
+src/renderer/extensions/whistle/index.tsx
+  47df91798a68e873 4-11,119,130,170,243-245,253,255,270-271,275,277,283,323,343,360,432,442,458
+src/renderer/extensions/index.ts
+  47df91798a68e873 13,21
+src/renderer/extensions/rule-editor/components/editor/rule-language/rule.ts
+  47df91798a68e873 87-88
+src/renderer/extensions/rule-editor/components/card/index.tsx
+  47df91798a68e873 104,123,125-131,152-153
+src/renderer/extensions/rule-editor/components/rule-list/index.tsx
+  47df91798a68e873 109,127,198,312-313,322,362,404,406
+src/renderer/extensions/rule-editor/components/rule-list/remote.ts
+  47df91798a68e873 27,80
+src/main/api.ts
+  47df91798a68e873 12,35-38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.6",
+  "base_commit_sha": "634d49daccce5ff54a7148fdc1ab9af54700726a",
+  "prompts": {
+    "47df91798a68e873": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019de8af-bd92-7e22-8b4f-950c92fb1dec",
+        "model": "gpt-5.5"
+      },
+      "human_author": "xcodebuild",
+      "messages": [],
+      "total_additions": 399,
+      "total_deletions": 98,
+      "accepted_lines": 367,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/renderer/extensions/rule-editor/components/rule-list/index.tsx": {
+          "additions": 9,
+          "deletions": 13,
+          "accepted_lines": 9
+        },
+        "src/main/const.ts": {
+          "deletions": 1
+        },
+        "src/main/api.ts": {
+          "additions": 5,
+          "deletions": 1,
+          "accepted_lines": 5
+        },
+        "src/renderer/extensions/rule-editor/components/editor/rule-language/rule.ts": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        },
+        "package.json": {
+          "additions": 32
+        },
+        "src/renderer/extensions/rule-editor/index.tsx": {
+          "additions": 12,
+          "deletions": 2,
+          "accepted_lines": 12
+        },
+        "src/renderer/extensions/index.ts": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        },
+        "src/renderer/extensions/phone-proxy/index.tsx": {
+          "additions": 4,
+          "deletions": 4,
+          "accepted_lines": 4
+        },
+        "src/renderer/extensions/rule-editor/components/card/index.tsx": {
+          "additions": 11,
+          "deletions": 9,
+          "accepted_lines": 11
+        },
+        "src/renderer/extensions/whistle/index.tsx": {
+          "additions": 27,
+          "deletions": 20,
+          "accepted_lines": 27
+        },
+        "src/main/splash.ts": {
+          "additions": 88,
+          "deletions": 24,
+          "accepted_lines": 88
+        },
+        "src/renderer/extensions/whistle-panel/index.tsx": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "src/main/main.ts": {
+          "additions": 194,
+          "deletions": 9,
+          "accepted_lines": 194
+        },
+        "src/renderer/extensions/setting/components/setting-form/index.tsx": {
+          "additions": 2,
+          "deletions": 4,
+          "accepted_lines": 2
+        },
+        "src/renderer/extensions/rule-editor/components/rule-list/remote.ts": {
+          "additions": 2,
+          "deletions": 2,
+          "accepted_lines": 2
+        },
+        "src/renderer/extensions/rule-editor/components/editor/rule-language/protocols.ts": {
+          "additions": 1,
+          "deletions": 1,
+          "accepted_lines": 1
+        },
+        "src/renderer/extensions/weinre/index.tsx": {
+          "additions": 7,
+          "deletions": 3,
+          "accepted_lines": 7
+        }
+      }
+    }
+  }
+}
