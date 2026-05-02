@@ -38,6 +38,7 @@ import {
     APP_VERSION,
     IS_BUILD_FOR_PR,
 } from './const';
+import { setSystemProxy } from './platform';
 import ua from 'universal-analytics';
 import { CoreAPI } from '../renderer/core-api';
 import { uuidv4 } from '../renderer/utils';
@@ -534,9 +535,29 @@ app.on('before-quit', function () {
     forceQuit = true;
 });
 
-app.on('will-quit', () => {
-    // 注销所有快捷键
+app.on('will-quit', async () => {
     globalShortcut.unregisterAll();
+    await setSystemProxy(0);
+});
+
+process.on('SIGINT', () => {
+    setSystemProxy(0)
+        .then(() => {
+            process.exit(0);
+        })
+        .catch(() => {
+            process.exit(1);
+        });
+});
+
+process.on('SIGTERM', () => {
+    setSystemProxy(0)
+        .then(() => {
+            process.exit(0);
+        })
+        .catch(() => {
+            process.exit(1);
+        });
 });
 
 // quit application when all windows are closed
