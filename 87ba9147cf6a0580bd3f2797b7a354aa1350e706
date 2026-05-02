@@ -1,0 +1,37 @@
+scripts/run.js
+  338b89e8eaa6c635 1-322
+package.json
+  338b89e8eaa6c635 7-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.6",
+  "base_commit_sha": "87ba9147cf6a0580bd3f2797b7a354aa1350e706",
+  "prompts": {
+    "338b89e8eaa6c635": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019de897-79a8-7941-85be-da1233948ad0",
+        "model": "gpt-5.5"
+      },
+      "human_author": "xcodebuild",
+      "messages": [],
+      "total_additions": 352,
+      "total_deletions": 30,
+      "accepted_lines": 351,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "scripts/run.js": {
+          "additions": 323,
+          "deletions": 1,
+          "accepted_lines": 322
+        },
+        "package.json": {
+          "additions": 29,
+          "deletions": 29,
+          "accepted_lines": 29
+        }
+      }
+    }
+  }
+}
