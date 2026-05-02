@@ -29,7 +29,7 @@ function run(command, args = [], options = {}) {
         cwd,
         env: makeEnv(options.env),
         stdio: 'inherit',
-        shell: isWin,
+        shell: options.shell ?? isWin,
     });
 
     if (result.error) {
@@ -50,7 +50,7 @@ function status(command, args = [], options = {}) {
         cwd,
         env: makeEnv(options.env),
         stdio: options.silent ? 'ignore' : 'inherit',
-        shell: isWin,
+        shell: options.shell ?? isWin,
     });
 
     if (result.error) {
@@ -69,8 +69,8 @@ function output(command, args = [], options = {}) {
         cwd,
         env: makeEnv(options.env),
         encoding: 'utf8',
-        stdio: ['ignore', 'pipe', options.silent ? 'ignore' : 'inherit'],
-        shell: isWin,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: options.shell ?? isWin,
     });
 
     if (result.error) {
@@ -78,6 +78,9 @@ function output(command, args = [], options = {}) {
     }
 
     if (result.status !== 0) {
+        if (result.stderr) {
+            process.stderr.write(result.stderr);
+        }
         process.exit(result.status || 1);
     }
 
@@ -183,7 +186,7 @@ function git(args, options = {}) {
         '-c',
         'core.compression=0',
     ];
-    run('git', [...gitConfig, ...args], options);
+    run('git', [...gitConfig, ...args], { ...options, shell: false });
 }
 
 function gitStatus(args, options = {}) {
@@ -197,7 +200,7 @@ function gitStatus(args, options = {}) {
         '-c',
         'core.compression=0',
     ];
-    return status('git', [...gitConfig, ...args], options);
+    return status('git', [...gitConfig, ...args], { ...options, shell: false });
 }
 
 function gitOutput(args, options = {}) {
@@ -211,7 +214,7 @@ function gitOutput(args, options = {}) {
         '-c',
         'core.compression=0',
     ];
-    return output('git', [...gitConfig, ...args], options);
+    return output('git', [...gitConfig, ...args], { ...options, shell: false });
 }
 
 function escapeRegExp(value) {
