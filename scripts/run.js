@@ -59,6 +59,30 @@ function status(command, args = [], options = {}) {
     return result.status === null ? 1 : result.status;
 }
 
+function output(command, args = [], options = {}) {
+    const cwd = options.cwd || root;
+    if (!options.silent) {
+        console.log(`$ ${formatCommand(command, args)}`);
+    }
+    const result = spawnSync(command, args, {
+        cwd,
+        env: makeEnv(options.env),
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', options.silent ? 'ignore' : 'inherit'],
+        shell: isWin,
+    });
+
+    if (result.error) {
+        throw result.error;
+    }
+
+    if (result.status !== 0) {
+        process.exit(result.status || 1);
+    }
+
+    return result.stdout.trim();
+}
+
 function runNodeScript(scriptName) {
     run(process.execPath, [path.join('scripts', scriptName)]);
 }
@@ -185,6 +209,64 @@ function gitStatus(args, options = {}) {
     return status('git', [...gitConfig, ...args], options);
 }
 
+function gitOutput(args, options = {}) {
+    const gitConfig = [
+        '-c',
+        'http.version=HTTP/1.1',
+        '-c',
+        'http.lowSpeedLimit=0',
+        '-c',
+        'http.lowSpeedTime=999999',
+        '-c',
+        'core.compression=0',
+    ];
+    return output('git', [...gitConfig, ...args], options);
+}
+
+function escapeRegExp(value) {
+    return value.replace(/[\\.^$*+?()[\]{}|]/g, '\\$&');
+}
+
+function getLatestSubtreeSplit(prefix) {
+    const normalizedPrefix = prefix.replace(/\/+$/, '');
+    const grep = `^git-subtree-dir: ${escapeRegExp(normalizedPrefix)}/*$`;
+    const body = gitOutput(['log', `--grep=${grep}`, '-n', '1', '--format=%B', 'HEAD'], {
+        silent: true,
+    });
+    const match = body.match(/^git-subtree-split:\s*([0-9a-f]{40})\s*$/m);
+    return match ? match[1] : null;
+}
+
+function hasCommit(commit) {
+    return gitStatus(['cat-file', '-e', `${commit}^{commit}`], { silent: true }) === 0;
+}
+
+function fetchCommit(remoteUrl, commit, tempRef, retries) {
+    if (hasCommit(commit)) {
+        return true;
+    }
+
+    for (let attempt = 1; attempt <= retries; attempt += 1) {
+        const code = gitStatus([
+            'fetch',
+            '--no-tags',
+            '--depth=1',
+            '--filter=blob:none',
+            remoteUrl,
+            `${commit}:${tempRef}`,
+        ]);
+        if (code === 0 && hasCommit(commit)) {
+            return true;
+        }
+
+        if (attempt < retries) {
+            console.error(`Fetch commit ${commit} failed. Retry ${attempt + 1}/${retries}...`);
+        }
+    }
+
+    return false;
+}
+
 function upgradeWhistle() {
     ensureCleanWorktree();
 
@@ -192,8 +274,10 @@ function upgradeWhistle() {
     const remoteRef = process.env.WHISTLE_REMOTE_REF || 'master';
     const prefix = process.env.WHISTLE_PREFIX || 'vendor/whistle';
     const retries = Number(process.env.WHISTLE_FETCH_RETRIES || 3);
-    const tempRef = `refs/ipproxy/whistle-upgrade/${Date.now()}`;
+    const tempRefBase = `refs/ipproxy/whistle-upgrade/${Date.now()}`;
+    const tempRef = `${tempRefBase}/target`;
     const refspec = `${remoteRef}:${tempRef}`;
+    const tempRefs = [tempRef];
 
     let fetched = false;
 
@@ -215,9 +299,21 @@ function upgradeWhistle() {
             process.exit(1);
         }
 
-        git(['subtree', 'merge', `--prefix=${prefix}`, '--squash', tempRef, remoteUrl]);
+        const previousSplit = getLatestSubtreeSplit(prefix);
+        if (previousSplit && !hasCommit(previousSplit)) {
+            const previousSplitRef = `${tempRefBase}/previous-${previousSplit.slice(0, 12)}`;
+            tempRefs.push(previousSplitRef);
+            if (!fetchCommit(remoteUrl, previousSplit, previousSplitRef, retries)) {
+                console.error(`Failed to fetch previous whistle split ${previousSplit}.`);
+                process.exit(1);
+            }
+        }
+
+        git(['subtree', 'merge', `--prefix=${prefix}`, '--squash', tempRef]);
     } finally {
-        status('git', ['update-ref', '-d', tempRef], { silent: true });
+        tempRefs.forEach((ref) => {
+            status('git', ['update-ref', '-d', ref], { silent: true });
+        });
     }
 
     installDeps();
