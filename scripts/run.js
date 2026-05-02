@@ -171,16 +171,6 @@ function installDeps() {
     updateNodeModules();
 }
 
-function ensureCleanWorktree() {
-    const unstaged = status('git', ['diff', '--quiet'], { silent: true });
-    const staged = status('git', ['diff', '--cached', '--quiet'], { silent: true });
-
-    if (unstaged !== 0 || staged !== 0) {
-        console.error('Working tree is not clean. Commit or stash changes before upgrading whistle.');
-        process.exit(1);
-    }
-}
-
 function git(args, options = {}) {
     const gitConfig = [
         '-c',
@@ -268,8 +258,6 @@ function fetchCommit(remoteUrl, commit, tempRef, retries) {
 }
 
 function upgradeWhistle() {
-    ensureCleanWorktree();
-
     const remoteUrl = process.env.WHISTLE_REMOTE_URL || 'https://github.com/avwo/whistle';
     const remoteRef = process.env.WHISTLE_REMOTE_REF || 'master';
     const prefix = process.env.WHISTLE_PREFIX || 'vendor/whistle';
