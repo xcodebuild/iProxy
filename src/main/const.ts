@@ -60,7 +60,6 @@ export const WINDOW_DEFAULT_HEIGHT = 700;
 export const WINDOW_MIN_WIDTH = 640;
 export const WINDOW_MIN_HEIGHT = 375;
 
-
 export const BYPASS_DOMAINS = [
     '*.lan',
     '*.ali.com',

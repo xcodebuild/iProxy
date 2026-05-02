@@ -44,12 +44,12 @@ export class PhoneProxy extends Extension {
                     setEnabled(nextEnabled);
                 };
                 this.coreAPI.eventEmmitter.on('iproxy-proxy-on-lan-changed', handler);
-                
+
                 this.coreAPI.eventEmmitter.emit('iproxy-restart-proxy-switch-lan', true);
 
                 return () => {
                     this.coreAPI.eventEmmitter.off('iproxy-proxy-on-lan-changed', handler);
-                }
+                };
             }, []);
 
             useEffect(() => {
@@ -86,7 +86,7 @@ export class PhoneProxy extends Extension {
                             {t('Proxy on LAN disabled')}
                         </div>
                     </div>
-                )
+                );
             } else if (enabled === 'loading') {
                 return (
                     <div className="iproxy-phoneproxy-container">
@@ -95,7 +95,7 @@ export class PhoneProxy extends Extension {
                             {t('Switching Proxy on LAN Status...')}
                         </div>
                     </div>
-                )
+                );
             }
 
             return (

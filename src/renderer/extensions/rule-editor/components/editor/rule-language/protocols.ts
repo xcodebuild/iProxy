@@ -87,7 +87,7 @@ const allInnerRules = BASE_PROTOCOLS.slice(0, 2)
     .concat(innerRules)
     .concat(BASE_PROTOCOLS.slice(3));
 allInnerRules.splice(allInnerRules.indexOf('plugin'), 1);
-const allRules = allInnerRules.map(function(name) {
+const allRules = allInnerRules.map(function (name) {
     return name + '://';
 });
 

@@ -1,7 +1,14 @@
 import { Extension } from '../../extension';
 import logger from 'electron-log';
 import React, { useEffect, useRef, useState } from 'react';
-import { DesktopOutlined, StopOutlined, CheckOutlined, KeyOutlined, MenuOutlined, RetweetOutlined } from '@ant-design/icons';
+import {
+    DesktopOutlined,
+    StopOutlined,
+    CheckOutlined,
+    KeyOutlined,
+    MenuOutlined,
+    RetweetOutlined,
+} from '@ant-design/icons';
 import { Icon as LegacyIcon } from '@ant-design/compatible';
 import { Divider, Dropdown, Menu, message } from 'antd';
 import { lazyParseData, getWhistlePort } from '../../utils';
@@ -109,7 +116,7 @@ export class WhistleExtension extends Extension {
             logger.info('init');
             const client = await this.coreAPI.joinBoardcast();
 
-            client.onmessage = event => {
+            client.onmessage = (event) => {
                 const data = lazyParseData(event.data as string);
 
                 if (data.eventName === 'whistle-ready') {
@@ -120,7 +127,7 @@ export class WhistleExtension extends Extension {
                         status: 'online',
                     });
 
-                    this.coreAPI.eventEmmitter.on('whistle-save-rule', rules => {
+                    this.coreAPI.eventEmmitter.on('whistle-save-rule', (rules) => {
                         syncRuleToWhistle(rules, port);
                     });
 
@@ -160,7 +167,7 @@ export class WhistleExtension extends Extension {
                 }
             });
 
-            client.onerror = err => {
+            client.onerror = (err) => {
                 logger.error(err);
             };
             logger.info('client', client);
@@ -233,7 +240,9 @@ export class WhistleExtension extends Extension {
 
     statusbarRightComponent() {
         const useProxyOnLan = () => {
-            const [proxyAvailableOnLan, setProxyAvailableOnLan] = useState<boolean>(this.coreAPI.store.get('proxyAvailableOnLan') || false);
+            const [proxyAvailableOnLan, setProxyAvailableOnLan] = useState<boolean>(
+                this.coreAPI.store.get('proxyAvailableOnLan') || false,
+            );
             const [loading, setLoading] = useState(false);
 
             const { t } = useTranslation();
@@ -241,9 +250,9 @@ export class WhistleExtension extends Extension {
             React.useEffect(() => {
                 const handler = async (nextStatus: boolean | 'loading') => {
                     if (nextStatus === 'loading') {
-                        setLoading(true)
+                        setLoading(true);
                     } else {
-                        setLoading(false)
+                        setLoading(false);
                         setProxyAvailableOnLan(nextStatus);
                         if (nextStatus) {
                             message.info(t('Proxy on LAN enabled'));
@@ -258,20 +267,20 @@ export class WhistleExtension extends Extension {
 
                 return () => {
                     this.coreAPI.eventEmmitter.off('iproxy-proxy-on-lan-changed', handler);
-                }
-            }, [ t ]);
+                };
+            }, [t]);
 
             return {
                 loading,
-                proxyAvailableOnLan
+                proxyAvailableOnLan,
             };
-        }
+        };
         // @ts-ignore
         // eslint-disable-next-line react/prop-types
         const WhistleStatusbarItem = ({ setStatusBarMode }) => {
             const [onlineState, setOnlineState] = useState('init');
             const [port, setPort] = useState();
-            const {loading, proxyAvailableOnLan} = useProxyOnLan();
+            const { loading, proxyAvailableOnLan } = useProxyOnLan();
 
             useEffect(() => {
                 const modeMap = {
@@ -311,7 +320,7 @@ export class WhistleExtension extends Extension {
                 (async () => {
                     client = await this.coreAPI.joinBoardcast();
 
-                    client.onmessage = event => {
+                    client.onmessage = (event) => {
                         // const data = lazyParseData(event.data as string);
                         // if (data.eventName === 'whistle-hit') {
                         //     setHit(data.data.host);
@@ -331,7 +340,7 @@ export class WhistleExtension extends Extension {
                         content: t('System proxy changed by other Program, re-enable proxy?'),
                         onOk: () => {
                             mHasWarned = false;
-                            enableSystemProxy((portRef.current as unknown) as number);
+                            enableSystemProxy(portRef.current as unknown as number);
                         },
                         onCancel: () => {
                             mHasWarned = true;
@@ -348,7 +357,7 @@ export class WhistleExtension extends Extension {
                         try {
                             const proxyworking = await this.coreAPI.checkSystemProxy(
                                 '127.0.0.1',
-                                (portRef.current as unknown) as number,
+                                portRef.current as unknown as number,
                             );
                             // maybe something has changed after the async call, recheck
                             if (!proxyworking && onlineStateRef.current === 'ready' && !mHasWarned) {
@@ -420,7 +429,7 @@ export class WhistleExtension extends Extension {
             }[onlineState] as any;
 
             useEffect(() => {
-                this.coreAPI.eventEmmitter.on('whistle-online-status-change', data => {
+                this.coreAPI.eventEmmitter.on('whistle-online-status-change', (data) => {
                     setOnlineState(data.status);
                     if (data.port) {
                         setPort(data.port);
@@ -430,9 +439,7 @@ export class WhistleExtension extends Extension {
             return (
                 <>
                     <div className="switch-whistle-proxy-on-lan">
-                        <span>
-                            {t('Proxy on LAN')}:&nbsp;
-                        </span>
+                        <span>{t('Proxy on LAN')}:&nbsp;</span>
                         <Switch
                             checkedChildren={<CheckOutlined />}
                             unCheckedChildren={<StopOutlined />}
@@ -448,7 +455,7 @@ export class WhistleExtension extends Extension {
                     <Dropdown overlay={menu}>
                         <div className="whistle-status-bar-item">
                             {t('Proxy')}
-                            {port ? `: [HTTP ${port}/SOCKS5 ${((port as unknown) as number) + 1}]` : null}{' '}
+                            {port ? `: [HTTP ${port}/SOCKS5 ${(port as unknown as number) + 1}]` : null}{' '}
                             <LegacyIcon
                                 style={{ marginRight: '10px', marginLeft: '5px' }}
                                 className={info.proxyClassName}

@@ -11,16 +11,16 @@ export const splash = ({
   <!DOCTYPE html>
   <meta charset="utf-8">
   <html>
-  
+
   <head>
-  
+
     <style>
       body,
       html {
         margin: 0;
         overflow: hidden;
       }
-  
+
       #box {
         position: absolute;
         user-select: none;
@@ -29,7 +29,7 @@ export const splash = ({
         overflow: hidden;
         margin: auto;
       }
-  
+
       #logo {
         height: 16px;
         position: absolute;
@@ -39,13 +39,13 @@ export const splash = ({
         top: 25px;
         left: 25px;
       }
-  
+
       #logo img {
         width: 18px;
         -webkit-filter: grayscale(100%) brightness(5);
         filter: grayscale(100%) brightness(5);
       }
-  
+
       #logo h6 {
         color: white;
         font-size: 16px;
@@ -54,7 +54,7 @@ export const splash = ({
         letter-spacing: 0px;
         margin-left: 5px;
       }
-  
+
       #box h1 {
         color: white;
         display: inline-block;
@@ -64,40 +64,79 @@ export const splash = ({
         top: 50%;
         transform: translateX(-50%) translateY(-120%);
       }
-  
+
       #box .text {
         color: white;
         font-weight: 400;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
       }
-  
+
       #box h4 {
         font-size: 12px;
         font-weight: 400;
         opacity: 50%;
       }
-  
+
       #starting-txt {
         position: absolute;
         left: 25px;
         bottom: 13px;
       }
-  
+
+      #progress-container {
+        position: absolute;
+        left: 50%;
+        top: 60%;
+        transform: translateX(-50%) translateY(40px);
+        width: 70%;
+        max-width: 400px;
+      }
+
+      #progress-bar-wrapper {
+        width: 100%;
+        height: 4px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+
+      #progress-bar {
+        height: 100%;
+        width: 0%;
+        background: white;
+        border-radius: 2px;
+        transition: width 0.3s ease;
+      }
+
+      #progress-info {
+        margin-top: 12px;
+        text-align: center;
+        font-size: 12px;
+        font-weight: 400;
+        color: rgba(255, 255, 255, 0.8);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+      }
+
+      #progress-percent {
+        color: white;
+        font-weight: 600;
+      }
+
       #author-txt {
         position: absolute;
         right: 25px;
         bottom: 13px;
       }
-  
+
       #author-txt a {
         color: inherit;
         text-decoration: none;
       }
-  
+
       .text img {
         width: 15px;
       }
-  
+
       .dot {
         width: 4px;
         height: 4px;
@@ -109,39 +148,39 @@ export const splash = ({
         border-radius: 5px;
         background: ${fontColor};
       }
-  
+
       #dot1 {
         animation: dotslide 2.8s infinite cubic-bezier(0.2, .8, .8, 0.2);
       }
-  
+
       #dot2 {
         animation: dotslide 2.8s .2s infinite cubic-bezier(0.2, .8, .8, 0.2);
       }
-  
+
       #dot3 {
         animation: dotslide 2.8s .4s infinite cubic-bezier(0.2, .8, .8, 0.2);
       }
-  
+
       #dot4 {
         animation: dotslide 2.8s .6s infinite cubic-bezier(0.2, .8, .8, 0.2);
       }
-  
+
       #dot5 {
         animation: dotslide 2.8s .8s infinite cubic-bezier(0.2, .8, .8, 0.2);
       }
-  
+
       @keyframes dotslide {
         0% {
           left: -20%;
         }
-  
+
         100% {
           left: 120%;
         }
       }
     </style>
   </head>
-  
+
   <body style="background-color:${color}">
     <div id="box" style="background-color:${color}">
       <span id="logo">
@@ -154,10 +193,35 @@ export const splash = ({
       <div class="dot" id="dot3"></div>
       <div class="dot" id="dot4"></div>
       <div class="dot" id="dot5"></div>
-      <h4 class="text" id="starting-txt">${text}</h4>
+      <div id="progress-container">
+        <div id="progress-bar-wrapper">
+          <div id="progress-bar"></div>
+        </div>
+        <div id="progress-info">
+          <span id="progress-percent">0%</span> - <span id="progress-text">${text}</span>
+        </div>
+      </div>
+      <h4 class="text" id="starting-txt" style="display: none;">${text}</h4>
       <span style="display: none" class="text" id="author-txt">${website}</span>
     </div>
+    <script>
+      (function() {
+        const { ipcRenderer } = require('electron');
+        const progressBar = document.getElementById('progress-bar');
+        const progressPercent = document.getElementById('progress-percent');
+        const progressText = document.getElementById('progress-text');
+
+        ipcRenderer.on('splash-progress', (event, data) => {
+          const { percent, message } = data;
+          progressBar.style.width = percent + '%';
+          progressPercent.textContent = Math.round(percent) + '%';
+          if (message) {
+            progressText.textContent = message;
+          }
+        });
+      })();
+    </script>
   </body>
-  
+
   </html>
   `;
