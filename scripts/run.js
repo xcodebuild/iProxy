@@ -13,7 +13,8 @@ function makeEnv(extra = {}) {
         ...extra,
     };
     const binPath = path.join(root, 'node_modules', '.bin');
-    env.PATH = `${binPath}${path.delimiter}${env.PATH || ''}`;
+    const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') || 'PATH';
+    env[pathKey] = `${binPath}${path.delimiter}${env[pathKey] || ''}`;
     return env;
 }
 
