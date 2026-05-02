@@ -9,6 +9,7 @@ import checkInstallStatus from './install';
 import treeKill from 'tree-kill';
 import ip from 'ip';
 import path from 'path';
+import fs from 'fs-extra';
 import { IPROXY_FILES_DIR, SYSTEM_IS_MACOS, SYSTEM_IS_LINUX } from './const';
 import { app, nativeTheme, BrowserWindow } from 'electron';
 import http from 'http';
@@ -31,7 +32,10 @@ async function spawnModule(props: any) {
 
     logger.info('boardcast port', boardcastPort);
 
-    const nodeModulePath = path.join(IPROXY_FILES_DIR, `/node/node_modules/`);
+    let nodeModulePath = path.join(IPROXY_FILES_DIR, `/node/node_modules/`);
+    if (!fs.existsSync(nodeModulePath)) {
+        nodeModulePath = path.join(IPROXY_FILES_DIR, `/node/modules/`);
+    }
     const modulePath = encodeURIComponent(path.join(nodeModulePath, `${moduleId}/index.js`));
 
     let nodeEXE = '';
