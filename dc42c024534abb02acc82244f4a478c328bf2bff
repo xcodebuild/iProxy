@@ -1,0 +1,59 @@
+src/main/main.ts
+  4a49c4e782169747 379-381
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8-ntes.6",
+  "base_commit_sha": "dc42c024534abb02acc82244f4a478c328bf2bff",
+  "prompts": {
+    "4a49c4e782169747": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_216d1f828ffetzIODE19vsbUDx",
+        "model": "codex/gpt-5.5"
+      },
+      "human_author": "xcodebuild",
+      "messages": [],
+      "total_additions": 11,
+      "total_deletions": 28,
+      "accepted_lines": 6,
+      "overriden_lines": 0,
+      "per_file_stats": {
+        "src/renderer/components/app/index.tsx": {
+          "deletions": 18
+        },
+        "src/renderer/components/app/index.less": {
+          "additions": 8,
+          "deletions": 8,
+          "accepted_lines": 3
+        },
+        "src/main/main.ts": {
+          "additions": 3,
+          "deletions": 2,
+          "accepted_lines": 3
+        }
+      }
+    },
+    "fd514e1a3b1d1c7b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_216ef5512ffe4cZXjgfq3X9DGB",
+        "model": "deepseek/deepseek-v4-flash"
+      },
+      "human_author": "xcodebuild",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 8,
+      "accepted_lines": 1,
+      "overriden_lines": 1,
+      "per_file_stats": {
+        "src/renderer/components/app/index.less": {
+          "additions": 5,
+          "deletions": 8,
+          "accepted_lines": 1,
+          "overriden_lines": 1
+        }
+      }
+    }
+  }
+}
