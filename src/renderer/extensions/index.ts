@@ -10,7 +10,7 @@ import { WhistlePanel } from './whistle-panel';
 import { Weinre } from './weinre';
 
 export function getAllExtensions() {
-    const extensions = ([
+    const extensions = [
         new RuleEditor(),
         // new Network(),
         new WhistlePanel(),
@@ -18,7 +18,7 @@ export function getAllExtensions() {
         new PhoneProxy(),
         new Setting(),
         new WhistleExtension(),
-    ] as unknown) as Extension[];
+    ] as unknown as Extension[];
 
     return extensions;
 }

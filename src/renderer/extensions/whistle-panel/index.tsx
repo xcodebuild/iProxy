@@ -59,7 +59,7 @@ export class WhistlePanel extends Extension {
                 if (whistleIframe.src.indexOf('network') !== -1) {
                     whistleIframe.style.display = 'block';
                 }
-                return function() {
+                return function () {
                     whistleIframe.style.display = 'none';
                 };
             }, []);

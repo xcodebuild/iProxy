@@ -21,7 +21,9 @@ import { hideOrQuit } from './platform';
 import { installCertAndHelper } from './install';
 
 // @ts-ignore
-import extract from 'extract-zip';
+import yauzl from 'yauzl';
+import { promisify } from 'util';
+import { pipeline } from 'stream';
 
 import {
     WINDOW_DEFAULT_WIDTH,
@@ -131,6 +133,12 @@ const IPROXY_FILES_ZIP_IN_ASAR_PATH = electronIsDev
 
 let splashWindow: BrowserWindow | null;
 
+function updateSplashProgress(percent: number, message: string) {
+    if (splashWindow && !splashWindow.isDestroyed()) {
+        splashWindow.webContents.send('splash-progress', { percent, message });
+    }
+}
+
 async function initSplashScreen() {
     // start a splash window
     return new Promise((resolve) => {
@@ -157,6 +165,10 @@ async function initSplashScreen() {
             autoHideMenuBar: true,
             resizable: false,
             movable: true,
+            webPreferences: {
+                nodeIntegration: true,
+                contextIsolation: false,
+            },
         });
 
         splashWindow.loadURL(splashContent);
@@ -169,6 +181,132 @@ async function initSplashScreen() {
     });
 }
 
+async function extractZipWithProgress(zipPath: string, destDir: string) {
+    const zipfile = await new Promise<any>((resolve, reject) => {
+        yauzl.open(zipPath, { lazyEntries: true }, (err: Error | null, zf: any) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve(zf);
+            }
+        });
+    });
+    const totalEntries = zipfile.entryCount;
+    let extractedCount = 0;
+    const pipelineAsync = promisify(pipeline);
+    const updateInterval = Math.max(1, Math.floor(totalEntries / 100));
+
+    return new Promise<void>((resolve, reject) => {
+        let canceled = false;
+
+        zipfile.on('error', (err: Error) => {
+            canceled = true;
+            reject(err);
+        });
+
+        zipfile.on('close', () => {
+            if (!canceled) {
+                resolve();
+            }
+        });
+
+        const processEntry = (entry: any) => {
+            if (canceled) {
+                return;
+            }
+
+            if (entry.fileName.startsWith('__MACOSX/')) {
+                zipfile.readEntry();
+                return;
+            }
+
+            const entryDest = path.join(destDir, entry.fileName);
+            const entryDestDir = path.dirname(entryDest);
+
+            fs.mkdirp(entryDestDir)
+                .then(() => {
+                    const mode = (entry.externalFileAttributes >> 16) & 0xffff;
+                    const IFMT = 61440;
+                    const IFDIR = 16384;
+                    const IFLNK = 40960;
+                    const symlink = (mode & IFMT) === IFLNK;
+                    let isDir = (mode & IFMT) === IFDIR;
+
+                    if (!isDir && entry.fileName.endsWith('/')) {
+                        isDir = true;
+                    }
+
+                    const madeBy = entry.versionMadeBy >> 8;
+                    if (!isDir) isDir = madeBy === 0 && entry.externalFileAttributes === 16;
+
+                    if (isDir) {
+                        return fs.mkdirp(entryDest).then(() => {
+                            extractedCount++;
+                            if (extractedCount % updateInterval === 0 || extractedCount === totalEntries) {
+                                const percent = 10 + (extractedCount / totalEntries) * 70;
+                                updateSplashProgress(percent, `Extracting ${entry.fileName}...`);
+                            }
+                            zipfile.readEntry();
+                        });
+                    }
+
+                    return new Promise<void>((res, rej) => {
+                        zipfile.openReadStream(entry, (err: Error | null, readStream: any) => {
+                            if (err) {
+                                rej(err);
+                                return;
+                            }
+
+                            if (symlink) {
+                                const chunks: Buffer[] = [];
+                                readStream.on('data', (chunk: Buffer) => chunks.push(chunk));
+                                readStream.on('end', () => {
+                                    const link = Buffer.concat(chunks).toString();
+                                    fs.symlink(link, entryDest)
+                                        .then(() => {
+                                            extractedCount++;
+                                            if (
+                                                extractedCount % updateInterval === 0 ||
+                                                extractedCount === totalEntries
+                                            ) {
+                                                const percent = 10 + (extractedCount / totalEntries) * 70;
+                                                updateSplashProgress(percent, `Extracting ${entry.fileName}...`);
+                                            }
+                                            zipfile.readEntry();
+                                            res();
+                                        })
+                                        .catch(rej);
+                                });
+                                readStream.on('error', rej);
+                            } else {
+                                const writeStream = fs.createWriteStream(entryDest);
+                                pipelineAsync(readStream, writeStream)
+                                    .then(() => {
+                                        extractedCount++;
+                                        if (extractedCount % updateInterval === 0 || extractedCount === totalEntries) {
+                                            const percent = 10 + (extractedCount / totalEntries) * 70;
+                                            updateSplashProgress(percent, `Extracting ${entry.fileName}...`);
+                                        }
+                                        zipfile.readEntry();
+                                        res();
+                                    })
+                                    .catch(rej);
+                            }
+                        });
+                    });
+                })
+                .catch((err: Error) => {
+                    canceled = true;
+                    zipfile.close();
+                    reject(err);
+                });
+        };
+
+        zipfile.on('entry', processEntry);
+        zipfile.readEntry();
+    });
+}
+
 async function initCopyFiles() {
     try {
         if (!fs.existsSync(IPROXY_FILES_DIR)) {
@@ -177,25 +315,29 @@ async function initCopyFiles() {
 
         const versionFile = path.join(IPROXY_FILES_DIR, 'version');
         if (fs.existsSync(versionFile) && fs.readFileSync(versionFile, 'utf-8') === version && !electronIsDev) {
-            // pass
+            updateSplashProgress(100, 'Files already up to date');
         } else {
             console.log('copy files');
+            updateSplashProgress(5, 'Removing old files...');
             fs.removeSync(IPROXY_FILES_DIR);
 
-            await extract(IPROXY_FILES_ZIP_IN_ASAR_PATH, {
-                dir: IPROXY_HOME_PATH,
-            });
+            updateSplashProgress(10, 'Extracting files (this may take a while on Windows)...');
+            await extractZipWithProgress(IPROXY_FILES_ZIP_IN_ASAR_PATH, IPROXY_HOME_PATH);
 
-            // copyFolderRecursiveSync(IPROXY_FILES_IN_ASAR_PATH, IPROXY_HOME_PATH);
-            // fs.chmodSync(IPROXY_NODEJS_PATH, '775');
+            updateSplashProgress(80, 'Moving node_modules...');
             fs.moveSync(
                 path.join(IPROXY_FILES_DIR, '/node/modules'),
                 path.join(IPROXY_FILES_DIR, '/node/node_modules'),
             );
+
+            updateSplashProgress(95, 'Writing version file...');
             fs.writeFileSync(versionFile, version, 'utf-8');
+
+            updateSplashProgress(100, 'Files extracted successfully');
         }
     } catch (e) {
         console.error(e);
+        updateSplashProgress(0, 'Error extracting files');
     }
 }
 
@@ -420,9 +562,15 @@ app.on('activate', () => {
 // create main BrowserWindow when electron is ready
 app.on('ready', async () => {
     appReady = true;
+    updateSplashProgress(0, 'Initializing splash screen...');
     await initSplashScreen();
+    updateSplashProgress(0, 'Checking files...');
     await initCopyFiles();
+    updateSplashProgress(0, 'Creating main window...');
     mainWindow = createMainWindow();
+    updateSplashProgress(0, 'Setting up menu...');
     setApplicationMenu();
+    updateSplashProgress(0, 'Initializing IPC...');
     initIPC(mainWindow);
+    updateSplashProgress(100, 'Ready!');
 });

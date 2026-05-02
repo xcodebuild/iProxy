@@ -84,8 +84,8 @@ export function initRuleLanguage(mo: typeof monaco) {
     mo.languages.registerCompletionItemProvider('rule', {
         triggerCharacters: [' '],
         // @ts-ignore
-        provideCompletionItems: function() {
-            const result = PROTOCOLS.map(item => {
+        provideCompletionItems: function () {
+            const result = PROTOCOLS.map((item) => {
                 return {
                     label: item,
                     kind: 'function',

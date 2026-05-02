@@ -29,7 +29,7 @@ export class Weinre extends Extension {
 
             useEffect(() => {
                 CoreAPI.eventEmmitter.emit('weinre-enter');
-                return function() {
+                return function () {
                     CoreAPI.eventEmmitter.emit('weinre-exit');
                 };
             }, []);
@@ -52,14 +52,18 @@ export class Weinre extends Extension {
 
                     if (container) {
                         container.innerHTML = `<style>
-                        ${isDarkMode ? `
+                        ${
+                            isDarkMode
+                                ? `
                         .content-header {
                             background: #3b3b3d !important;
                         }
                         div {
                             color : #f0f0f0 !important;
                         }
-                        `: ''}
+                        `
+                                : ''
+                        }
                         </style>
                         <div>
                             通过代理访问带有 iproxy=true 参数的页面开始调试
