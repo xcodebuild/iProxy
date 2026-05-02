@@ -24,7 +24,7 @@ function extendRule(index: number, content: string) {
     });
     return extendContent
         .split('\n')
-        .map(item => {
+        .map((item) => {
             if (item.indexOf('.js') !== -1 || item.indexOf('.css') !== -1) {
                 return item + ' resCors://enable';
             } else {
@@ -77,7 +77,7 @@ ignore://*|!enable|!disable ${WHITE_LIST_DOMAIN_STR}
 `
             : '') +
         rules
-            .filter(item => {
+            .filter((item) => {
                 return item.enabled;
             })
             .map((item, index) => {

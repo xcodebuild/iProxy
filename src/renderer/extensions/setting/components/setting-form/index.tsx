@@ -26,7 +26,7 @@ const PluginInfoCard = () => {
     });
 
     useEffect(() => {
-        getWhistlePort(CoreAPI).then(port => {
+        getWhistlePort(CoreAPI).then((port) => {
             setPort(port);
             pluginDataRequest.run();
         });
@@ -161,9 +161,7 @@ class InnerSettingForm extends React.Component {
                     {getFieldDecorator('defaultPort')(<InputNumber min={1024} max={65534} />)}
                 </Form.Item>
                 <Form.Item label={t('Copyright')}>
-                    <Typography>
-                        Version {version} Made with love
-                    </Typography>
+                    <Typography>Version {version} Made with love</Typography>
                 </Form.Item>
                 <Form.Item label={t('Actions')}>
                     <Button className="action-btn" loading={this.state.isUpdating} onClick={checkUpdate} type="primary">

@@ -106,7 +106,7 @@ export const RuleList = (props: Props) => {
         const enterHandler = () => {
             saveWithLimit(
                 ruleListRef.current
-                    .filter(item => item.uuid !== '[internal-debugger-on]')
+                    .filter((item) => item.uuid !== '[internal-debugger-on]')
                     .concat([
                         {
                             uuid: '[internal-debugger-on]',
@@ -124,7 +124,7 @@ export const RuleList = (props: Props) => {
         CoreAPI.eventEmmitter.on('weinre-enter', enterHandler);
         CoreAPI.eventEmmitter.on('weinre-exit', exitHandler);
 
-        return function() {
+        return function () {
             CoreAPI.eventEmmitter.off('weiren-enter', enterHandler);
             CoreAPI.eventEmmitter.off('weiren-exit', exitHandler);
         };
@@ -195,7 +195,7 @@ export const RuleList = (props: Props) => {
 
             setRuleList(items);
 
-            switchRule(items.findIndex(item => item.uuid === currentSelectUUID));
+            switchRule(items.findIndex((item) => item.uuid === currentSelectUUID));
         };
     }, [selected, ruleList]);
 
@@ -309,12 +309,8 @@ export const RuleList = (props: Props) => {
             </div>
             <DragDropContext onDragEnd={onDragEnd}>
                 <Droppable droppableId="droppable">
-                    {provided => (
-                        <div
-                            className="iproxy-rule-list no-drag"
-                            {...provided.droppableProps}
-                            ref={provided.innerRef}
-                        >
+                    {(provided) => (
+                        <div className="iproxy-rule-list no-drag" {...provided.droppableProps} ref={provided.innerRef}>
                             {ruleList.map((item, index) => {
                                 const className = classnames({
                                     'iproxy-rule-list-item': true,
@@ -323,7 +319,7 @@ export const RuleList = (props: Props) => {
                                 });
                                 return (
                                     <Draggable key={item.uuid} draggableId={item.uuid} index={index}>
-                                        {provided => {
+                                        {(provided) => {
                                             const handleClick = () => {
                                                 switchRule(index);
                                             };
@@ -363,7 +359,7 @@ export const RuleList = (props: Props) => {
                                                         label: t('remove'),
                                                         click: () => {
                                                             const newRules = ruleList.filter(
-                                                                _item => _item.uuid !== item.uuid,
+                                                                (_item) => _item.uuid !== item.uuid,
                                                             );
                                                             setRuleList(newRules);
                                                             switchRule(0, true);
@@ -405,9 +401,9 @@ export const RuleList = (props: Props) => {
                                                             onBlur={renameComplete}
                                                             onPressEnter={renameComplete}
                                                             value={renameText}
-                                                            onChange={e => setRenameText(e.target.value)}
+                                                            onChange={(e) => setRenameText(e.target.value)}
                                                             autoFocus
-                                                            onFocus={e => {
+                                                            onFocus={(e) => {
                                                                 e.persist();
                                                                 setTimeout(() => e.target.select());
                                                             }}

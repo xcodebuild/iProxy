@@ -101,7 +101,7 @@ exports.handleRequest = async (ctx, next) => {
     },
 ];
 
-export type Option = typeof options[0];
+export type Option = (typeof options)[0];
 
 export const Card = (props: Props) => {
     const { onFinish, onCancel, x, y } = props;
@@ -120,12 +120,15 @@ export const Card = (props: Props) => {
         <Dropdown
             overlay={
                 <Menu>
-                     {options.map(item => {
+                    {options.map((item) => {
                         return (
-                            <Menu.Item key={item.value} onClick={() => {
-                                const option = options.find(findItem => findItem.value === item.value) as Option;
-                                onFinish(option);
-                            }}>
+                            <Menu.Item
+                                key={item.value}
+                                onClick={() => {
+                                    const option = options.find((findItem) => findItem.value === item.value) as Option;
+                                    onFinish(option);
+                                }}
+                            >
                                 <div className="iproxy-select-item">
                                     <span className="iproxy-select-icon">
                                         <LegacyIcon type={item.icon}></LegacyIcon>
@@ -146,9 +149,8 @@ export const Card = (props: Props) => {
                 }}
                 size="small"
                 shape="circle"
-                icon={<MenuOutlined />}>
-            </Button>
+                icon={<MenuOutlined />}
+            ></Button>
         </Dropdown>
-        
     );
 };

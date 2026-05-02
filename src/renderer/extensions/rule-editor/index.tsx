@@ -3,7 +3,7 @@ import React from 'react';
 import { RuleList, Rule } from './components/rule-list';
 import { Tray } from 'electron';
 import * as remote from '@electron/remote';
-import { ICON_TEMPLATE_PATH, RULE_STORE_KEY, DOCUMENT_URL, GITHUB_PROJECT_PAGE } from '../../const';
+import { ICON_TEMPLATE_PATH, RULE_STORE_KEY, DOCUMENT_URL, GITHUB_PROJECT_PAGE, SYSTEM_IS_MACOS } from '../../const';
 import { CoreAPI } from '../../core-api';
 import { useTranslation } from 'react-i18next';
 import { TFunction } from 'i18next';
@@ -99,7 +99,17 @@ export class RuleEditor extends Extension {
             tray = await new remote.Tray(image);
 
             tray.on('mouse-move', buildTrayContextMenu);
-            tray.on('click', buildTrayContextMenu);
+            tray.on('click', () => {
+                if (!SYSTEM_IS_MACOS) {
+                    const win = remote.getCurrentWindow();
+                    if (win.isMinimized()) {
+                        win.restore();
+                    }
+                    win.show();
+                    win.focus();
+                }
+                buildTrayContextMenu();
+            });
             tray.setToolTip('iProxy');
         })();
     }
