@@ -5,20 +5,15 @@ import { Icon as LegacyIcon } from '@ant-design/compatible';
 import classnames from 'classnames';
 import { useTranslation } from 'react-i18next';
 import { Provider, KeepAlive } from 'react-keep-alive';
-// @ts-ignore
-import { Titlebar } from 'react-titlebar-osx';
 
 import useAppExtensionPanels, { AppPanel } from '../../hooks/use-app-extension-panels';
 import { useThemeModeProvider } from '../../hooks/use-theme-mode';
-import useCurrentWindow from '../../hooks/use-current-window';
-import { SYSTEM_IS_MACOS } from '../../const';
 
 export const App = () => {
     const { t } = useTranslation();
     const ThemeModeProvider = useThemeModeProvider();
     const extensions = useMemo(() => getAllExtensions(), []);
     const { panels, rightStatusItems, activePanel, handleClickPanel } = useAppExtensionPanels(extensions);
-    const currentWindow = useCurrentWindow();
 
     const renderActivePanel = () => {
         const ActivePanelComponent = activePanel ? activePanel.component : null;
@@ -40,19 +35,6 @@ export const App = () => {
         <ThemeModeProvider>
             <div className="iproxy-app-container">
                 <Provider>
-                    {SYSTEM_IS_MACOS ? (
-                        <Titlebar
-                            text="iProxy"
-                            onClose={() => currentWindow.close()}
-                            onMaximize={() => currentWindow.maximize()}
-                            onFullscreen={() => currentWindow.fullScreen()}
-                            onMinimize={() => currentWindow.minimize()}
-                            padding={5}
-                            transparent={true}
-                            draggable={true}
-                        />
-                    ) : null}
-
                     <div className="iproxy-panel-dock no-drag">
                         {panels.map((panel: AppPanel, index: number) => {
                             const className = classnames({
