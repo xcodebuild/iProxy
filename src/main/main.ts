@@ -182,6 +182,17 @@ async function initSplashScreen() {
     });
 }
 
+function getExtractedMode(mode: number, isDir: boolean) {
+    if (mode === 0) {
+        if (isDir) {
+            return 0o755;
+        } else {
+            return 0o644;
+        }
+    }
+    return mode;
+}
+
 async function extractZipWithProgress(zipPath: string, destDir: string) {
     const zipfile = await new Promise<any>((resolve, reject) => {
         yauzl.open(zipPath, { lazyEntries: true }, (err: Error | null, zf: any) => {
@@ -240,14 +251,18 @@ async function extractZipWithProgress(zipPath: string, destDir: string) {
                     const madeBy = entry.versionMadeBy >> 8;
                     if (!isDir) isDir = madeBy === 0 && entry.externalFileAttributes === 16;
 
+                    const procMode = getExtractedMode(mode, isDir) & 0o777;
+
                     if (isDir) {
                         return fs.mkdirp(entryDest).then(() => {
-                            extractedCount++;
-                            if (extractedCount % updateInterval === 0 || extractedCount === totalEntries) {
-                                const percent = 10 + (extractedCount / totalEntries) * 70;
-                                updateSplashProgress(percent, `Extracting ${entry.fileName}...`);
-                            }
-                            zipfile.readEntry();
+                            return fs.chmod(entryDest, procMode).then(() => {
+                                extractedCount++;
+                                if (extractedCount % updateInterval === 0 || extractedCount === totalEntries) {
+                                    const percent = 10 + (extractedCount / totalEntries) * 70;
+                                    updateSplashProgress(percent, `Extracting ${entry.fileName}...`);
+                                }
+                                zipfile.readEntry();
+                            });
                         });
                     }
 
@@ -264,6 +279,7 @@ async function extractZipWithProgress(zipPath: string, destDir: string) {
                                 readStream.on('end', () => {
                                     const link = Buffer.concat(chunks).toString();
                                     fs.symlink(link, entryDest)
+                                        .then(() => fs.chmod(entryDest, procMode))
                                         .then(() => {
                                             extractedCount++;
                                             if (
@@ -280,7 +296,7 @@ async function extractZipWithProgress(zipPath: string, destDir: string) {
                                 });
                                 readStream.on('error', rej);
                             } else {
-                                const writeStream = fs.createWriteStream(entryDest);
+                                const writeStream = fs.createWriteStream(entryDest, { mode: procMode });
                                 pipelineAsync(readStream, writeStream)
                                     .then(() => {
                                         extractedCount++;
