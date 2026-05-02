@@ -1,4 +1,3 @@
-require('./base-css.js');
 require('../css/composer.css');
 var React = require('react');
 var ReactDOM = require('react-dom');
@@ -15,10 +14,13 @@ var message = require('./message');
 var ContextMenu = require('./context-menu');
 var CookiesDialog = require('./cookies-dialog');
 var Dialog = require('./dialog');
-var EditorDialog = require('./editor-dialog');
 var win = require('./win');
 var HistoryData = require('./history-data');
-var parseCurl = require('./parse-curl');
+var LazyInit = require('./lazy-init');
+var Frames = require('./frames');
+var Icon = require('./icon');
+var CloseBtn = require('./close-btn');
+var ViewInspector = require('./view-inspector');
 
 var METHODS = [
   'GET',
@@ -61,11 +63,21 @@ var METHODS = [
   'UNSUBSCRIBE'
 ];
 var SEND_CTX_MENU = [
-  { name: 'Send File', action: 'file' },
-  { name: 'Repeat Times' },
-  { name: 'Show History', action: 'history' }
+  { name: 'Send Body Via File', action: 'file' },
+  { name: 'Replay Times' },
+  { name: 'Show History', action: 'history' },
+  {
+    name: 'Service',
+    list: [
+      { name: 'Create API Test', action: 'createApiTest' },
+      { name: 'Copy As Script', action: 'copyAsScript' },
+      { name: 'Share Via URL', action: 'Export' }
+    ]
+  }
 ];
+var findDOMNode = ReactDOM.findDOMNode;
 var MAX_FILE_SIZE = 1024 * 1024 * 20;
+var MAX_RES_SIZE = 1024 * 1024 * 3;
 
 var TYPES = {
   form: 'application/x-www-form-urlencoded',
@@ -89,6 +101,10 @@ var RULES_HEADER = 'x-whistle-rule-value';
 Object.keys(TYPES).forEach(function (name) {
   REV_TYPES[TYPES[name]] = name;
 });
+
+var getTabClass = function (active) {
+  return active ? 'w-tab-btn w-active' : 'w-tab-btn';
+};
 
 function getString(str, len) {
   if (typeof str !== 'string') {
@@ -172,13 +188,12 @@ function replaceCRLF(body) {
   return body && body.replace(/\r\n|\r|\n/g, '\r\n');
 }
 
-function parseJson(text) {
-  if (text[0] !== '{' && text[0] !== '[') {
+function getComposerTime(composerTime) {
+  if (!composerTime || !composerTime.endTime) {
     return;
   }
-  try {
-    return JSON.parse(text);
-  } catch(e) {}
+  var time = composerTime.endTime - composerTime.startTime;
+  return time >= 1000 ? (time / 1000) + 's' : time + 'ms';
 }
 
 var Composer = React.createClass({
@@ -191,9 +206,7 @@ var Composer = React.createClass({
     var method = data.method;
     var body = getString(data.body);
     if (body && body !== data.body) {
-      message.warn(
-        'The length of the body cannot exceed 256k, and the excess will be truncated.'
-      );
+      message.warn('Body content limited to 256KB (excess will be truncated)');
     }
     var headers = util.parseHeaders(data.headers);
     var type = getType(headers);
@@ -237,16 +250,15 @@ var Composer = React.createClass({
     var self = this;
     self.update(self.props.modal);
     this.refs.uploadBody.update(this.uploadBodyData);
-    this.hintElem = $(ReactDOM.findDOMNode(this.refs.hints));
+    this.hintElem = $(findDOMNode(this.refs.hints));
+    dataCenter.onTakeTimeChange = function(time) {
+      self.setState({ composerTime: time });
+    };
     events.on('_setComposerData', function(_, data) {
-      if (!data) {
-        return;
+      if (data) {
+        events.trigger('showComposerTab');
+        self.onCompose(data);
       }
-      win.confirm('Are you sure to modify the data of composer?', function(sure) {
-        if (sure) {
-          self.onCompose(data);
-        }
-      });
     });
     events.on('setComposer', function () {
       if (self.state.pending || self.props.disabled) {
@@ -256,6 +268,8 @@ var Composer = React.createClass({
       if (!activeItem) {
         return;
       }
+      self.setState({ reqData: activeItem });
+      activeItem.frames && dataCenter.setComposerItem(activeItem);
       var body = util.getBody(activeItem.req);
       var updateComposer = function () {
         var headers = activeItem.req.headers;
@@ -291,7 +305,7 @@ var Composer = React.createClass({
       };
       if (body.length > MAX_BODY_SIZE) {
         win.confirm(
-          'The request body is too long and will be truncated, continue?',
+          'Request body exceeds limit and will be truncated. Continue?',
           function (allow) {
             if (allow) {
               updateComposer();
@@ -302,24 +316,29 @@ var Composer = React.createClass({
         updateComposer();
       }
     });
+    events.on('showFramesInComposer', function() {
+      self.setState({ tabName: 'Frames' });
+    });
     events.on('updateStrictMode', function () {
       self.setState({});
     });
     self.updatePrettyData();
     $(document).on('click mousedown', function(e) {
       var target = $(e.target);
-      if (!(target.closest('.w-composer-params').length ||
-        target.closest('.w-composer-params-editor').length ||
-        target.closest('.w-composer-dialog').length ||
+      if (!(target.closest('.w-com-params').length ||
+        target.closest('.w-com-params-editor').length ||
+        target.closest('.w-com-dialog').length ||
         target.closest('.w-win-dialog').length ||
-        target.closest('.w-context-menu').length)) {
+        target.closest('.w-ctx-menu').length)) {
         self.hideParams();
       }
-      if (!(target.closest('.w-composer-history-data').length ||
+      if (!(target.closest('.w-com-history-data').length ||
         target.closest('.w-keep-history-data').length ||
         target.closest('.w-replay-count-dialog').length ||
-        target.closest('.w-composer-history-btn').length ||
-        target.closest('.w-copy-text-with-tips').length)) {
+        target.closest('.w-com-history-btn').length ||
+        target.closest('.w-copy-text-with-tips').length ||
+        target.closest('.w-ie-dialog').length ||
+        target.closest('.w-service-dialog').length)) {
         self.hideHistory();
       }
     });
@@ -363,17 +382,17 @@ var Composer = React.createClass({
   },
   getMethod: function () {
     var curMethod = this.state.method || 'GET';
-    var method = ReactDOM.findDOMNode(this.refs.method).value || curMethod;
+    var method = findDOMNode(this.refs.method).value || curMethod;
     return method === '+ Custom' ? method : curMethod;
   },
   updatePrettyData: function () {
     if (!this.state.showPretty) {
       return;
     }
-    var headers = ReactDOM.findDOMNode(this.refs.headers).value;
+    var headers = findDOMNode(this.refs.headers).value;
     var prettyHeaders = util.parseHeaders(headers);
     this.refs.prettyHeaders.update(prettyHeaders);
-    var body = ReactDOM.findDOMNode(this.refs.body).value;
+    var body = findDOMNode(this.refs.body).value;
     if (body && this.state.isHexText) {
       body = hexToStr(body);
     }
@@ -393,10 +412,10 @@ var Composer = React.createClass({
     }
     var refs = this.refs;
     var req = item.req;
-    ReactDOM.findDOMNode(refs.url).value = item.url;
-    ReactDOM.findDOMNode(refs.method).value = req.method;
-    ReactDOM.findDOMNode(refs.headers).value = util.getOriginalReqHeaders(item, rulesHeaders);
-    var bodyElem = ReactDOM.findDOMNode(refs.body);
+    findDOMNode(refs.url).value = item.url;
+    findDOMNode(refs.method).value = req.method;
+    findDOMNode(refs.headers).value = util.getOriginalReqHeaders(item, rulesHeaders);
+    var bodyElem = findDOMNode(refs.body);
     if (req.method === 'GET') {
       bodyElem.value = '';
     } else {
@@ -431,22 +450,19 @@ var Composer = React.createClass({
     this.refs.uploadBody.update(this.parseUploadModal(req));
     return true;
   },
-  shouldComponentUpdate: function (nextProps) {
-    var hide = util.getBoolean(this.props.hide);
-    return hide != util.getBoolean(nextProps.hide) || !hide;
-  },
+  shouldComponentUpdate: util.shouldComponentUpdate,
   getComposerData: function() {
     var refs = this.refs;
     var method = this.getMethod();
-    var url = ReactDOM.findDOMNode(this.refs.url).value.trim();
-    var headers = ReactDOM.findDOMNode(this.refs.headers).value;
+    var url = findDOMNode(this.refs.url).value.trim();
+    var headers = findDOMNode(this.refs.headers).value;
 
     return {
       url: url,
       headers: headers,
       method: method,
       useH2: this.state.useH2 ? 1 : '',
-      body: replaceCRLF(ReactDOM.findDOMNode(refs.body).value)
+      body: replaceCRLF(findDOMNode(refs.body).value)
     };
   },
   saveComposer: function () {
@@ -537,7 +553,7 @@ var Composer = React.createClass({
   onHexTextChange: function (e) {
     var isHexText = e.target.checked;
     storage.set('showHexTextBody', isHexText ? 1 : '');
-    var elem = ReactDOM.findDOMNode(this.refs.body);
+    var elem = findDOMNode(this.refs.body);
     var body = elem.value;
     if (body.trim()) {
       if (isHexText) {
@@ -568,7 +584,7 @@ var Composer = React.createClass({
     }
     if (rules && typeof rules === 'string') {
       rules = util.decodeURIComponentSafe(rules);
-      ReactDOM.findDOMNode(this.refs.composerRules).value = rules;
+      findDOMNode(this.refs.composerRules).value = rules;
       this.setState({ rules: rules });
       this.onRulesChange();
       this.setRulesDisable(false);
@@ -588,6 +604,7 @@ var Composer = React.createClass({
       rules.push(item.rules);
     }
     var req = { headers: {}, base64: item.base64 };
+    this.handleFrames();
     if (util.notEStr(headers)) {
       headers = headers.trim().split(/[\r\n]+/).filter(function(line) {
         line = line.trim();
@@ -612,15 +629,15 @@ var Composer = React.createClass({
       this.updateRules(rules.join('\n'));
     }
     if (util.isString(item.url)) {
-      ReactDOM.findDOMNode(refs.url).value = item.url;
+      findDOMNode(refs.url).value = item.url;
       this.state.url = item.url;
     }
     if (util.isString(item.method)) {
-      ReactDOM.findDOMNode(refs.method).value = item.method;
+      findDOMNode(refs.method).value = item.method;
       this.state.method = item.method;
     }
     if (util.isString(headers)) {
-      ReactDOM.findDOMNode(refs.headers).value = headers;
+      findDOMNode(refs.headers).value = headers;
       this.state.headers = headers;
     }
     if (!isHexText && !item.body && item.base64) {
@@ -650,7 +667,7 @@ var Composer = React.createClass({
       storage.set('composerProxyRules', item.enableProxyRules ? 1 : '');
     }
     if (!this.updateUploadForm(req)) {
-      ReactDOM.findDOMNode(refs.body).value = body;
+      findDOMNode(refs.body).value = body;
     }
     this.onComposerChange(true);
     storage.set('disableComposerBody', this.state.disableBody ? 1 : '');
@@ -659,7 +676,7 @@ var Composer = React.createClass({
   },
   onReplay: function (times) {
     if (this._selectedItem) {
-      this.sendRequest($.extend({}, this._selectedItem, { repeatCount: times || 1 }));
+      this.sendRequest($.extend({}, this._selectedItem, { repeatCount: times || 1, needResponse: false }));
     }
   },
   handleUrlKeyUp: function(e) {
@@ -679,13 +696,13 @@ var Composer = React.createClass({
     var target = e === true ? e : e && e.target;
     if (target) {
       if (target === true || target.nodeName === 'SELECT') {
-        var method = ReactDOM.findDOMNode(self.refs.method).value;
+        var method = findDOMNode(self.refs.method).value;
         self.setState({ method: method }, self.updatePrettyData);
       }
       if (target === true || target.name === 'headers') {
         clearTimeout(self.typeTimer);
         self.typeTimer = setTimeout(function () {
-          var headers = ReactDOM.findDOMNode(self.refs.headers).value;
+          var headers = findDOMNode(self.refs.headers).value;
           self.setState({
             type: getType(util.parseHeaders(headers))
           });
@@ -702,7 +719,7 @@ var Composer = React.createClass({
     if (type) {
       this.setState({ type: type });
       type = TYPES[type];
-      var elem = ReactDOM.findDOMNode(this.refs.headers);
+      var elem = findDOMNode(this.refs.headers);
       var headers = util.parseHeaders(elem.value);
       Object.keys(headers).forEach(function (name) {
         if (name.toLowerCase() === 'content-type') {
@@ -735,7 +752,7 @@ var Composer = React.createClass({
   onHeaderChange: function (key, newKey) {
     var refs = this.refs;
     var headers = refs.prettyHeaders.toString();
-    ReactDOM.findDOMNode(refs.headers).value = headers;
+    findDOMNode(refs.headers).value = headers;
     this.saveComposer();
     if (
       key.toLowerCase() === 'content-type' ||
@@ -752,7 +769,7 @@ var Composer = React.createClass({
     if (body && this.state.isHexText) {
       body = strToHex(body);
     }
-    ReactDOM.findDOMNode(refs.body).value = body;
+    findDOMNode(refs.body).value = body;
     this.saveComposer();
   },
   updateUploadData: function () {
@@ -794,7 +811,7 @@ var Composer = React.createClass({
     var self = this;
     if (!dataCenter.supportH2) {
       win.confirm(
-        'The current version of Node.js cannot support HTTP/2.\nPlease upgrade to the latest LTS version.',
+        'HTTP/2 requires Node.js LTS version v16+. Please upgrade',
         function (sure) {
           sure && window.open('https://nodejs.org/');
           self.setState({});
@@ -845,9 +862,9 @@ var Composer = React.createClass({
     var self = this;
     self.refs.setRepeatTimes.show();
     self._isReplay = isReplay;
-    ReactDOM.findDOMNode(self.refs.repeatBtn).innerHTML = isReplay ? 'Replay' : 'Send';
+    findDOMNode(self.refs.repeatBtn).innerHTML = isReplay ? 'Replay' : 'Send';
     setTimeout(function () {
-      var input = ReactDOM.findDOMNode(self.refs.repeatTimes);
+      var input = findDOMNode(self.refs.repeatTimes);
       input.select();
       input.focus();
     }, 300);
@@ -861,7 +878,7 @@ var Composer = React.createClass({
       return this.showRepeatTimes();
     }
     var refs = this.refs;
-    var url = ReactDOM.findDOMNode(refs.url).value.trim();
+    var url = findDOMNode(refs.url).value.trim();
     if (!url || this.state.pending) {
       return;
     }
@@ -870,7 +887,7 @@ var Composer = React.createClass({
     var disableComposerRules =
       dataCenter.isStrictMode() || this.state.disableComposerRules;
     var rules = disableComposerRules ? null : this.state.rules;
-    var headersStr = ReactDOM.findDOMNode(refs.headers).value;
+    var headersStr = findDOMNode(refs.headers).value;
     var headers = headersStr;
     if (typeof rules === 'string' && (rules = rules.trim())) {
       var obj = util.parseJSON(headers);
@@ -968,7 +985,7 @@ var Composer = React.createClass({
           headers = list.join('\n');
         }
       } else {
-        body = ReactDOM.findDOMNode(refs.body).value;
+        body = findDOMNode(refs.body).value;
         isHexText = this.state.isHexText;
         if (isHexText) {
           base64 = util.getBase64FromHexText(body);
@@ -991,74 +1008,131 @@ var Composer = React.createClass({
       enableProxyRules: this.state.enableProxyRules
     });
   },
+  handleBody: function(res) {
+    var self = this;
+    var reqId = res && res.reqId;
+    var preReqId = self._curDataId;
+    preReqId && dataCenter.offComposeData(preReqId);
+    self._curDataId = reqId;
+    if (!reqId) {
+      return;
+    }
+    var body;
+    dataCenter.onComposeData(reqId, function(base64) {
+      if (!base64) {
+        return;
+      }
+      var result = self.state.result;
+      var res = result && result.res;
+      if (res) {
+        body = util.joinBase64(body, base64);
+        var data = {};
+        Object.keys(res).forEach(function(key) {
+          data[key] = res[key];
+        });
+        data.base64 = body;
+        result.res = data;
+        self.setState({});
+      }
+      if (body.length > MAX_RES_SIZE) {
+        dataCenter.offComposeData(reqId);
+      }
+    });
+  },
+  handleFrames: function(res) {
+    var headers = res && res.headers;
+    var id = headers && headers['x-whistle-req-id'];
+    var isFrames = headers && headers['x-whistle-frames-mode'] === '1';
+    dataCenter.curComposerReqId = id;
+    if (!id || !isFrames) {
+      dataCenter.setComposerItem();
+      this.setState({ reqData: null });
+      return;
+    }
+    var reqData = {
+      id: id,
+      frames: []
+    };
+    dataCenter.setComposerItem(reqData);
+    this.setState({ reqData: reqData });
+    return true;
+  },
   sendRequest: function(params) {
     var self = this;
-    clearTimeout(self.comTimer);
-    self.comTimer = setTimeout(function () {
-      self.setState({ pending: false });
-    }, 3000);
+    var index = (self._reqIndex || 0) + 1;
+    self._reqIndex = index;
+    if (params.needResponse) {
+      clearTimeout(self.comTimer);
+      self.comTimer = setTimeout(function () {
+        self.setState({ pending: false });
+      }, 5000);
+    }
     events.trigger('enableRecord');
-    dataCenter.composer(
-      JSON.stringify(params),
-      function (data, xhr, em) {
-        clearTimeout(self.comTimer);
-        var state = {
-          pending: false,
-          tabName: 'Response',
-          initedResponse: true
-        };
-        if (!data || data.ec !== 0) {
-          var status = xhr && xhr.status;
-          if (status) {
-            em = status;
-            util.showSystemError(xhr);
-          } else if (!em || typeof em !== 'string' || em === 'error') {
-            em = 'Please check the proxy settings or whether whistle has been started.';
-          }
-          state.result = { url: params.url, req: '', res: { statusCode: em } };
-        } else {
-          var res = data.res;
-          if (res) {
-            res.rawHeaders = dataCenter.getRawHeaders(
+    self.handleFrames();
+    dataCenter.composeInner(params, function (data, xhr, em) {
+      if (!params.needResponse || self._reqIndex !== index) {
+        return;
+      }
+      clearTimeout(self.comTimer);
+      var state = {
+        pending: false,
+        tabName: 'Response'
+      };
+      var res = data && data.res;
+      if (self.handleFrames(res)) {
+        data.frames = [];
+        data.inComposer = true;
+      }
+      var reqId;
+      self.handleBody(res);
+      if (!data || data.ec !== 0) {
+        var status = xhr && xhr.status;
+        if (status) {
+          em = status;
+          util.showSystemError(xhr);
+        } else if (!em || typeof em !== 'string' || em === 'error') {
+          em = 'Please check the proxy settings or whether whistle has been started';
+        }
+        state.result = { url: params.url, req: '', res: { statusCode: em } };
+      } else {
+        if (res) {
+          reqId = res.headers && res.headers['x-whistle-req-id'];
+          res.rawHeaders = dataCenter.getRawHeaders(
               res.headers,
               res.rawHeaderNames
             );
-            res.rawTrailers = dataCenter.getRawHeaders(
+          res.rawTrailers = dataCenter.getRawHeaders(
               res.trailers,
               res.rawTrailerNames
             );
-          } else {
-            data.res = { statusCode: 200 };
-          }
-          data.url = params.url;
-          data.req = '';
-          state.result = data;
+        } else {
+          data.res = { statusCode: 200 };
         }
-        self.setState(state);
-      },
-      {
-        contentType: 'application/json',
-        processData: false
+        data.url = params.url;
+        data.req = '';
+        state.result = data;
       }
-    );
+      state.reqId = reqId;
+      self.setState(state);
+    });
     params.date = Date.now();
     params.body = params.body || '';
-    this.addHistory(params);
-    events.trigger('executeComposer');
-    self.setState({ result: '', pending: true });
+    params.needResponse && this.addHistory(params);
+    events.trigger('autoRefreshNetwork');
+    self.setState({ result: '', pending: params.needResponse, composerTime: null });
   },
   selectAll: function (e) {
     e.target.select();
     this.showHints();
   },
   saveRules: function () {
-    var rules = ReactDOM.findDOMNode(this.refs.composerRules).value;
+    var rules = findDOMNode(this.refs.composerRules).value;
     this.state.rules = rules;
     storage.set('composerRules', rules);
     this.setState({});
   },
   formatJSON: function () {
-    var body = ReactDOM.findDOMNode(this.refs.body);
+    var body = findDOMNode(this.refs.body);
     if (!body.value.trim()) {
       return;
     }
@@ -1069,7 +1143,7 @@ var Composer = React.createClass({
     }
   },
   inspectJSON: function() {
-    var body = ReactDOM.findDOMNode(this.refs.body).value;
+    var body = findDOMNode(this.refs.body).value;
     events.trigger('showJsonViewDialog', body.trim());
   },
   onRulesChange: function () {
@@ -1098,10 +1172,10 @@ var Composer = React.createClass({
   },
   showCookiesDialog: function() {
     var self = this;
-    var url = ReactDOM.findDOMNode(self.refs.url).value;
+    var url = findDOMNode(self.refs.url).value;
     var host = util.getHostname(url).toLowerCase();
     if (!/^[a-z.\d_-]+$/.test(host)) {
-      return message.warn('No cookies');
+      return message.info('Cookies not found');
     }
     if (self._pending) {
       return;
@@ -1109,10 +1183,7 @@ var Composer = React.createClass({
     self._pending = true;
     dataCenter.getCookies({ domain: host }, function (result, xhr) {
       self._pending = false;
-      if (!result) {
-        return util.showSystemError(xhr);
-      }
-      result = result.cookies || [];
+      result = (result && result.cookies) || [];
       var maxCount = 30;
       if (result.length < maxCount) {
         var list = dataCenter.networkModal.getList();
@@ -1130,7 +1201,7 @@ var Composer = React.createClass({
         }
       }
       if (!result.length) {
-        return message.warn('No cookies');
+        return message.info('Cookies not found');
       }
       if (result.length < maxCount) {
         var cookies = self._cacheCookies;
@@ -1155,7 +1226,7 @@ var Composer = React.createClass({
     });
   },
   insertCookie: function(cookie) {
-    var elem = ReactDOM.findDOMNode(this.refs.headers);
+    var elem = findDOMNode(this.refs.headers);
     var headers = util.parseHeaders(elem.value);
     headers.cookie = cookie;
     elem.value = util.objectToString(headers);
@@ -1165,7 +1236,7 @@ var Composer = React.createClass({
     this.saveComposer();
   },
   setUrl: function(value) {
-    ReactDOM.findDOMNode(this.refs.url).value = value || '';
+    findDOMNode(this.refs.url).value = value || '';
     this.hideHints();
     this.onComposerChange();
   },
@@ -1228,13 +1299,16 @@ var Composer = React.createClass({
     if (tabName === this.state.tabName) {
       return;
     }
-    this.setState({ tabName: tabName, initedResponse: true });
+    this.setState({ tabName: tabName });
   },
   onContextMenu: function(e) {
     e.preventDefault();
-    var data = util.getMenuPosition(e, 125);
-    data.list = SEND_CTX_MENU;
+    var hideLoadTest = !dataCenter.whistleId;
+    var data = util.getMenuPosition(e, 150);
     SEND_CTX_MENU[2].name = this.state.showHistory ? 'Hide History' : 'Show History';
+    SEND_CTX_MENU[3].hide = hideLoadTest;
+    data.list = SEND_CTX_MENU;
+    data.className = 'w-ctx-sub-menu-left';
     this.refs.contextMenu.show(data);
     this.hideHints();
   },
@@ -1244,7 +1318,7 @@ var Composer = React.createClass({
       this.state.showHints = true;
       return this.loadHistory();
     }
-    var curUrl = ReactDOM.findDOMNode(this.refs.url).value.trim();
+    var curUrl = findDOMNode(this.refs.url).value.trim();
     var keyword = curUrl.toLowerCase();
     var urlHints = keyword ? list.filter(function(url) {
       return url.toLowerCase().indexOf(keyword) !== -1;
@@ -1261,7 +1335,7 @@ var Composer = React.createClass({
     this.setState({ showHints: false });
   },
   showParams: function() {
-    var url = ReactDOM.findDOMNode(this.refs.url).value.replace(/#.*$/, '');
+    var url = findDOMNode(this.refs.url).value.replace(/#.*$/, '');
     var index = url.indexOf('?');
     var hasQuery = index !== -1;
     var query = hasQuery ? url.substring(index + 1) : '';
@@ -1287,7 +1361,7 @@ var Composer = React.createClass({
   },
   clearQuery: function() {
     var self = this;
-    win.confirm('Are you sure to delete all params?', function(sure) {
+    win.confirm('Do you confirm the deletion of all params?', function(sure) {
       if (sure) {
         self.refs.paramsEditor.clear();
         self.hideParams();
@@ -1299,31 +1373,37 @@ var Composer = React.createClass({
   },
   onParamsChange: function () {
     var query = this.refs.paramsEditor.toString();
-    var elem = ReactDOM.findDOMNode(this.refs.url);
+    var elem = findDOMNode(this.refs.url);
     elem.value = util.replacQuery(elem.value, query);
     this.saveComposer();
     this.setState({ hasQuery: !!query });
   },
   onClickContextMenu: function (action) {
     switch (action) {
-    case 'Repeat Times':
+    case 'Replay Times':
       return this.showRepeatTimes();
     case 'history':
       return this.toggleHistory();
     case 'file':
-      this.uploadFile();
+      return this.uploadFile();
+    case 'Export':
+      return this.export();
+    case 'createApiTest':
+      return util.showService('createApiTest');
+    case 'copyAsScript':
+      return util.showService('copyAsScript');
     }
   },
   uploadFile: function() {
     if (!this.reading) {
-      ReactDOM.findDOMNode(this.refs.readLocalFile).click();
+      findDOMNode(this.refs.readLocalFile).click();
     }
   },
   readLocalFile: function () {
-    var form = new FormData(ReactDOM.findDOMNode(this.refs.readLocalFileForm));
+    var form = new FormData(findDOMNode(this.refs.readLocalFileForm));
     var file = form.get('localFile');
     if (file.size > MAX_FILE_SIZE) {
-      return win.alert('The size of file cannot exceed 20m.');
+      return win.alert('Maximum file size: 20MB');
     }
     var self = this;
     self.reading = true;
@@ -1332,40 +1412,14 @@ var Composer = React.createClass({
       self.localFileBase64 = util.bytesToBase64(data);
       self.execute();
     });
-    ReactDOM.findDOMNode(this.refs.readLocalFile).value = '';
+    findDOMNode(this.refs.readLocalFile).value = '';
   },
   import: function(e) {
-    events.trigger('importSessions', e);
-    this.hoverOutImport();
-  },
-  showImportCURL: function() {
-    this.hoverOutImport();
-    this.refs.editorDialog.show();
-  },
-  importCURL: function(text) {
-    text = text.trim();
-    if (!text) {
-      message.error('The text cannot be empty.');
-      return false;
-    }
-    try {
-      var result = parseJson(text) || parseCurl(text);
-      if (!result || !result.url) {
-        message.error('Not CURL text.');
-        return false;
-      }
-      result.isHexText = false;
-      result.headers = util.objectToString(result.headers);
-      this.onCompose(result);
-    } catch (e) {
-      message.error(e.message);
-      return false;
-    }
-
+    events.trigger('showImportDialog', 'composer');
   },
   copyAsCURL: function() {
     var state = this.state;
-    var body = ReactDOM.findDOMNode(this.refs.body).value;
+    var body = findDOMNode(this.refs.body).value;
     var base64 = '';
     if (state.isHexText) {
       base64 = util.getBase64FromHexText(body);
@@ -1392,37 +1446,21 @@ var Composer = React.createClass({
     data.isCRLF = state.isCRLF;
     data.type = 'setComposerData';
     data.enableProxyRules = state.enableProxyRules;
-    events.trigger('download', {
-      name: 'composer_' + Date.now() + '.txt',
-      value: JSON.stringify(data, null, '  ')
-    });
+    events.trigger('showExportDialog', ['composer', data]);
   },
   onBodyStateChange: function (e) {
     var disableBody = !e.target.checked;
     this.setState({ disableBody: disableBody });
     storage.set('disableComposerBody', disableBody ? 1 : '');
-    if (!disableBody) {
-      this.setState({ tabName: 'Request' });
-    }
   },
   focusEnableBody: function () {
     this.setState({ disableBody: false });
     storage.set('disableComposerBody', '');
   },
-  _hoverOutImport: function() {
-
-  },
-  hoverInImport: function() {
-    clearTimeout(this._hoverOutTimer);
-    this._hoverOutTimer = null;
-    this.setState({ overImport: true });
-  },
-  hoverOutImport: function() {
-    var self = this;
-    self._hoverOutTimer = self._hoverOutTimer || setTimeout(function() {
-      self._hoverOutTimer = null;
-      self.setState({ overImport: false });
-    }, 80);
+  shakeMethod: function() {
+    if (!this.hasBody) {
+      util.shakeElem($(findDOMNode(this.refs.method)));
+    }
   },
   render: function () {
     var self = this;
@@ -1437,6 +1475,7 @@ var Composer = React.createClass({
     var showParams = state.showParams;
     var showRequest = tabName === 'Request';
     var showResponse = tabName === 'Response';
+    var showFrames = tabName === 'Frames';
     var statusCode = result ? result.res && result.res.statusCode : '';
     var isForm = type === 'form';
     var method = state.method;
@@ -1453,21 +1492,27 @@ var Composer = React.createClass({
     var urlHints = state.urlHints;
     var hasQuery = state.hasQuery;
     var enableProxyRules = state.enableProxyRules;
+    var reqData = state.reqData;
     var tips = hasBody ? null : method + ' method is not allowed to have a request body';
+    var composerTime = state.composerTime;
+    var resProps = {
+      'Status Code': statusCode == null ? 'aborted' : statusCode,
+      'Total Duration': getComposerTime(composerTime)
+    };
+
     self.hasBody = hasBody;
 
     return (
       <div
         className={
-          'fill box w-detail-content w-detail-composer' +
+          'fill box w-detail-ctn w-detail-com' +
           (showHistory ? ' w-show-history' : '') +
-          (util.getBoolean(self.props.hide) ? ' hide' : '')
+          (util.getBool(self.props.hide) ? ' hide' : '')
         }
       >
-        <div className="fill orient-vertical-box">
-          <div className="w-composer-url box">
-            <span className={'glyphicon glyphicon-time w-status-' +
-              (showHistory ? 'show' : 'hide') + ' w-composer-history-btn'}
+        <div className="fill v-box">
+          <div className="w-com-url box">
+            <Icon name="dashboard" className="w-com-history-btn"
               title={(showHistory ? 'Hide' : 'Show') + ' history list'}
               onClick={this.toggleHistory}
             />
@@ -1476,7 +1521,7 @@ var Composer = React.createClass({
               value={method}
               onChange={this.onComposerChange}
               ref="method"
-              className="form-control w-composer-method"
+              className="form-control w-com-method"
             >
               {METHODS.map(function (m) {
                 return <option value={m}>{m}</option>;
@@ -1494,11 +1539,11 @@ var Composer = React.createClass({
               ref="url"
               type="text"
               maxLength="8192"
-              placeholder="Input the url"
-              className="fill w-composer-input"
+              placeholder="Enter URL"
+              className="fill w-com-input"
             />
             <button
-              className="btn btn-default w-composer-params"
+              className="btn btn-default w-com-params"
               onClick={self.toggleParams}
             >
               Params
@@ -1507,9 +1552,10 @@ var Composer = React.createClass({
               disabled={pending}
               onClick={this.execute}
               onContextMenu={self.onContextMenu}
-              className="btn btn-primary w-composer-execute"
+              title={enableProxyRules ? null : 'Whistle Rules IGNORED'}
+              className={'btn w-com-execute btn-' + (enableProxyRules ? 'primary' : 'info')}
             >
-              <span className="glyphicon glyphicon-send" />
+              <Icon name="send" />
             </button>
             <div
               className="w-filter-hint"
@@ -1518,11 +1564,9 @@ var Composer = React.createClass({
             >
               <div className="w-filter-bar">
                 <a onClick={this.toggleHistory}>
-                  {showHistory ? 'Hide' : 'Show'} history
+                  <Icon name="dashboard" />{showHistory ? 'Hide' : 'Show'} history
                 </a>
-                <span onClick={self.hideHints} aria-hidden="true">
-                  &times;
-                </span>
+                <CloseBtn onClick={self.hideHints} className="w-clear-hints" />
               </div>
               <ul ref="hints" onClick={this.clickHints}>
                 {
@@ -1534,14 +1578,12 @@ var Composer = React.createClass({
             </div>
           </div>
           <div
-            className={'w-layer w-composer-params-editor orient-vertical-box' + (showParams ? '' : ' hide')}
+            className={'w-layer w-com-params-editor v-box' + (showParams ? '' : ' hide')}
           >
             <div className="w-filter-bar">
-              <span onClick={self.hideParams} aria-hidden="true">
-                &times;
-              </span>
+              <CloseBtn onClick={self.hideParams} className="w-close-params" />
               <a style={{display: hasQuery ? null : 'none'}} className="w-params-clear-btn" onClick={this.clearQuery}>
-                <span className="glyphicon glyphicon-trash" />Clear
+                <Icon name="trash" />Clear
               </a>
               <a onClick={this.addQueryParam}>
                 +Param
@@ -1558,10 +1600,10 @@ var Composer = React.createClass({
               ref="rulesCon"
               onDoubleClick={this.enableRules}
               title={isStrictMode ? TIPS : undefined}
-              className="orient-vertical-box fill w-composer-rules"
+              className="v-box fill w-com-rules"
             >
               <div className="w-detail-inspectors-title">
-                <label className="w-composer-rules-label">
+                <label className="w-com-rules-label">
                   <input
                     disabled={pending}
                     onChange={this.onDisableChange}
@@ -1570,8 +1612,7 @@ var Composer = React.createClass({
                   />
                   Rules
                 </label>
-                +
-                <label className="w-composer-proxy-rules" title="Whether to use the Rules in Whistle?">
+                <label className="w-com-proxy-rules" title="Whether to use the Rules in Whistle?">
                   <input
                     disabled={pending}
                     type="checkbox"
@@ -1580,24 +1621,7 @@ var Composer = React.createClass({
                   />
                   Whistle Rules
                 </label>
-                <label className="w-composer-pretty">
-                  <input
-                    onChange={this.onShowPretty}
-                    type="checkbox"
-                    checked={showPretty}
-                  />
-                  Pretty
-                </label>
-                <label className="w-composer-enable-body">
-                  <input
-                    disabled={pending || !hasBody}
-                    checked={!disableBody && hasBody}
-                    type="checkbox"
-                    onChange={this.onBodyStateChange}
-                  />
-                  Body
-                </label>
-                <label className="w-composer-use-h2">
+                <label className="w-com-use-h2">
                   <input
                     disabled={pending}
                     type="checkbox"
@@ -1606,17 +1630,19 @@ var Composer = React.createClass({
                   />
                   HTTP/2
                 </label>
-                <div className="w-composer-btns">
-                  <a draggable="false" onClick={self.import}
-                    onMouseEnter={self.hoverInImport} onMouseLeave={self.hoverOutImport}>Import</a>
+                <label className={'w-com-enable-body' + (hasBody ? '' : ' w-disabled')} title={tips} onClick={self.shakeMethod}>
+                  <input
+                    disabled={pending || !hasBody}
+                    checked={!disableBody && hasBody}
+                    type="checkbox"
+                    onChange={this.onBodyStateChange}
+                  />
+                  Body
+                </label>
+                <div className="w-com-btns">
+                  <a draggable="false" onClick={self.import}>Import</a>
                   <a draggable="false" onClick={self.export}>Export</a>
-                  <a draggable="false" onClick={self.copyAsCURL}>CopyAsCURL</a>
-                  <ul className="shadow w-composer-import"
-                    onMouseEnter={self.hoverInImport} onMouseLeave={self.hoverOutImport}
-                    style={{display: state.overImport ? 'block' : 'none'}}>
-                    <li onClick={self.showImportCURL}>Import CURL</li>
-                    <li onClick={self.import}>Import File</li>
-                  </ul>
+                  <a draggable="false" onClick={self.copyAsCURL}>AsCURL</a>
                 </div>
               </div>
               <textarea
@@ -1628,21 +1654,21 @@ var Composer = React.createClass({
                 onDoubleClick={this.enableRules}
                 style={{
                   background:
-                    !disableComposerRules && rules ? 'lightyellow' : undefined
+                    !disableComposerRules && rules ? 'var(--b-filtered)' : undefined
                 }}
                 maxLength="8192"
-                className="fill orient-vertical-box w-composer-rules"
-                placeholder="Input the rules (Priority over Whistle Rules)"
+                className="fill v-box w-com-rules"
+                placeholder="Enter rules (Higher priority than Whistle Rules)"
               />
             </div>
-            <div className="orient-vertical-box fill">
-              <div className="w-detail-inspectors-title w-composer-tabs">
+            <div className="v-box fill">
+              <div className="w-detail-inspectors-title w-com-tabs">
                 <button
                   onClick={this.onTabChange}
                   name="Request"
-                  className={showRequest ? 'w-tab-btn w-active' : 'w-tab-btn'}
+                  className={getTabClass(showRequest)}
                 >
-                  <span className="glyphicon glyphicon-edit" />
+                  <Icon name="edit" />
                   Request
                 </button>
                 <button
@@ -1650,16 +1676,27 @@ var Composer = React.createClass({
                   onClick={this.onTabChange}
                   name="Response"
                   style={{fontWeight: 'normal'}}
-                  className={showResponse ? 'w-tab-btn w-active' : 'w-tab-btn'}
+                  className={getTabClass(showResponse)}
                 >
-                  <span className="glyphicon glyphicon-arrow-left" />
+                  <Icon name="arrow-left" />
                   Response
+                </button>
+                <button
+                  title={result.url}
+                  id="whistleComposerFrames"
+                  onClick={this.onTabChange}
+                  name="Frames"
+                  style={{fontWeight: 'normal'}}
+                  className={getTabClass(showFrames)}
+                >
+                  <Icon name="menu-hamburger" />
+                  Frames
                 </button>
               </div>
               <Divider hide={!showRequest} vertical="true">
-                <div className="fill orient-vertical-box w-composer-headers">
+                <div className="fill v-box w-com-headers">
                   <div
-                    className="w-composer-bar"
+                    className="w-com-bar"
                     onChange={this.onTypeChange}
                   >
                     <label>
@@ -1670,7 +1707,7 @@ var Composer = React.createClass({
                       />
                       Pretty
                     </label>
-                    <label className="w-composer-label">Type:</label>
+                    <label className="w-com-label">Type:</label>
                     <label>
                       <input
                         disabled={pending}
@@ -1720,21 +1757,20 @@ var Composer = React.createClass({
                       />
                       Raw
                     </label>
-                    <button
-                      disabled={pending}
-                      className={
-                        'w-composer-add-header btn btn-primary' + (showPretty ? '' : ' hide')
-                      }
-                      onClick={this.addHeader}
-                    >
-                      +Header
-                    </button>
+                    <div className="flex-1" />
                     <button
                       disabled={pending}
                       className="btn btn-default"
                       onClick={this.showCookiesDialog}
                     >
                       Cookies
+                    </button>
+                    <button
+                      disabled={pending}
+                      className="btn btn-primary"
+                      onClick={this.addHeader}
+                    >
+                      +Header
                     </button>
                   </div>
                   <textarea
@@ -1744,10 +1780,10 @@ var Composer = React.createClass({
                     maxLength={MAX_HEADERS_SIZE}
                     onKeyDown={this.formatHeaders}
                     ref="headers"
-                    placeholder="Input the headers"
+                    placeholder="Enter headers"
                     name="headers"
                     className={
-                      'fill orient-vertical-box' + (showPretty ? ' hide' : '')
+                      'fill v-box' + (showPretty ? ' hide' : '')
                     }
                   />
                   <PropsEditor
@@ -1759,9 +1795,9 @@ var Composer = React.createClass({
                     callback={this.execute}
                   />
                 </div>
-                <div className="fill orient-vertical-box w-composer-body">
-                  <div className="w-composer-bar">
-                    <label className="w-composer-label">
+                <div className={'fill v-box w-com-body' + (disableBody ? ' w-com-disable-body' : '')}>
+                  <div className="w-com-bar">
+                    <label className="w-com-label" onClick={self.shakeMethod}>
                       <input
                         disabled={pending || !hasBody}
                         checked={!disableBody && hasBody}
@@ -1772,14 +1808,14 @@ var Composer = React.createClass({
                     </label>
                     <label
                       className={
-                        'w-composer-hex-text' +
+                        'w-com-hex-text' +
                         (isHexText ? ' w-checked' : '') +
                         (showUpload || showPrettyBody ? ' hide' : '')
                       }
                       onDoubleClick={this.focusEnableBody}
                     >
                       <input
-                        disabled={lockBody}
+                        disabled={pending}
                         checked={isHexText}
                         type="checkbox"
                         onChange={this.onHexTextChange}
@@ -1788,14 +1824,14 @@ var Composer = React.createClass({
                     </label>
                     <label
                       className={
-                        'w-composer-crlf' +
+                        'w-com-crlf' +
                         (isHexText || showPrettyBody || showUpload ? ' hide' : '') +
                         (isCRLF ? ' w-checked' : '')
                       }
                       onDoubleClick={this.focusEnableBody}
                     >
                       <input
-                        disabled={lockBody}
+                        disabled={pending}
                         checked={isCRLF}
                         onChangeCapture={this.onCRLFChange}
                         type="checkbox"
@@ -1803,18 +1839,7 @@ var Composer = React.createClass({
                       \r\n
                     </label>
                     <button
-                      className={
-                        'btn btn-default' +
-                        (showPrettyBody || isHexText || showUpload
-                          ? ' hide'
-                          : '')
-                      }
-                      onClick={this.inspectJSON}
-                    >
-                      Inspect
-                    </button>
-                    <button
-                      disabled={lockBody}
+                      disabled={pending}
                       className={
                         'btn btn-default' +
                         (showPrettyBody || isHexText || showUpload
@@ -1824,6 +1849,17 @@ var Composer = React.createClass({
                       onClick={this.formatJSON}
                     >
                       Format
+                    </button>
+                    <button
+                      className={
+                        'btn btn-primary' +
+                        (showPrettyBody || isHexText || showUpload
+                          ? ' hide'
+                          : '')
+                      }
+                      onClick={this.inspectJSON}
+                    >
+                      Inspect
                     </button>
                     <button
                       disabled={lockBody}
@@ -1840,23 +1876,20 @@ var Composer = React.createClass({
                       +Param
                     </button>
                   </div>
-                  {tips && <div className="w-record-status">{tips}</div>}
+                  {tips && <div className="w-record-status" onClick={self.shakeMethod}>{tips}</div>}
                   <textarea
                     readOnly={lockBody}
                     defaultValue={state.body}
                     onChange={this.onComposerChange}
                     maxLength={MAX_BODY_SIZE}
                     onDoubleClick={this.focusEnableBody}
-                    style={{
-                      background:
-                        hasBody && !disableBody ? 'lightyellow' : undefined,
-                      fontFamily: isHexText ? 'monospace' : undefined
-                    }}
+                    onClick={self.shakeMethod}
+                    style={{ fontFamily: isHexText ? 'monospace' : undefined }}
                     onKeyDown={this.onFormat}
                     ref="body"
-                    placeholder={'Input the ' + (isHexText ? 'hex text' : 'body')}
+                    placeholder={'Enter ' + (isHexText ? 'hex text' : 'body')}
                     className={
-                      'fill orient-vertical-box' +
+                      'fill v-box' +
                       (showPrettyBody  || showUpload
                         ? ' hide'
                         : '')
@@ -1882,34 +1915,35 @@ var Composer = React.createClass({
                   />
                 </div>
               </Divider>
-              {state.initedResponse ? (
+              <LazyInit inited={showResponse}>
                 <div
                   style={{ display: showResponse ? undefined : 'none' }}
-                  className={'w-composer-res w-composer-res-' + getStatus(statusCode)}
+                  className={'w-com-res w-com-res-' + getStatus(statusCode)}
                 >
                   <button
                     onClick={this.onTabChange}
                     name="Request"
-                    className="btn btn-default w-composer-back-btn"
+                    className="btn btn-default w-com-back-btn"
                     title="Back to Request"
                   >
-                    <span className="glyphicon glyphicon-menu-left"></span>
+                    <Icon name="menu-left" />
                   </button>
                   <Properties
-                    modal={{
-                      'Status Code':
-                        statusCode == null ? 'aborted' : statusCode
-                    }}
+                    modal={resProps}
                   />
+                  <ViewInspector reqId={state.reqId} />
                 </div>
-              ) : undefined}
-              {state.initedResponse ? (
+              </LazyInit>
+              <LazyInit inited={showResponse}>
                 <ResDetail
                   inComposer="1"
                   modal={result}
                   hide={!showResponse}
                 />
-              ) : undefined}
+              </LazyInit>
+              <LazyInit inited={showFrames}>
+                <Frames hide={!showFrames} data={reqData} frames={reqData && reqData.frames} />
+              </LazyInit>
             </div>
           </Divider>
         </div>
@@ -1962,8 +1996,6 @@ var Composer = React.createClass({
             name="localFile"
           />
         </form>
-        <EditorDialog ref="editorDialog" title="Import CURL" hideFormat="1" placeholder="Input the CURL text"
-          textEditor onConfirm={this.importCURL} />
       </div>
     );
   }

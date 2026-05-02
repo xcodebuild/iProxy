@@ -1,7 +1,6 @@
 var Transform = require('pipestream').Transform;
 var util = require('util');
 var iconv = require('iconv-lite');
-var Buffer = require('safe-buffer').Buffer;
 var fileMgr = require('./file-mgr');
 
 var DOCTYPE = Buffer.from('<!DOCTYPE html>\r\n');
@@ -16,6 +15,7 @@ function WhistleTransform(options) {
   if ((value = parseInt(options.delay)) > 0) {
     this._delay = value;
   }
+  this._noDoctype = options.noDoctype;
 
   var charset = options.charset && String(options.charset);
   if (!iconv.encodingExists(charset)) {
@@ -119,7 +119,7 @@ WhistleTransform.prototype._transform = function (chunk, encoding, callback) {
       }
       var top = self._top;
       if (top) {
-        if (self._isHtml) {
+        if (self._isHtml && !self._noDoctype) {
           top = Buffer.concat([DOCTYPE, top]);
         }
         chunk = chunk ? Buffer.concat([top, chunk]) : top;

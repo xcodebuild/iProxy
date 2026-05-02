@@ -14,9 +14,9 @@ var MAX_VAR_LEN = 100;
 var AT_RE = /^@/;
 var P_RE = /^%/;
 var P_VAR_RE = /^%([a-z\d_-]+)([=.])/;
-var PLUGIN_SPEC_RE = /^(pipe|sniCallback):/;
 var VAL_RE = /^([a-z\d_.-]+:\/\/)?(`)?\{([^\s]*?)(?:\}\1?)?$/i;
 var PROTOCOL_RE = /^([^\s:]+):\/\//;
+var VALUE_RE = /^\s*```/;
 var HINT_TIMEOUT = 120;
 var curHintMap = {};
 var curHintProto,
@@ -28,6 +28,56 @@ var curHintProto,
   curHintOffset;
 var hintUrl, hintCgi, waitingRemoteHints;
 var extraKeys = { 'Alt-/': 'autocomplete' };
+var FILTERS = [
+  '<keyword or regex for URL>',
+  'm:<keyword or regex for HTTP method>',
+  'b:<keyword or regex for request body>',
+  's:<keyword or regex for response status code>',
+  'clientIp:<keyword or regex for client IP address>',
+  'serverIp:<keyword or regex for server IP address>',
+  'chance:<probability between 0 and 1>',
+  'reqH.header-key:<keyword or regex for request header value>',
+  'resH.header-key:<keyword or regex for response header value>'
+];
+var HEADERS = [
+  'reqH.header-key:(keyword|regex)=<replacement>',
+  'resH.header-key:(keyword|regex)=<replacement>',
+  'trailer.header-key:(keyword|regex)=<replacement>'
+];
+var DEL_HINTS = [
+  'pathname.<index>',
+  'urlParams.<param-key>',
+  'reqHeaders.<header-key>',
+  'resHeaders.<header-key>',
+  'reqCookies.<cookie-key>',
+  'resCookies.<cookie-key>',
+  'reqBody.<key.path>',
+  'resBody.<key.path>',
+  'pathname',
+  'urlParams',
+  'reqType',
+  'resType',
+  'reqCharset',
+  'resCharset',
+  'reqBody',
+  'resBody'
+];
+
+var LINE_PROPS_HINTS = ['important', 'safeHtml', 'strictHtml', 'disableAutoCors', 'disableUserLogin', 'enableUserLogin',
+  'internal', 'internalOnly', 'internalProxy', 'proxyFirst', 'proxyHost', 'proxyHostOnly', 'proxyTunnel', 'weakRule', 'enableBigData'];
+
+var ENABLE_HINTS = ['abort', 'abortReq', 'abortRes', 'authCapture', 'auto2http', 'bigData', 'br', 'gzip', 'deflate',
+  'capture', 'captureIp', 'captureStream', 'clientCert', 'clientId', 'clientIp', 'customParser', 'flushHeaders', 'forHttp', 'forHttps',
+  'forceReqWrite', 'forceResWrite', 'h2', 'http2', 'httpH2', 'hide', 'hideComposer', 'hideCaptureError', 'showHost', 'ignoreSend', 'ignoreReceive',
+  'pauseSend', 'pauseReceive', 'inspect', 'interceptConsole', 'internalProxy', 'proxyFirst', 'proxyHost', 'proxyTunnel', 'keepCSP', 'keepAllCSP', 'keepCache',
+  'keepAllCache', 'keepClientId', 'safeHtml', 'strictHtml', 'multiClient', 'reqMergeBigData', 'resMergeBigData', 'requestWithMatchedRules', 'responseWithMatchedRules', 'tunnelHeadersFirst',
+  'useLocalHost', 'useSafePort', 'userLogin', 'weakRule', 'socket', 'websocket'];
+var DISABLE_HINTS = ['301', 'abort', 'abortReq', 'abortRes', 'authCapture', 'auto2http', 'autoCors',  'ajax', 'bigData', 'capture', 'captureIp', 'captureStream',
+  'clientCert', 'clientId', 'clientIp', 'customParser', 'cache', 'dnsCache', 'csp', 'cookies', 'reqCookies', 'resCookies', 'flushHeaders', 'forHttp', 'forHttps', 'forceReqWrite',
+  'forceResWrite', 'gzip', 'h2', 'http2', 'httpH2', 'hide', 'hideComposer', 'hideCaptureError', 'interceptConsole', 'internalProxy', 'proxyFirst',
+  'proxyHost', 'proxyTunnel', 'keepCSP', 'keepAllCSP', 'keepCache', 'keepAllCache', 'keepAlive', 'keepClientId', 'keepH2Session', 'safeHtml', 'strictHtml',
+  'multiClient', 'proxyConnection', 'ua', 'proxyUA', 'referer', 'rejectUnauthorized', 'reqMergeBigData', 'resMergeBigData', 'requestWithMatchedRules', 'responseWithMatchedRules', 'secureOptions', 'servername',
+  'timeout', 'trailerHeader', 'trailers', 'tunnelAuthHeader', 'tunnelHeadersFirst', 'useLocalHost', 'useSafePort', 'userLogin', 'weakRule'];
 var CHARS = [
   '-',
   '"_"',
@@ -77,10 +127,13 @@ $(window).on('hashchange', function () {
   }
 });
 
+function isExactMatch(curWord, list) {
+  var item = list && list.length === 1 && list[0];
+  return item && (item.text || item) === curWord;
+}
+
 var curKeys;
 var curRules;
-var MULTI_LINE_VALUE_RE =
-  /^[^\n\r\S]*(```+)[^\n\r\S]*(\S+)[^\n\r\S]*[\r\n]([\s\S]*?)[\r\n][^\n\r\S]*\1\s*$/gm;
 
 function getInlineKeys() {
   var rulesModal = dataCenter.rulesModal;
@@ -101,14 +154,12 @@ function getInlineKeys() {
   }
   if (curRules !== value) {
     curRules = value;
-    curKeys = null;
-    value.replace(MULTI_LINE_VALUE_RE, function (_, __, key) {
-      curKeys = curKeys || [];
-      if (curKeys.indexOf(key) === -1) {
-        curKeys.push(key);
-      }
-      return '';
-    });
+    var values = {};
+    util.resolveInlineValues(curRules, values);
+    curKeys = Object.keys(values);
+    if (!curKeys.length) {
+      curKeys = null;
+    }
   }
   return curKeys;
 }
@@ -140,11 +191,11 @@ function getHints(keyword) {
   }
   keyword = keyword.toLowerCase();
   var list = allRules.filter(function (name) {
-    if (name === 'socks://' && 'proxy'.indexOf(keyword) !== -1) {
+    if ((name === 'socks://' || name === 'xsocks://') && 'proxy'.indexOf(keyword) !== -1) {
       return true;
     }
     name = name.toLowerCase();
-    return name.indexOf(keyword) !== -1;
+    return name.indexOf(keyword) !== -1 || (name === 'tlsoptions://' && 'cipher://'.indexOf(keyword) !== -1);
   });
   list.sort(function (cur, next) {
     var curIndex = cur.toLowerCase().indexOf(keyword);
@@ -162,14 +213,69 @@ function getHints(keyword) {
     list.push('xproxy://');
   } else if ('extend'.indexOf(keyword) !== -1) {
     list.push('reqMerge://', 'resMerge://');
-  } else if (keyword.length > 2) {
-    if (!'redirect://'.indexOf(keyword)) {
-      list.push('locationHref://');
-    } else if (!'locationHref://'.indexOf(keyword)) {
-      list.push('redirect://');
+  }
+  var index1 = list.indexOf('redirect://');
+  var index2 = list.indexOf('locationHref://');
+  if (index1 !== -1) {
+    if (index2 !== -1) {
+      if (index1 > index2) {
+        list.splice(index1, 1);
+        list.splice(index2 + 1, 0, 'redirect://');
+      } else {
+        list.splice(index2, 1);
+        list.splice(index1 + 1, 0, 'locationHref://');
+      }
+    } else {
+      list.splice(index1 + 1, 0, 'locationHref://');
     }
+  } else if (index2 !== -1) {
+    list.splice(index2 + 1, 0, 'redirect://');
   }
   return list;
+}
+
+function getFilterHint(filter) {
+  var index = filter.indexOf('<');
+  var text = index === -1 ? filter : filter.substring(0, index);
+  return {
+    text: text.replace('.header-key', '._headerKey_').replace('(keyword|regex)=', '_keywordOrRegEx_='),
+    displayText: filter
+  };
+}
+
+function getFilterHints(keyword, filter1, filter2) {
+  keyword = keyword.toLowerCase();
+  if (/[:=]/.test(keyword)) {
+    return [];
+  }
+  var filters1 = [];
+  var filters2 = [];
+  FILTERS.forEach(function(filter, i) {
+    if (!keyword || (i && filter.toLowerCase().indexOf(keyword) !== -1)) {
+      filters1.push(getFilterHint(filter1 + filter));
+      if (filter2) {
+        filters2.push(getFilterHint(filter2 + filter));
+      }
+    }
+  });
+  return filters1.concat(filters2);
+}
+
+function getSpecHints(keyword, protocol, hints) {
+  var getHint = function(hint) {
+    return getFilterHint(protocol + hint);
+  };
+  if (!keyword) {
+    return hints.map(getHint);
+  }
+  var result = [];
+  keyword = keyword.toLowerCase();
+  hints.forEach(function (hint) {
+    if (hint.toLowerCase().indexOf(keyword) !== -1) {
+      result.push(getHint(hint));
+    }
+  });
+  return result;
 }
 
 function getAtValueList(keyword) {
@@ -212,7 +318,15 @@ function getAtValueList(keyword) {
   } catch (e) {}
 }
 
+function getSpecHint(name, specProto) {
+  return {
+    text: name,
+    displayText: name + '(' + (specProto === 'pipe' ? 'pipe' : 'sni') + 'Value)'
+  };
+}
+
 function getPluginVarHints(keyword, specProto) {
+  var originalKeyword = keyword;
   var list;
   if (specProto) {
     keyword = keyword.substring(specProto.length + 3);
@@ -224,11 +338,20 @@ function getPluginVarHints(keyword, specProto) {
     list = protocols.getPluginVarList();
   }
   if (!keyword) {
-    return list;
+    return specProto ? list.map(function(name) {
+      return getSpecHint(name, specProto);
+    }) : list;
   }
   keyword = keyword.toLowerCase();
   if (specProto) {
     keyword = specProto + '://' + keyword;
+    var result = [];
+    list.filter(function (name) {
+      if (name.indexOf(keyword) !== -1) {
+        result.push(getSpecHint(name, specProto));
+      }
+    });
+    return result.length === 1 && result[0].text === originalKeyword ? [] : result;
   }
   return list.filter(function (name) {
     return name.indexOf(keyword) !== -1;
@@ -245,7 +368,7 @@ function getAtHelpUrl(name, options) {
       }
     }
   } catch (e) {}
-  return 'https://avwo.github.io/whistle/rules/@.html';
+  return util.getDocUrl('rules/@.html');
 }
 
 function getRuleHelp(plugin, helpUrl) {
@@ -253,7 +376,7 @@ function getRuleHelp(plugin, helpUrl) {
     helpUrl = '';
   }
   return (
-    helpUrl || plugin.homepage || 'https://avwo.github.io/whistle/plugins.html'
+    helpUrl || plugin.homepage || util.getDocUrl('extensions/usage.html')
   );
 }
 
@@ -264,7 +387,7 @@ function getHintText(protoName, text, isVar, isKey) {
   return protoName + (isKey ? '.' : '=') + text;
 }
 
-function handleRemoteHints(data, editor, plugin, protoName, value, cgi, isVar) {
+function handleRemoteHints(data, editor, plugin, protoName, value, cgi, isVar, curWord) {
   curHintList = [];
   curHintMap = {};
   curHintPos = null;
@@ -298,15 +421,12 @@ function handleRemoteHints(data, editor, plugin, protoName, value, cgi, isVar) {
         curHintMap[item] = getRuleHelp(plugin);
       }
     } else if (item) {
-      var label, curVal;
-      if (typeof item.label === 'string') {
-        label = item.label.trim();
-      }
-      if (!label && typeof item.display === 'string') {
-        label = item.display.trim();
-      }
-      if (typeof item.value === 'string') {
-        curVal = getHintText(protoName, item.value.trim(), isVar, item.isKey);
+      var label = item.label || item.displayText || item.display;
+      var curVal = item.value || item.text;
+      label = typeof label === 'string' ? label.trim() : '';
+      curVal = typeof curVal === 'string' ? curVal.trim() : '';
+      if (curVal) {
+        curVal = getHintText(protoName, curVal, isVar, item.isKey);
       }
       if (curVal && curVal.length < maxLen && !curHintMap[label || curVal]) {
         ++len;
@@ -322,28 +442,117 @@ function handleRemoteHints(data, editor, plugin, protoName, value, cgi, isVar) {
       }
     }
   });
+  if (isExactMatch(curWord, curHintList)) {
+    curHintList = [];
+    len = 0;
+  }
   if (waitingRemoteHints && len) {
     editor._byPlugin = true;
     editor.execCommand('autocomplete');
   }
 }
 
+function isFilterProtocol(name) {
+  return name === 'includeFilter://' || name === 'excludeFilter://';
+}
+
+function getSpecProto(keyword) {
+  if (!keyword) {
+    return;
+  }
+  if (!keyword.indexOf('pipe://')) {
+    return 'pipe';
+  }
+  if (!keyword.indexOf('sniCallback://')) {
+    return 'sniCallback';
+  }
+  if (keyword.indexOf('://') !== -1) {
+    return;
+  }
+  keyword = keyword.toLowerCase();
+  var isPipe = 'pipe://'.indexOf(keyword) !== -1;
+  if (!isPipe && 'snicallback://'.indexOf(keyword) === -1) {
+    return;
+  }
+  var allRules = protocols.getAllRules();
+  var curProto = isPipe ? 'pipe://' : 'sniCallback://';
+  for (var i = 0, len = allRules.length; i < len; i++) {
+    var rule = allRules[i];
+    if (rule !== curProto && rule.toLowerCase().indexOf(keyword) !== -1) {
+      return;
+    }
+  }
+
+  return isPipe ? 'pipe' : 'sniCallback';
+}
+
+function getSpecHintOptions(list) {
+  var len = list.length;
+  var rule = len === 1 ? list[0] : '';
+  if (!rule) {
+    return;
+  }
+  if (rule.indexOf('headerReplace://') === 0) {
+    return {
+      isHeader: true,
+      protocol: 'headerReplace://',
+      hints: HEADERS
+    };
+  }
+  if (rule.indexOf('delete://') === 0) {
+    return {
+      isDelete: true,
+      protocol: 'delete://',
+      hints: DEL_HINTS
+    };
+  }
+  if (rule.indexOf('lineProps://') === 0) {
+    return {
+      isLineProps: true,
+      protocol: 'lineProps://',
+      hints: LINE_PROPS_HINTS
+    };
+  }
+  if (rule.indexOf('enable://') === 0) {
+    return {
+      isEnable: true,
+      protocol: 'enable://',
+      hints: ENABLE_HINTS
+    };
+  }
+  if (rule.indexOf('disable://') === 0) {
+    return {
+      isDisable: true,
+      protocol: 'disable://',
+      hints: DISABLE_HINTS
+    };
+  }
+}
+
 var WORD = /\S+/;
+var HTTP_RE = /^https?:\/?\/?/;
+var SPEC_HINT_RE = /^(headerReplace|includeFilter|excludeFilter|delete|lineProps|enable|disable):\/\//;
 var showAtHint;
 var showVarHint;
+var canShowHint;
 var toValKey = function(key, tpl) {
   return tpl + '{' + key + '}' + tpl;
 };
-CodeMirror.registerHelper('hint', 'rulesHint', function (editor, options) {
+CodeMirror.registerHelper('hint', 'rulesHint', function (editor) {
   showAtHint = false;
   showVarHint = false;
   waitingRemoteHints = false;
   curFocusProto = null;
+  var hasShownHint = canShowHint;
+  canShowHint = false;
   var byDelete = editor._byDelete || editor._byPlugin;
   var byEnter = editor._byEnter;
   editor._byDelete = editor._byPlugin = editor._byEnter = false;
   var cur = editor.getCursor();
   var curLine = editor.getLine(cur.line);
+  if (VALUE_RE.test(curLine)) {
+    return;
+  }
   var end = cur.ch,
     start = end,
     list;
@@ -354,15 +563,16 @@ CodeMirror.registerHelper('hint', 'rulesHint', function (editor, options) {
   while (start && WORD.test(curLine.charAt(start - 1))) {
     --start;
   }
-  var curWord = start != end && curLine.substring(start, end);
+  var curWord = start == end ? '' : curLine.substring(start, end);
   var isAt = AT_RE.test(curWord);
   var plugin;
   var pluginName;
   var value;
   var pluginVars;
   var sep;
-  var specProto = PLUGIN_SPEC_RE.test(curWord) && RegExp.$1;
+  var specProto = getSpecProto(curWord);
   var isPluginVar = P_RE.test(curWord);
+  var isPluginKey;
   if (isPluginVar && P_VAR_RE.test(curWord)) {
     pluginName = RegExp.$1;
     sep = RegExp.$2;
@@ -372,15 +582,24 @@ CodeMirror.registerHelper('hint', 'rulesHint', function (editor, options) {
       return;
     }
     value = curWord.substring(pluginName.length + 2);
-    isPluginVar = false;
+    isPluginVar = sep === '.';
+    isPluginKey = isPluginVar;
   }
+
   if (isAt || specProto || isPluginVar) {
-    if (!byEnter || /^(?:pipe|sniCallback):\/\/$/.test(curWord)) {
+    if (!byEnter || isPluginKey || /^(?:pipe|sniCallback):\/\/$/.test(curWord)) {
       list = isAt
         ? getAtValueList(curWord)
         : getPluginVarHints(curWord, specProto);
     }
-    if (!list || !list.length) {
+    var varLen = list && list.length;
+    var onlyOne = isExactMatch(curWord, list);
+    var noHint = !varLen || onlyOne;
+    if (isPluginKey) {
+      if (onlyOne && /=./.test(value)) {
+        return;
+      }
+    } else if (noHint) {
       return;
     }
     if (isAt) {
@@ -388,11 +607,16 @@ CodeMirror.registerHelper('hint', 'rulesHint', function (editor, options) {
     } else if (isPluginVar) {
       showVarHint = true;
     }
-    return {
-      list: list,
-      from: CodeMirror.Pos(cur.line, start),
-      to: CodeMirror.Pos(cur.line, end)
-    };
+    if (!noHint) {
+      return {
+        list: list,
+        from: CodeMirror.Pos(cur.line, start),
+        to: CodeMirror.Pos(cur.line, end)
+      };
+    }
+    if (onlyOne) {
+      byEnter = false;
+    }
   }
   if (curWord) {
     if (VAL_RE.test(curWord)) {
@@ -420,7 +644,10 @@ CodeMirror.registerHelper('hint', 'rulesHint', function (editor, options) {
           list = [];
           var lowerKey = valKeyword.toLowerCase();
           valuesKeys.forEach(function(key) {
-            if (key.toLowerCase().indexOf(lowerKey) !== -1) {
+            var lk = key.toLowerCase();
+            if (lk === lowerKey) {
+              list.unshift(toValKey(key, tplStart));
+            } else if (lk.indexOf(lowerKey) !== -1) {
               list.push(toValKey(key, tplStart));
             }
           });
@@ -431,7 +658,7 @@ CodeMirror.registerHelper('hint', 'rulesHint', function (editor, options) {
         }
         var valLen = list && list.length;
         if (valLen) {
-          if (valLen === 1 && list[0] === curWord.substring(protoLen)) {
+          if (isExactMatch(curWord.substring(protoLen), list)) {
             return;
           }
           curLine = curLine.substring(start).split(/\s/, 1)[0] || '';
@@ -494,11 +721,11 @@ CodeMirror.registerHelper('hint', 'rulesHint', function (editor, options) {
             } else {
               text = getHintText(protoName, item.text, pluginVars, item.isKey);
               if (item.displayText) {
-                text = item.displayText;
                 hint = {
                   text: text,
                   displayText: item.displayText
                 };
+                text = item.displayText;
               }
             }
             curHintMap[text] = getRuleHelp(plugin, item.help);
@@ -583,54 +810,61 @@ CodeMirror.registerHelper('hint', 'rulesHint', function (editor, options) {
                 protoName,
                 value,
                 getRemoteHints,
-                pluginVars
+                pluginVars,
+                curWord
               );
             }
           );
         }, HINT_TIMEOUT);
       }
     }
-    if (
-      value ||
-      curWord.indexOf('//') !== -1 ||
-      !NON_SPECAIL_RE.test(curWord)
-    ) {
+    var isSpecHint = SPEC_HINT_RE.test(curWord);
+    if (value || (isSpecHint ? (byEnter && hasShownHint) : curWord.indexOf('//') !== -1) || !NON_SPECAIL_RE.test(curWord)) {
       return;
     }
   } else if (byDelete) {
     return;
   }
-  list = getHints(curWord);
-  if (!list.length) {
+  var filterName;
+  if (isSpecHint) {
+    var slashIdx = curWord.indexOf('://') + 3;
+    value = curWord.substring(slashIdx);
+    filterName = curWord.substring(0, slashIdx);
+  } else {
+    value = '';
+  }
+  list = getHints(filterName || curWord);
+  var hintOpts = getSpecHintOptions(list);
+  var len = list.length;
+  var isFilter = (len === 2 && (isFilterProtocol(list[0]) || isFilterProtocol(list[1]))) || (len === 1 && isFilterProtocol(list[0]));
+  isSpecHint = hintOpts || isFilter;
+  if (isSpecHint) {
+    list = hintOpts ? getSpecHints(value, hintOpts.protocol, hintOpts.hints) : getFilterHints(value, list[0], list[1]);
+    len = list.length;
+  }
+  if (!len) {
     return;
   }
-  var index = curLine.indexOf('://', start);
-  var protocol;
-  if (index !== -1) {
-    index = index + 3;
-    protocol = curLine.substring(start, index);
-    // redirect://http://
-    if (
-      !/\s/.test(protocol) &&
-      (curWord.indexOf('red') !== 0 ||
-        (protocol !== curWord + 'http://' && protocol !== curWord + 'https://'))
-    ) {
-      end = index;
+  canShowHint = isSpecHint;
+  var last = end;
+  var nextCh = curLine[last];
+  while (nextCh && WORD.test(nextCh)) {
+    nextCh = curLine[++last];
+  }
+  var curItem = curLine.substring(start, last);
+  if (isSpecHint) {
+    end = last;
+    if (len === 1 && isExactMatch(curItem, list)) {
+      return;
     }
   } else {
-    index = curLine.indexOf(':', start);
-    if (index !== -1) {
-      ++index;
-      protocol = curLine.substring(start, index) + '//';
-      if (list.indexOf(protocol) !== -1) {
-        end = index;
-        var curChar = curLine[end];
-        if (curChar === '/') {
+    var index = curItem.indexOf(':');
+    if (index !== -1 && !HTTP_RE.test(curItem.substring(end))) {
+      end = start + index + 1;
+      if (curLine[end] === '/') {
+        end++;
+        if (curLine[end] === '/') {
           end++;
-          curChar = curLine[end];
-          if (curChar === '/') {
-            end++;
-          }
         }
       }
     }
@@ -737,7 +971,7 @@ exports.getHelpUrl = function (editor, options) {
     var plugin = name && protocols.getPlugin(name);
     plugin = plugin && plugin.homepage;
     return (
-      plugin || 'https://avwo.github.io/whistle/plugins.html?plugin=' + name
+      plugin || util.getDocUrl('extensions/usage.html')
     );
   }
   return protocols.getHelpUrl(name);

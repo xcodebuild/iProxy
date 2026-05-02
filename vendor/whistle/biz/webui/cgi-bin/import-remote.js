@@ -12,7 +12,7 @@ module.exports = function(req, res) {
       maxLength: MAX_LEN
     }, function(err, body, r) {
       if (err) {
-        var msg = err.code === 'EEXCEED'  ? 'The size of response body exceeds 6m' : err.message;
+        var msg = err.code === 'EEXCEED'  ? 'The size of response body exceeds 6MB' : err.message;
         return res.json({ec: 2, em: msg});
       }
       var status = r.statusCode;
@@ -25,9 +25,9 @@ module.exports = function(req, res) {
   } else if (util.isString(url)) {
     loadService(function(err, options) {
       if (err) {
-        res.type('text').status(500).send(err.stack || err);
+        util.sendRes(res, 500, err.stack || err);
       } else {
-        req.url = '/cgi-bin/sessions/get-temp-file?filename=' + encodeURIComponent(url);
+        req.url = '/cgi-bin/temp/get?filename=' + encodeURIComponent(url);
         util.transformReq(req, res, options.port);
       }
     });

@@ -5,24 +5,29 @@ var http = require('http');
 var https = require('https');
 var parseReqUrl = require('parseurl');
 var bodyParser = require('body-parser');
-var crypto = require('crypto');
 var fs = require('fs');
 var zlib = require('zlib');
 var extend = require('extend');
+var LRU = require('lru-cache');
 var htdocs = require('../htdocs');
 var handleWeinreReq = require('../../weinre');
 var setProxy = require('./proxy');
 var rulesUtil = require('../../../lib/rules/util');
 var getRootCAFile = require('../../../lib/https/ca').getRootCAFile;
 var config = require('../../../lib/config');
-var sendError = require('../cgi-bin/util').sendError;
-var parseAuth = require('../../../lib/util/common').parseAuth;
+var cgiUtil = require('../cgi-bin/util');
+var common = require('../../../lib/util/common');
 var getWorker = require('../../../lib/plugins/util').getWorker;
 var loadAuthPlugins = require('../../../lib/plugins').loadAuthPlugins;
 var parseUrl = require('../../../lib/util/parse-url-safe');
 
+var sendError = cgiUtil.sendError;
+var sendGzipText = cgiUtil.sendGzipText;
+var parseAuth = common.parseAuth;
+var createHash = common.createHash;
 var PARSE_CONF = { extended: true, limit: '3mb'};
 var UPLOAD_PARSE_CONF = { extended: true, limit: '30mb'};
+var PLUGIN_NAMES = new LRU({ max: 360 });
 var urlencodedParser = bodyParser.urlencoded(PARSE_CONF);
 var jsonParser = bodyParser.json(PARSE_CONF);
 var uploadUrlencodedParser = bodyParser.urlencoded(UPLOAD_PARSE_CONF);
@@ -32,9 +37,10 @@ var WEINRE_RE = /^\/weinre\/.*/;
 var ALLOW_PLUGIN_PATHS = ['/cgi-bin/rules/list2', '/cgi-bin/values/list2', '/cgi-bin/get-custom-certs-info'];
 var SPECIAL_PATHS = ['/cgi-bin/rules/project'];
 var DONT_CHECK_PATHS = ['/cgi-bin/server-info', '/cgi-bin/plugins/is-enable', '/cgi-bin/plugins/get-plugins',
-  '/preview.html', '/cgi-bin/rootca', '/cgi-bin/log/set', '/cgi-bin/status'];
+  '/preview.html', '/cgi-bin/rootca', '/cgi-bin/check-update', '/cgi-bin/log/set', '/cgi-bin/status'];
 var GUEST_PATHS = ['/cgi-bin/composer', '/cgi-bin/socket/data', '/cgi-bin/abort', '/cgi-bin/socket/abort',
   '/cgi-bin/socket/change-status', '/cgi-bin/sessions/export'];
+var CORS_PATHS = ['/cgi-bin/status',  '/cgi-bin/rootca'];
 var PLUGIN_PATH_RE = /^\/(whistle|plugin)\.([^/?#]+)(\/)?/;
 var STATIC_SRC_RE = /\.(?:ico|js|css|png)$/i;
 var UPLOAD_URLS = ['/cgi-bin/values/upload', '/cgi-bin/composer', '/cgi-bin/download'];
@@ -47,9 +53,35 @@ var INSPECTOR_HTML = fs.readFileSync(path.join(__dirname, '../../../assets/tab.h
 var MODAL_HTML = fs.readFileSync(path.join(__dirname, '../../../assets/modal.html'));
 var MENU_URL = '???_WHISTLE_PLUGIN_EXT_CONTEXT_MENU_' + config.port + '???';
 var INSPECTOR_URL = '???_WHISTLE_PLUGIN_INSPECTOR_TAB_' + config.port + '???';
-var UP_PATH_REGEXP = /(?:^|[\\/])\.\.(?:[\\/]|$)/;
 var KEY_RE_G = /\${[^{}\s]+}|{\S+}/g;
 var COMMENT_RE = /#[^\r\n]*$/mg;
+
+function hasLogin() {
+  return config.username && config.password;
+}
+
+function isTempFile(query) {
+  var files = query.files;
+  if (files && typeof files === 'string') {
+    return false;
+  }
+  return common.isTempFile(query.filename);
+}
+
+function sendToService(req, res) {
+  if (!hasLogin() && req.path === '/cgi-bin/temp/get' && !isTempFile(req.query)) {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end('{"ec":0,"value":"","forbidden":true}');
+    return;
+  }
+  proxyEvent.loadService(function(err, options) {
+    if (err) {
+      common.sendRes(res, 500, err.stack || err);
+    } else {
+      util.transformReq(req, res, options.port);
+    }
+  });
+}
 
 function doNotCheckLogin(req) {
   var path = req.path;
@@ -62,12 +94,6 @@ function getUsername() {
 
 function getPassword() {
   return config.password || '';
-}
-
-function shasum(str) {
-  var shasum = crypto.createHash('sha1');
-  shasum.update(str || '');
-  return shasum.digest('hex');
 }
 
 function parseCookie(str) {
@@ -94,9 +120,9 @@ function getLoginKey (req, res, auth) {
   var ip = util.getClientIp(req);
   var password = auth.password;
   if (config.encrypted) {
-    password = shasum(password);
+    password = createHash(password);
   }
-  return shasum([auth.username, password, ip].join('\n'));
+  return createHash([auth.username, password, ip].join('\n'));
 }
 
 function requireLogin(req, res, msg) {
@@ -108,7 +134,7 @@ function requireLogin(req, res, msg) {
   }
   res.setHeader('WWW-Authenticate', ' Basic realm=User Login');
   res.setHeader('Content-Type', 'text/html; charset=utf8');
-  res.status(401).end(msg || 'Access denied, please <a href="javascript:;" onclick="location.reload()">try again</a>.');
+  res.status(401).end(msg || 'Access denied, please <a href="javascript:;" onclick="location.reload()">try again</a>');
 }
 
 function equalAuth(auth, src) {
@@ -139,11 +165,11 @@ function verifyLogin(req, res, auth) {
   if (correctKey === lkey) {
     return true;
   }
-  var headerAuth = parseAuth(req.headers.authorization);
+  var headerAuth = parseAuth(req.headers.authorization || req.headers['proxy-authorization']);
   var queryAuth = parseAuth(req.query.authorization);
   if (!isGuest && config.encrypted) {
-    headerAuth.pass = headerAuth.pass && shasum(headerAuth.pass);
-    queryAuth.pass = queryAuth.pass && shasum(queryAuth.pass);
+    headerAuth.pass = headerAuth.pass && createHash(headerAuth.pass);
+    queryAuth.pass = queryAuth.pass && createHash(queryAuth.pass);
   }
   if (equalAuth(headerAuth, auth) || equalAuth(queryAuth, auth)) {
     res.setHeader('Set-Cookie', [
@@ -202,15 +228,14 @@ function readRemoteStream(req, res, authUrl) {
   client.end();
 }
 
-function injectFile(res, filepath, prepend, append, isJs) {
+function injectFile(req, res, filepath, prepend, append, isJs) {
   fs.readFile(filepath, function(err, ctn) {
     if (err) {
       return sendError(res, err);
     }
-    res.writeHead(200, {
+    sendGzipText(req, res, {
       'Content-Type': (isJs ? 'application/javascript' : 'text/html') + '; charset=utf-8'
-    });
-    res.end(concat(prepend, ctn, append));
+    }, concat(prepend, ctn, append));
   });
 }
 
@@ -270,17 +295,23 @@ app.use(function(req, res, next) {
     }
   } else {
     pluginName = config.getPluginNameByHost(req.headers.host);
-    if (!pluginName && referer) {
-      var refOpts = parseUrl(referer);
-      var pathname = refOpts.pathname;
-      if (PLUGIN_PATH_RE.test(pathname) && RegExp.$3) {
-        req.url = '/' + RegExp.$1 + '.' + RegExp.$2 + path;
+    if (!pluginName) {
+      if (referer) {
+        var refOpts = parseUrl(referer);
+        var pathname = refOpts.pathname;
+        if (PLUGIN_PATH_RE.test(pathname) && RegExp.$3) {
+          var name = RegExp.$2;
+          req.url = '/' + RegExp.$1 + '.' + name + path;
+          PLUGIN_NAMES.set(path, name);
+        } else {
+          pluginName = config.getPluginNameByHost(refOpts.hostname);
+        }
       } else {
-        pluginName = config.getPluginNameByHost(refOpts.hostname);
+        pluginName = PLUGIN_NAMES.get(path);
       }
     }
     if (pluginName) {
-      req.url = '/whistle.' + pluginName + path;
+      req.url = '/plugin.' + pluginName + path;
     }
   }
 
@@ -316,7 +347,7 @@ function checkInternalPath(req) {
   if (config.allowAllOrigin || ALLOW_CROSS_URLS.indexOf(req.path) !== -1) {
     return true;
   }
-  var host = req.headers['x-whistle-origin-host'];
+  var host = req.headers[common.ORIGIN_HOST_HEADER];
   return !host || isAllowHost(host);
 }
 
@@ -327,6 +358,9 @@ function checkAllowOrigin(req) {
     return false;
   }
   if (config.allowAllOrigin) {
+    return true;
+  }
+  if (CORS_PATHS.indexOf(req.path) !== -1) {
     return true;
   }
   if (!config.allowOrigin) {
@@ -341,7 +375,7 @@ function checkAllowOrigin(req) {
 }
 
 function cgiHandler(req, res) {
-  if (UP_PATH_REGEXP.test(req.path) || !checkInternalPath(req)) {
+  if (common.existsUpPath(req.path) || !checkInternalPath(req)) {
     return res.status(403).end('Forbidden');
   }
   if (checkAllowOrigin(req)) {
@@ -359,25 +393,25 @@ function cgiHandler(req, res) {
   if (require.cache[filepath]) {
     return handleResponse();
   }
-  fs.stat(filepath, function(err, stat) {
+  common.getStat(filepath, function(err, stat) {
     if (err || !stat.isFile()) {
       var notFound = err ? err.code === 'ENOENT' : !stat.isFile();
       var msg;
       if (config.debugMode) {
-        msg =  '<pre>' + (err ? util.encodeHtml(util.getErrorStack(err)) : 'Not File') + '</pre>';
+        msg = util.THEME_STYLE + '<pre>' + (err ? util.encodeHtml(util.getErrorStack(err)) : 'No such File') + '</pre>';
       } else {
         msg = notFound ? 'Not Found' : 'Internal Server Error';
       }
-      return res.status(notFound ? 404 : 500).send(msg);
+      return common.sendRes(res, notFound ? 404 : 500, msg);
     }
     handleResponse();
   });
 }
-
-app.all('/cgi-bin/sessions/*', cgiHandler);
-app.all('/favicon.ico', function(req, res) {
-  res.sendFile(htdocs.getImgFile('favicon.ico'));
-});
+app.all('/service/*', sendToService);
+app.all('/cgi-bin/service/*', sendToService);
+app.all('/cgi-bin/sessions/*', sendToService);
+app.all('/cgi-bin/log/*', sendToService);
+app.post('/cgi-bin/plugins/install', sendToService);
 
 function readPluginPage(req, res, plugin, html, config) {
   res.type('html');
@@ -416,9 +450,8 @@ app.all(PLUGIN_PATH_RE, function(req, res) {
   if (req.url.indexOf(INSPECTOR_URL) !== -1) {
     return readPluginPage(req, res, plugin, INSPECTOR_HTML, plugin[util.PLUGIN_INSPECTOR_CONFIG]);
   }
-  var internalId = req.headers['x-whistle-internal-id'];
-  if (internalId === util.INTERNAL_ID) {
-    delete req.headers['x-whistle-internal-id'];
+  if (req.headers[util.INTERNAL_ID_HEADER] === util.INTERNAL_ID) {
+    delete req.headers[util.INTERNAL_ID_HEADER];
   } else if (plugin.inheritAuth && !checkAuth(req, res)) {
     return;
   }
@@ -427,18 +460,11 @@ app.all(PLUGIN_PATH_RE, function(req, res) {
   }
   pluginMgr.loadPlugin(plugin, function(err, ports) {
     if (err || !ports.uiPort) {
-      if (err) {
-        res.status(500).send('<pre>' + util.encodeHtml(err) + '</pre>');
-      } else {
-        res.status(404).send('Not Found');
-      }
-      return;
+      return common.sendRes(res, err ? 500 : 404, err ? '<pre>' + util.encodeHtml(err) + '</pre>' : 'Not Found');
     }
     var options = parseReqUrl(req);
     var headers = req.headers;
     headers[config.PLUGIN_HOOK_NAME_HEADER] = config.PLUGIN_HOOKS.UI;
-    headers['x-whistle-remote-address'] = req._remoteAddr || util.getRemoteAddr(req);
-    headers['x-whistle-remote-port'] = req._remotePort || util.getRemotePort(req);
     req.url = options.path.replace(result[0].slice(0, -1), '');
     var openInModal = req.url.indexOf('?openInModal=5b6af7b9884e1165') !== -1;
     util.transformReq(req, res, ports.uiPort, null, openInModal ? MODAL_HTML : null);
@@ -473,15 +499,27 @@ app.use(function(req, res, next) {
   }
 });
 
-function sendText(res, text) {
-  res.writeHead(200, {
+app.post('/cgi-bin/composer', function(req, res) {
+  req.headers[config.CLIENT_IP_HEADER] = util.getClientIp(req);
+  req.headers[config.CLIENT_PORT_HEADER] = util.getClientPort(req);
+  sendToService(req, res);
+});
+app.get('/cgi-bin/compose-data', sendToService);
+app.all('/cgi-bin/saved/*', sendToService);
+app.all('/cgi-bin/temp/*', sendToService);
+app.get('/cgi-bin/history', sendToService);
+function sendText(req, res, text) {
+  sendGzipText(req, res, {
     'Content-Type': 'text/plain; charset=utf-8'
-  });
-  res.end(typeof text === 'string' ? text : '');
+  }, typeof text === 'string' ? text : '');
 }
 
 function parseKey(key) {
   return key[0] === '$' ? key.slice(2, -1) : key.slice(1, -1);
+}
+
+if (config.handleUpdate) {
+  app.post('/cgi-bin/update', config.handleUpdate);
 }
 
 app.get('/rules', function(req, res) {
@@ -489,10 +527,10 @@ app.get('/rules', function(req, res) {
   var name = query.name || query.key;
   if (name === 'Default') {
     name = rulesUtil.rules.getDefault();
-  } else if (!name) {
-    name = rulesUtil.rules.getRawRulesText();
-  } else {
+  } else if (name) {
     name = rulesUtil.rules.get(name);
+  } else {
+    name = rulesUtil.rules.getRawRulesText();
   }
   if (name && query.values !== 'false' && !(query.values <= 0)) {
     var keys = name.replace(COMMENT_RE, '').match(KEY_RE_G);
@@ -505,12 +543,12 @@ app.get('/rules', function(req, res) {
       }
     }
   }
-  sendText(res, name);
+  sendText(req, res, name);
 });
 
 app.get('/values', function(req, res) {
   var name = req.query.name || req.query.key;
-  sendText(res, rulesUtil.values.get(name));
+  sendText(req, res, rulesUtil.values.get(name));
 });
 
 app.get('/web-worker.js', urlencodedParser, function(req, res) {
@@ -518,10 +556,9 @@ app.get('/web-worker.js', urlencodedParser, function(req, res) {
   if (!body) {
     return res.status(404).end('Not Found');
   }
-  res.writeHead(200, {
+  sendGzipText(req, res, {
     'Content-Type': 'application/javascript; charset=utf-8'
-  });
-  res.end(body);
+  }, body);
 });
 
 app.all('/cgi-bin/*', function(req, res, next) {
@@ -532,7 +569,7 @@ app.all('/cgi-bin/*', function(req, res, next) {
 }, cgiHandler);
 
 app.use('/preview.html', function(req, res, next) {
-  if (req.headers[config.INTERNAL_ID_HEADER] !== config.INTERNAL_ID) {
+  if (req.headers[util.INTERNAL_ID_HEADER] !== util.INTERNAL_ID) {
     return res.status(404).end('Not Found');
   }
   next();
@@ -548,6 +585,8 @@ var htmlPrepend = uiExt.htmlPrepend;
 var htmlAppend = uiExt.htmlAppend;
 var jsPrepend = uiExt.jsPrepend;
 var jsAppend = uiExt.jsAppend;
+var htmlFile = htdocs.getHtmlFile('index.html');
+var jsFile = htdocs.getJsFile('index.js');
 
 function concat(a, b, c) {
   if (!a && !c) {
@@ -561,9 +600,10 @@ function concat(a, b, c) {
 }
 
 if (!config.debugMode) {
-  var indexHtml = concat(htmlPrepend, fs.readFileSync(htdocs.getHtmlFile('index.html')), htmlAppend);
-  var indexJs = concat(jsPrepend, fs.readFileSync(htdocs.getJsFile('index.js')), jsAppend);
-  var jsETag = shasum(indexJs);
+  var indexHtml = concat(htmlPrepend, fs.readFileSync(htmlFile), htmlAppend);
+  var indexJs = concat(jsPrepend, fs.readFileSync(jsFile), jsAppend);
+  var jsETag = createHash(indexJs);
+  var gzipIndexHtml = zlib.gzipSync(indexHtml);
   var gzipIndexJs = zlib.gzipSync(indexJs);
   app.use('/js/index.js', function(req, res) {
     if (req.headers['if-none-match'] === jsETag) {
@@ -574,43 +614,30 @@ if (!config.debugMode) {
       'Cache-Control': 'public, max-age=300',
       ETag: jsETag
     };
-    if (util.canGzip(req)) {
-      headers['Content-Encoding'] = 'gzip';
-      res.writeHead(200, headers);
-      res.end(gzipIndexJs);
-    } else {
-      res.writeHead(200, headers);
-      res.end(indexJs);
-    }
+    sendGzipText(req, res, headers, indexJs, gzipIndexJs);
   });
   var sendIndex = function(req, res) {
-    res.writeHead(200, {
+    sendGzipText(req, res, {
       'Content-Type': 'text/html; charset=utf-8'
-    });
-    res.end(indexHtml);
+    }, indexHtml, gzipIndexHtml);
   };
   app.get('/', sendIndex);
   app.get('/index.html', sendIndex);
 } else {
   if (htmlPrepend || htmlAppend) {
-    var htmlFile = htdocs.getHtmlFile('index.html');
     var injectHtml = function(req, res) {
-      injectFile(res, htmlFile, htmlPrepend, htmlAppend);
+      injectFile(req, res, htmlFile, htmlPrepend, htmlAppend);
     };
     app.get('/', injectHtml);
     app.get('/index.html', injectHtml);
   }
   if (jsPrepend || jsAppend) {
-    var jsFile = htdocs.getHtmlFile('js/index.js');
     app.get('/js/index.js', function(req, res) {
-      injectFile(res, jsFile, jsPrepend, jsAppend, true);
+      injectFile(req, res, jsFile, jsPrepend, jsAppend, true);
     });
   }
 }
 
-app.get('/', function(req, res) {
-  res.sendFile(htdocs.getHtmlFile('index.html'));
-});
 
 app.all(WEINRE_RE, function(req, res) {
   var options = parseReqUrl(req);
@@ -631,7 +658,7 @@ function init(proxy) {
   setProxy(proxy);
 }
 
-app.use(express.static(path.join(__dirname, '../htdocs'), {maxAge: 300000}));
+app.use(express.static(path.join(__dirname, '../htdocs'), {maxAge: 600000}));
 
 exports.init = init;
 exports.setupServer = function(server) {

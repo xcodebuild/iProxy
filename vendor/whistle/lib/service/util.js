@@ -1,6 +1,9 @@
-var Buffer = require('safe-buffer').Buffer;
 var crypto = require('crypto');
+var path = require('path');
+var fs = require('fs');
+var fse = require('fs-extra2');
 var zlib = require('../util/zlib');
+var common = require('../util/common');
 
 var STATUS_CODES = require('http').STATUS_CODES || {};
 var wsParser = require('ws-parser');
@@ -253,30 +256,16 @@ function parseJSON(str) {
 
 exports.parseJSON = parseJSON;
 
-function padding(num) {
-  return num < 10 ? '0' + num : num;
-}
-
-function paddingMS(ms) {
-  if (ms > 99) {
-    return ms;
-  }
-  if (ms > 9) {
-    return '0' + ms;
-  }
-  return '00' + ms;
-}
-
 function formatDate() {
   var date = new Date();
   var result = [];
   result.push(date.getFullYear());
-  result.push(padding(date.getMonth() + 1));
-  result.push(padding(date.getDate()));
-  result.push(padding(date.getHours()));
-  result.push(padding(date.getMinutes()));
-  result.push(padding(date.getSeconds()));
-  result.push(paddingMS(date.getMilliseconds()));
+  result.push(common.padLeft(date.getMonth() + 1));
+  result.push(common.padLeft(date.getDate()));
+  result.push(common.padLeft(date.getHours()));
+  result.push(common.padLeft(date.getMinutes()));
+  result.push(common.padLeft(date.getSeconds()));
+  result.push(common.padLeft(date.getMilliseconds(), 3));
   return result.join('');
 }
 
@@ -293,7 +282,7 @@ function getFilename(type, filename) {
         filename += '.txt';
       }
     } else {
-      filename = 'whistle_' + formatDate() + '.txt';
+      filename = 'network_' + formatDate() + '.txt';
     }
   } else if (type === 'har') {
     if (filename) {
@@ -301,7 +290,7 @@ function getFilename(type, filename) {
         filename += '.har';
       }
     } else {
-      filename = 'har_' + formatDate() + '.har';
+      filename = 'network_' + formatDate() + '.har';
     }
   } else {
     if (filename) {
@@ -309,7 +298,7 @@ function getFilename(type, filename) {
         filename += '.saz';
       }
     } else {
-      filename = 'fiddler_' + formatDate() + '.saz';
+      filename = 'network_' + formatDate() + '.saz';
     }
   }
   return filename;
@@ -328,7 +317,7 @@ function toISOString(time) {
     time.toISOString().slice(0, -1) +
     '0000' +
     (offet >= 0 ? '+' : '-') +
-    padding(Math.abs(offet)) +
+    common.padLeft(Math.abs(offet)) +
     ':00'
   );
 }
@@ -392,7 +381,7 @@ function resolveFrames(res, frames, callback) {
     }
   };
   setTimeout(execCallback, 3000);
-  frames.forEach((frame) => {
+  frames.forEach(function (frame) {
     receiver.add(frame.bin);
   });
 }
@@ -437,8 +426,110 @@ function parseFrames(res, content, callback) {
 
 exports.parseFrames = parseFrames;
 
-exports.getHexHash = function(ctn, key) {
+function getHexHash(ctn, key) {
   return crypto
     .createHmac('sha256', key || 'whistle_temp_files')
     .update(ctn || '').digest('hex').toLowerCase();
+}
+
+function descSorter(a, b) {
+  return a > b ? -1 : 1;
+}
+
+var MAX_SESSIONS_FILES = 2000;
+var SAVED_SESSIONS_FILE_RE = /_([1-9]\d*)_(\d+)$/;
+var DIR_RE = /^\d{6}$/;
+
+exports.SAVED_SESSIONS_FILE_RE = SAVED_SESSIONS_FILE_RE;
+
+function getFileList(files) {
+  var result = [];
+  files.forEach(function(file, i) {
+    if (SAVED_SESSIONS_FILE_RE.test(file)) {
+      var count = RegExp.$1;
+      var time = RegExp.$2;
+      result.push({
+        filename: file.slice(0,  - time.length - count.length - 2),
+        count: +count,
+        time: +time
+      });
+    }
+  });
+  return result;
+}
+
+function readSessionsFiles(dirs, cb, result) {
+  var first = !result;
+  result = result || [];
+  var dir = dirs.pop();
+  if (!dir) {
+    return cb(null, result);
+  }
+  fs.readdir(dir, function(err, files) {
+    if (err) {
+      return cb(err);
+    }
+    var list = getFileList(files);
+    result = result.concat(list);
+    if (result.length >= MAX_SESSIONS_FILES) {
+      return cb(null, first ? result : result.slice(0, MAX_SESSIONS_FILES));
+    }
+    readSessionsFiles(dirs, cb, result);
+  });
+}
+
+exports.getSavedList = function(savedDir, cb) {
+  fs.readdir(savedDir, function(err, dirs) {
+    if (err) {
+      return cb(err);
+    }
+    if (!dirs || !dirs.length) {
+      return cb(null, []);
+    }
+    var list = [];
+    dirs.forEach(function(dir) {
+      if (DIR_RE.test(dir)) {
+        list.push(dir);
+      }
+    });
+    list = list.sort(descSorter).slice(0, 12).map(function(dir) {
+      return path.join(savedDir, dir);
+    });
+    readSessionsFiles(list, cb);
+  });
 };
+
+var SHARE_TYPE_RE = /Share$/;
+
+exports.isShareType = function(type) {
+  return SHARE_TYPE_RE.test(type);
+};
+
+function writeRetry(filepath, data, callback, retry) {
+  fse.outputFile(filepath, data, function(e) {
+    if (!e || retry) {
+      return callback(e);
+    }
+    writeRetry(filepath, data, callback, true);
+  });
+}
+
+function writeFile(filepath, data, callback) {
+  common.getStat(filepath, function(_, stat) {
+    if (!stat || !stat.isFile()) {
+      return writeRetry(filepath, data, callback);
+    }
+    callback();
+  });
+}
+
+exports.writeFile = writeFile;
+
+function writeTempFile(dir, value, callback) {
+  var filename = getHexHash(value);
+  writeFile(path.join(dir, filename), value, function(err) {
+    callback(err, filename);
+  });
+}
+
+exports.writeTempFile = writeTempFile;

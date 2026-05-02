@@ -1,11 +1,13 @@
 var qs = require('querystring');
 var iconv = require('iconv-lite');
+var net = require('net');
 var util = require('../util');
 var extend = require('extend');
-var Buffer = require('safe-buffer').Buffer;
 var mime = require('mime');
 var pluginMgr = require('../plugins');
 var config = require('../config');
+var handleWeinre = require('./weinre');
+var handleLog = require('./log');
 
 var Transform = require('pipestream').Transform;
 var WhistleTransform = util.WhistleTransform;
@@ -14,7 +16,9 @@ var ReplaceStringTransform = util.ReplaceStringTransform;
 var FileWriterTransform = util.FileWriterTransform;
 
 var JSON_RE = /{[\w\W]*}|\[[\w\W]*\]/;
-var MAX_REQ_SIZE = 1024 * 1024;
+var BUOUNDARY_RE = /boundary=(?:"([^"]+)"|([^;]+))/i;
+var MAX_REQ_SIZE = 1024 * 1024 * (config.strict ? 1 : 2); // 2MB
+var BIG_MAX_REQ_SIZE = 1024 * 1024 * 16;
 var MAX_HEADER_SIZE = 1024 * 8;
 var CRLF = Buffer.from('\r\n');
 var CR = CRLF[0];
@@ -22,12 +26,13 @@ var LF = CRLF[1];
 var LINE = Buffer.from('-')[0];
 var UPLOAD_CTN_SEP = Buffer.from('\r\n\r\n');
 var CTN_DIS = 'Content-Disposition: form-data; name="';
+var clientIpKey = config.CLIENT_IP_HEADER;
 
 var REQ_TYPE = {
   urlencoded: 'application/x-www-form-urlencoded',
   form: 'application/x-www-form-urlencoded',
   json: 'application/json',
-  xml: 'text/xml',
+  xml: 'application/xml',
   text: 'text/plain',
   upload: 'multipart/form-data',
   multipart: 'multipart/form-data',
@@ -68,7 +73,7 @@ function toMultipart(name, value) {
     value = value.content || value.value || '';
     if (value && typeof value === 'object') {
       try {
-        value = JSON.stringify(value, null, '  ');
+        value = JSON.stringify(value, null, '  ') || '';
       } catch (e) {}
     } else if (base64) {
       try {
@@ -93,7 +98,7 @@ function toMultipart(name, value) {
 /**
  * 处理请求数据
  *
- * @param req：method、body、headers，top，bottom，speed、delay，charset,timeout
+ * @param req：method、body、headers，top，bottom，speed、delay，charset, timeout
  * @param data
  */
 function handleReq(req, data, reqRules, delType) {
@@ -104,7 +109,7 @@ function handleReq(req, data, reqRules, delType) {
     newType[0] =
       !type || type.indexOf('/') != -1
         ? type
-        : REQ_TYPE[type] || REQ_TYPE.defaultType;
+        : REQ_TYPE[type] || util.lookupType(type);
     req.headers['content-type'] = util.getNewType(newType.join(';'), req.headers);
   }
   util.setCharset(req.headers, data.charset, delType.reqType, delType.reqCharset);
@@ -126,17 +131,18 @@ function handleReq(req, data, reqRules, delType) {
   var opList = util.parseHeaderReplace(req.rules.headerReplace).req;
   if (opList) {
     var host = req.headers.host;
-    var xff = req.headers[config.CLIENT_IP_HEAD];
-    var clientId = req.headers[config.CLIENT_ID_HEAD];
+    var xff = req.headers[clientIpKey];
+    var clientId = req.headers[config.CLIENT_ID_HEADER];
     util.handleHeaderReplace(req.headers, opList);
     if (req.headers.host !== host) {
       req._customHost = req.headers.host;
     }
-    if (xff !== req.headers[config.CLIENT_IP_HEAD]) {
-      req._customXFF = req.headers[config.CLIENT_IP_HEAD];
+    var newXFF = req.headers[clientIpKey];
+    if (xff !== newXFF && net.isIP(newXFF)) {
+      req._customXFF = newXFF;
     }
-    if (clientId !== req.headers[config.CLIENT_ID_HEAD]) {
-      req._customClientId = req.headers[config.CLIENT_ID_HEAD];
+    if (clientId !== req.headers[config.CLIENT_ID_HEADER]) {
+      req._customClientId = req.headers[config.CLIENT_ID_HEADER];
     }
   }
 }
@@ -146,12 +152,13 @@ function handleAuth(data, auth) {
   auth && util.setHeader(data, 'authorization', auth);
 }
 
-function handleParams(req, params, urlParams) {
+function handleParams(req, params, urlParams, enableBigData) {
   params = util.isEmptyObject(params) ? null : params;
   var delProps = util.parseDelReqBody(req);
   var hasBody;
   var buffer;
   if (params || delProps) {
+    var maxReqSize = enableBigData || util.isEnable(req, 'reqMergeBigData') ? BIG_MAX_REQ_SIZE : MAX_REQ_SIZE;
     var transform;
     var headers = req.headers;
     var isJson = util.isJSONContent(req);
@@ -164,7 +171,7 @@ function handleParams(req, params, urlParams) {
           if (!interrupt) {
             buffer = buffer ? Buffer.concat([buffer, chunk]) : chunk;
             chunk = null;
-            if (buffer.length > MAX_REQ_SIZE) {
+            if (buffer.length > maxReqSize) {
               interrupt = true;
               chunk = buffer;
               buffer = null;
@@ -204,7 +211,7 @@ function handleParams(req, params, urlParams) {
             chunk = util.toBuffer(body);
           }
           buffer = null;
-        } else if (params) {
+        } else if (!interrupt && params) {
           util.deleteProps(params, delProps);
           var data = isJson ? JSON.stringify(params) : qs.stringify(params);
           chunk = util.toBuffer(data);
@@ -214,10 +221,7 @@ function handleParams(req, params, urlParams) {
       };
       req.addZipTransform(transform);
       hasBody = true;
-    } else if (
-      util.isMultipart(req) &&
-      /boundary=(?:"([^"]+)"|([^;]+))/i.test(headers['content-type'])
-    ) {
+    } else if (util.isMultipart(req) && BUOUNDARY_RE.test(headers['content-type'])) {
       delete headers['content-length'];
       var boundaryStr = '--' + (RegExp.$1 || RegExp.$2);
       var startBoundary = Buffer.from(boundaryStr + '\r\n');
@@ -296,7 +300,7 @@ function handleParams(req, params, urlParams) {
       var getChunk = function() {
         result = null;
         while(!ended && buffer.length >= endLength) {
-          var index = util.indexOfList(buffer, boundary);
+          var index = buffer.indexOf(boundary);
           var isMatched = index !== -1;
           if (isMatched) {
             var first = buffer[index + length];
@@ -325,7 +329,7 @@ function handleParams(req, params, urlParams) {
             var name;
             if (isMatched) {
               part = buffer.slice(0, index);
-              ctnIndex = util.indexOfList(part, UPLOAD_CTN_SEP);
+              ctnIndex = part.indexOf(UPLOAD_CTN_SEP);
               if (ctnIndex !== -1) {
                 name = getName(buffer.slice(0, ctnIndex) + '');
                 if (name != null && (name in params)) {
@@ -336,7 +340,7 @@ function handleParams(req, params, urlParams) {
               pushResult(part, true);
               buffer = buffer.slice(index + endLength);
             } else {
-              ctnIndex = util.indexOfList(buffer, UPLOAD_CTN_SEP);
+              ctnIndex = buffer.indexOf(UPLOAD_CTN_SEP);
               if (ctnIndex !== -1) {
                 name = getName(buffer.slice(0, ctnIndex) + '');
                 pass = name == null || !(name in params);
@@ -445,15 +449,18 @@ function handleReplace(req, replacement) {
 }
 
 module.exports = function (req, res, next) {
+  handleWeinre(req, res);
+  handleLog(req, res);
   var reqRules = req.rules;
   var authObj = util.getAuthByRules(reqRules);
+  var reqMerge = reqRules.params;
 
   util.parseRuleJson(
     [
       reqRules.reqHeaders,
       reqRules.reqCookies,
       authObj ? null : reqRules.auth,
-      reqRules.params,
+      reqMerge,
       reqRules.reqCors,
       reqRules.reqReplace,
       reqRules.urlReplace,
@@ -482,8 +489,8 @@ module.exports = function (req, res, next) {
       if (data.headers) {
         data.headers = util.lowerCaseify(data.headers, req.rawHeaderNames);
         req._customHost = data.headers.host;
-        req._customXFF = data.headers[config.CLIENT_IP_HEAD];
-        req._customClientId = data.headers[config.CLIENT_ID_HEAD];
+        req._customXFF = data.headers[clientIpKey];
+        req._customClientId = data.headers[config.CLIENT_ID_HEADER];
         if (typeof data.headers['content-type'] !== 'string') {
           delete data.headers['content-type'];
         }
@@ -545,19 +552,19 @@ module.exports = function (req, res, next) {
             data.bottom = reqAppend;
           }
           var delType = {};
-          var queryProps = util.parseDelQuery(req, delType);
+          var dProps = util.parseDelQuery(req, delType);
+          var queryProps = dProps.query;
+          var pathProps = dProps.paths;
           handleReq(req, data, reqRules, delType);
-          handleParams(req, params, urlParams);
-          if (req._urlParams || urlReplace || queryProps || req._delQueryString) {
+          handleParams(req, params, urlParams, reqMerge && reqMerge.lineProps.enableBigData);
+          if (req._urlParams || urlReplace || pathProps || queryProps || req._delQueryString) {
             var options = req.options;
             var isUrl = util.isUrl(options.href);
             var newUrl = isUrl ? options.href : req.fullUrl;
             if (req._urlParams) {
               newUrl = util.replaceUrlQueryString(newUrl, req._urlParams);
             }
-            if (urlReplace) {
-              newUrl = util.parsePathReplace(newUrl, urlReplace);
-            }
+            newUrl = util.parsePathReplace(newUrl, urlReplace, pathProps) || newUrl;
             newUrl = util.deleteQuery(newUrl, queryProps, req._delQueryString);
             if (newUrl !== options.href) {
               if (isUrl) {
@@ -571,10 +578,10 @@ module.exports = function (req, res, next) {
           util.disableReqProps(req);
           handleReplace(req, replacement);
           var reqWriter = util.hasRequestBody(req)
-            ? util.getRuleFile(reqRules.reqWrite)
+            ? util.getWriteFilePath(reqRules.reqWrite)
             : null;
           util.getFileWriters(
-            [reqWriter, util.getRuleFile(reqRules.reqWriteRaw)],
+            [reqWriter, util.getWriteFilePath(reqRules.reqWriteRaw)],
             function (writer, rawWriter) {
               if (writer) {
                 req.addZipTransform(

@@ -1,6 +1,11 @@
+var events = require('./events');
+
 var React = require('react');
 var MenuItem = require('./menu-item');
+var Icon = require('./icon');
 require('../css/record-btn.css');
+
+
 var PAUSE_OPTION = {
   name: 'Pause Record',
   icon: 'minus-sign',
@@ -36,6 +41,9 @@ var RecordBtn = React.createClass({
     ACTION_OPTIONS[0] = PAUSE_OPTION;
     this.props.onClick(stop ? 'stop' : 'refresh');
     this.setState({});
+  },
+  componentDidMount: function () {
+    events.on('toggleNetworkState', this.onClick);
   },
   enable: function (flag) {
     var state = this.state;
@@ -86,14 +94,15 @@ var RecordBtn = React.createClass({
     var hide = this.props.hide;
     var pause = state.pause;
     var stop = state.stop;
-    var title = 'Click to ' + (stop || pause ? 'start' : 'stop') + ' record';
+    var disabled = stop || pause;
+    var title = 'Click to ' + (disabled ? 'start' : 'stop') + ' record';
 
     return (
       <div
         onMouseEnter={this.showActionOptions}
         onMouseLeave={this.hideActionOptions}
         className={
-          'w-menu-wrapper w-refresh-menu-list w-menu-auto' +
+          'w-menu-wrapper w-switch-btn w-menu-auto' +
           (state.showActionOptions ? ' w-menu-wrapper-show' : '') +
           (hide ? ' hide' : '')
         }
@@ -101,15 +110,10 @@ var RecordBtn = React.createClass({
         <a
           onClick={this.onClick}
           draggable="false"
-          className={
-            'w-scroll-menu' + (this.props.disabledRecord ? ' w-disabled' : '')
-          }
+          className={'w-scroll-menu' + (disabled ? ' w-pause' : '') + (this.props.disabledRecord ? ' w-disabled' : '')}
           title={title}
         >
-          <span
-            style={{ color: !pause && stop ? '#ccc' : '#f66' }}
-            className={'glyphicon glyphicon-' + (pause ? 'minus-sign' : 'stop')}
-          ></span>
+          <Icon name={pause ? 'minus-sign' : 'stop'} />
           Record
         </a>
         <MenuItem

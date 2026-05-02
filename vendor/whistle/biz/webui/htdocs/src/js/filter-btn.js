@@ -1,6 +1,10 @@
 var React = require('react');
+var ReactDOM = require('react-dom');
+var $ = require('jquery');
 var dataCenter = require('./data-center');
 var events = require('./events');
+var util = require('./util');
+var Icon = require('./icon');
 
 var FilterBtn = React.createClass({
   getInitialState: function () {
@@ -18,24 +22,26 @@ var FilterBtn = React.createClass({
         });
       }
     });
-    events.on('accountRulesChanged', function() {
-      self.setState({});
+    events.on('shakeSettings', function () {
+      setTimeout(function () {
+        util.shakeElem($(ReactDOM.findDOMNode(self.refs.settings)));
+      }, 100);
     });
   },
   render: function () {
     var props = this.props;
     var hide = props.hide;
     var isNetwork = props.isNetwork;
-    var className = props.backRulesFirst ||
-      (isNetwork ? this.state.hasFilterText : dataCenter.hasAccountRules) ? ' w-menu-enable' : '';
+    var className = props.backRulesFirst || (isNetwork && this.state.hasFilterText ? ' w-menu-enable' : '');
     return (
       <a
+        ref="settings"
         onClick={props.onClick}
         className={'w-settings-menu' + className}
         style={{ display: hide ? 'none' : '' }}
         draggable="false"
       >
-        <span className="glyphicon glyphicon-cog" />
+        <Icon name="cog" />
         Settings
       </a>
     );

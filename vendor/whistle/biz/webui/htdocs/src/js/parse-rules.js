@@ -1,10 +1,5 @@
-var CONTROL_RE =
-  /[\u001e\u001f\u200e\u200f\u200d\u200c\u202a\u202d\u202e\u202c\u206e\u206f\u206b\u206a\u206d\u206c]+/g;
-var MULTI_LINE_VALUE_RE =
-  /^[^\n\r\S]*(```+)[^\n\r\S]*(\S+)[^\n\r\S]*[\r\n]([\s\S]+?)[\r\n][^\n\r\S]*\1\s*$/gm;
-var LINE_END_RE = /\n|\r\n|\r/g;
-var COMMENT_RE = /#[^\r\n]*/g;
-var MULTI_TO_ONE_RE = /^\s*line`\s*[\r\n]([\s\S]*?)[\r\n]\s*`\s*?$/gm;
+var util = require('./util');
+
 var SPACE_RE = /\s+/g;
 var IP_PORT_RE = /^(?:\[([:\da-f.]+)\]|(?:\d{1,3}\.){3}\d{1,3})(?::(\d+))?$/i;
 var SCHEMA_RE = /^\/\//;
@@ -15,30 +10,6 @@ var URL_RE = /^[^@%\\/\{\}\(\)<>]*[^@%\\/\{\}\(\)<>:](?:\/|$)/;
 var OLD_FILTER_RE = /^filter:\/\/\w+:.+$/;
 var FILTER_RE = /^(lineProps|excludeFilter|includeFilter):\/\/.*$/;
 
-function removeValues(str, values, rawValues) {
-  str = str && str.replace(CONTROL_RE, '').trim();
-  if (!str || str.indexOf('```') === -1) {
-    return str;
-  }
-  return str.replace(MULTI_LINE_VALUE_RE, function (all, _, key, value) {
-    if (!values[key]) {
-      values[key] = value;
-      rawValues[key] = all.trim();
-    }
-    return '';
-  });
-}
-
-function removeComment(str) {
-  return str.replace(COMMENT_RE, '').trim();
-}
-
-
-function mergeLines(str) {
-  return str.replace(MULTI_TO_ONE_RE, function(_, line) {
-    return line.replace(SPACE_RE, ' ');
-  });
-}
 
 function isPattern(item) {
   return (
@@ -97,10 +68,7 @@ module.exports = function (str) {
       rules.push(rule);
     }
   };
-  str = removeValues(str, values, rawValues);
-  str = removeComment(str);
-  str = mergeLines(str);
-  str.split(LINE_END_RE).forEach(function (line) {
+  util.formatRules(str, values, rawValues).forEach(function (line) {
     line = line.trim();
     if (!line) {
       return;

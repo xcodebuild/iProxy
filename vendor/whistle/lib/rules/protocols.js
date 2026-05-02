@@ -31,6 +31,7 @@ var protocols = [
   'responseFor',
   'rulesFile',
   'resScript',
+  'frameScript',
   'reqDelay',
   'resDelay',
   'headerReplace',
@@ -72,6 +73,7 @@ var protocols = [
   'cipher',
   'sniCallback'
 ];
+var toolProtocols = ['log', 'weinre'];
 
 var RULE_RE = /^(?:|x|xs)(?:file|rawfile|dust|tpl|jsonp):/;
 var LOC_RE = /^locationHref:/;
@@ -84,7 +86,6 @@ var pureResProtocols = [
   'resMerge',
   'resDelay',
   'resSpeed',
-  'resType',
   'resType',
   'resCharset',
   'resCookies',
@@ -107,7 +108,7 @@ var pureResProtocols = [
   'htmlPrepend',
   'jsPrepend',
   'responseFor'
-];
+].concat(toolProtocols);
 var resProtocols = [
   'filter',
   'enable',
@@ -145,13 +146,18 @@ var aliasProtocols = {
   html: 'htmlAppend',
   js: 'jsAppend',
   reqMerge: 'params',
+  tlsOptions: 'cipher',
   css: 'cssAppend',
   excludeFilter: 'filter',
   includeFilter: 'filter',
   P: 'G'
 };
+var protocolsWithoutG = protocols.slice(1);
 var reqProtocols = protocols.filter(function (name) {
   return pureResProtocols.indexOf(name) === -1;
+}).concat(toolProtocols);
+var reqProtosWithoutG = reqProtocols.filter(function (name) {
+  return name !== 'G';
 });
 
 var RULE_PROTO_RE = /^([\w.-]+):\/\//;
@@ -186,6 +192,7 @@ exports.multiMatchs = [
   'plugin',
   'delete',
   'style',
+  'cipher',
   'trailers',
   'urlParams',
   'params',
@@ -219,8 +226,10 @@ exports.multiMatchs = [
   'resScript'
 ];
 exports.protocols = protocols;
+exports.protocolsWithoutG = protocolsWithoutG;
 exports.pureResProtocols = pureResProtocols;
 exports.reqProtocols = reqProtocols;
+exports.reqProtosWithoutG = reqProtosWithoutG;
 exports.resProtocols = resProtocols;
 exports.aliasProtocols = aliasProtocols;
 
@@ -256,12 +265,6 @@ function resetRules(rules) {
 }
 
 exports.resetRules = resetRules;
-
-function isResRule(protocol) {
-  return resProtocols.indexOf(protocol) != -1;
-}
-
-exports.isResRule = isResRule;
 
 function isWebProtocol(protocol) {
   return protocol == 'http:' || protocol == 'https:';

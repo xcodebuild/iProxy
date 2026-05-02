@@ -5,6 +5,7 @@ var NetworkModal = require('./network-modal');
 var storage = require('./storage');
 var events = require('./events');
 var workers = require('./workers');
+var message = require('./message');
 
 var updateWorkers = workers.updateWorkers;
 var createCgi = createCgiObj.createCgi;
@@ -25,13 +26,13 @@ var setDataCenter = NetworkModal.setDataCenter;
 var networkModal = new NetworkModal(dataList);
 var curServerInfo;
 var initialDataPromise, initialData, startedLoad;
-var lastPageLogTime = -2;
+var lastPageLogTime = -4;
 var lastSvrLogTime = -2;
 var curLogId;
 var curSvrLogId;
 var dataIndex = 1000000;
-var MAX_PATH_LENGTH = 1024;
-var MAX_LOG_LENGTH = 360;
+var MAX_PATH_LEN = 1024;
+var MAX_LOG_LEN = 120;
 var lastRowId;
 var endId;
 var hashFilterObj;
@@ -39,7 +40,7 @@ var clearNetwork;
 var inited;
 var logId;
 var port;
-var pageId;
+var clientId;
 var account;
 var dataKeys = [];
 var dumpCount = 0;
@@ -57,6 +58,9 @@ var toolTabList = [];
 var comTabList = [];
 var pluginColumns = [];
 var webWorkerList = [];
+var reqIndex = 0;
+var composeDataMap = {};
+var rulesMFlag = '';
 var DEFAULT_CONF = {
   timeout: TIMEOUT,
   xhrFields: {
@@ -64,10 +68,30 @@ var DEFAULT_CONF = {
   },
   data: {}
 };
+var composerItem;
+var manualLogout; // 手动登出
+var hasUpdater;
+var HAS_RULES_KEY = window.Symbol ? window.Symbol('hasRules') : '__hasRules';
+var clearedLogs;
+var clearedSvrLogs;
+
+exports.HAS_RULES_KEY = HAS_RULES_KEY;
+exports.enabledRulesCount = 0;
+exports.setComposerItem = function(item) {
+  composerItem = item;
+};
+
+exports.checkPluginUpdates = function (plugin, callback) {
+  if (!exports.whistleId) {
+    return callback();
+  }
+  // TODO: 从服务端检查插件更新
+  callback(true);
+};
+
 exports.clientIp = '127.0.0.1';
 exports.MAX_INCLUDE_LEN = MAX_INCLUDE_LEN;
 exports.MAX_EXCLUDE_LEN = MAX_EXCLUDE_LEN;
-exports.MAX_LOG_LENGTH = MAX_LOG_LENGTH - 20;
 exports.changeLogId = function (id) {
   logId = id;
 };
@@ -81,10 +105,12 @@ exports.setDumpCount = function (count) {
 };
 
 exports.clearLogList = function() {
+  clearedLogs = true;
   logList = [];
 };
 
 exports.clearSvgLogList = function() {
+  clearedSvrLogs = true;
   svrLogList = [];
 };
 
@@ -96,20 +122,32 @@ exports.isOnlyViewOwnData = function () {
   return onlyViewOwnData;
 };
 
+function removeFilterComments(text) {
+  return text.replace(COMMENT_RE_G, ' ').trim();
+}
+
 exports.filterIsEnabled = function () {
   if (onlyViewOwnData) {
     return true;
   }
   var settings = getFilterText();
-  if (
-    !settings ||
-    (settings.disabledFilterText && settings.disabledExcludeText)
-  ) {
+  if (!settings) {
     return;
   }
-  var text = !settings.disabledFilterText && settings.filterText.trim();
-  return text || (!settings.disabledExcludeText && settings.excludeText.trim());
+  if (!settings.disabledFilterText && removeFilterComments(settings.filterText)) {
+    return true;
+  }
+  return !settings.disabledExcludeText && removeFilterComments(settings.excludeText);
 };
+
+function updateRulesInfo(data) {
+  var enabledCount = data.enabledCount || 0;
+  exports.backRulesFirst = data.backRulesFirst;
+  if (exports.enabledRulesCount !== enabledCount) {
+    exports.enabledRulesCount = enabledCount;
+    events.trigger('enabledRulesCountChange', enabledCount);
+  }
+}
 
 function compareFilter(filter) {
   if (filter !== hashFilterObj) {
@@ -234,6 +272,7 @@ function getNetworkColumns() {
 exports.getNetworkColumns = getNetworkColumns;
 
 var FILTER_TYPES_RE = /^(m|i|h|b|c|d|H):/;
+var COMMENT_RE_G = /(?:^\s*#[^\r\n]*|\s#[^\s]*)/mg;
 var FILTER_TYPES = {
   m: 'method',
   i: 'ip',
@@ -272,7 +311,7 @@ function resolveFilterText(text) {
     return result;
   }
   var pattern;
-  text.split(/\s+/).forEach(function (line) {
+  removeFilterComments(text).split(/\s+/).forEach(function (line) {
     if (FILTER_TYPES_RE.test(line)) {
       var type = FILTER_TYPES[RegExp.$1];
       var not = line[2] === '!';
@@ -388,6 +427,7 @@ var GET_CONF = $.extend(
 var cgi = createCgiObj(
   {
     getData: 'cgi-bin/get-data',
+    getLogs: 'cgi-bin/log/get',
     getInitial: 'cgi-bin/init'
   },
   GET_CONF
@@ -409,9 +449,13 @@ function toLowerCase(str) {
     .toLowerCase();
 }
 
-exports.certs = createCgiObj(
+var certs = createCgiObj(
   {
     remove: 'cgi-bin/certs/remove',
+    active: {
+      url:'cgi-bin/certs/active',
+      contentType: 'application/json'
+    },
     upload: {
       url: 'cgi-bin/certs/upload',
       contentType: 'application/json'
@@ -423,6 +467,24 @@ exports.certs = createCgiObj(
   },
   POST_CONF
 );
+
+exports.certs = certs;
+
+exports.uploadCerts = function (data, cb) {
+  if (typeof data !== 'string') {
+    data = JSON.stringify(data);
+  }
+  return certs.upload(data, function (data, xhr) {
+    if (!data) {
+      return util.showSystemError(xhr);
+    }
+    if (typeof cb === 'function') {
+      cb(data);
+    } else {
+      events.trigger('showCustomCerts');
+    }
+  });
+};
 
 exports.values = createCgiObj(
   {
@@ -462,10 +524,26 @@ exports.plugins = createCgiObj(
   POST_CONF
 );
 
+exports.installPluginsFromService = function (plugins, registry) {
+  if (!plugins || !exports.whistleId) {
+    return;
+  }
+  plugins = util.isString(plugins) ? plugins.trim().split(/\s*,\s*/) : (Array.isArray(plugins) ? plugins : []);
+  plugins = plugins.map(function(p) {
+    return p.indexOf('/') === -1 ? exports.whistleId + '/' + p : p;
+  }).join();
+  if (!plugins) {
+    return;
+  }
+  exports.plugins.installPlugins({
+    registry: /^https?:\/\/[^/]/.test(registry) ? registry : '',
+    plugins: plugins
+  }, util.showHandlePluginInfo);
+};
+
 exports.rules = createCgiObj(
   {
     disableAllRules: 'cgi-bin/rules/disable-all-rules',
-    accountRules: 'cgi-bin/rules/account',
     recycleList: {
       type: 'get',
       url: 'cgi-bin/rules/recycle/list'
@@ -478,6 +556,10 @@ exports.rules = createCgiObj(
     moveTo: {
       mode: 'chain',
       url: 'cgi-bin/rules/move-to'
+    },
+    getEnabledRules: {
+      url: 'cgi-bin/rules/enabled',
+      mode: 'cancel'
     },
     list: {
       type: 'get',
@@ -503,43 +585,56 @@ exports.rules = createCgiObj(
   POST_CONF
 );
 
-exports.log = createCgiObj(
+var COMPOSE_CONF = $.extend(
   {
-    set: 'cgi-bin/log/set'
+    type: 'post',
+    contentType: 'application/json',
+    processData: false
   },
-  POST_CONF
-);
-
-var compose = createCgiObj(
-  { compose: 'cgi-bin/composer' },
-  $.extend(
-    {
-      type: 'post',
-      contentType: 'application/json',
-      processData: false
-    },
     DEFAULT_CONF
-  )
-).compose;
+  );
 
-exports.compose = function (data, cb, options) {
+function createCompose(cancel) {
+  return createCgiObj( {
+    _: {
+      url: 'cgi-bin/composer',
+      mode: cancel ? 'cancel' : null
+    }
+  }, COMPOSE_CONF)._;
+}
+
+exports.createCompose = createCompose;
+
+var composeParallel = createCompose();
+var composeInner = createCompose(true);
+
+function handleCompose(data, cb, options, handler) {
   if (typeof data !== 'string') {
     data = JSON.stringify(data);
   }
-  return compose(data, cb, options);
+  return handler(data, cb, options);
+}
+
+exports.composeInner = function (data, cb, options) {
+  data.reqId = getReqId();
+  return handleCompose(data, cb, options, composeInner);
 };
 
-window.compose = exports.compose;
+exports.createComposeInterrupt = function () {
+  var composeInterrupt = createCompose(true);
+  return function (data, cb, options) {
+    return handleCompose(data, cb, options, composeInterrupt);
+  };
+};
+
+exports.compose = function (data, cb, options) {
+  return handleCompose(data, cb, options, composeParallel);
+};
 
 $.extend(
   exports,
   createCgiObj(
     {
-      composer: {
-        url: 'cgi-bin/composer',
-        mode: 'cancel'
-      },
-      compose2: 'cgi-bin/composer',
       interceptHttpsConnects: 'cgi-bin/intercept-https-connects',
       enableHttp2: 'cgi-bin/enable-http2',
       abort: 'cgi-bin/abort',
@@ -548,12 +643,26 @@ $.extend(
         url: 'cgi-bin/add-rules-values',
         contentType: 'application/json'
       },
-      setIPv6Only: 'cgi-bin/set-ipv6-only',
       createTempFile: {
-        url: 'cgi-bin/sessions/create-temp-file',
+        url: 'cgi-bin/temp/create',
         contentType: 'application/json'
       },
-      setDnsOrder: 'cgi-bin/set-dns-order'
+      saveSessions: {
+        url: 'cgi-bin/saved/save',
+        contentType: 'application/json'
+      },
+      removeSavedSessions: {
+        url: 'cgi-bin/saved/remove',
+        contentType: 'application/json'
+      },
+      setDnsOrder: 'cgi-bin/set-dns-order',
+      save: {
+        url: 'cgi-bin/service/save',
+        contentType: 'application/json'
+      },
+      login: 'cgi-bin/service/login',
+      logout: 'cgi-bin/service/logout',
+      updateClient: 'cgi-bin/update'
     },
     POST_CONF
   )
@@ -566,12 +675,39 @@ $.extend(
       checkUpdate: 'cgi-bin/check-update',
       importRemote: 'cgi-bin/import-remote',
       getHistory: 'cgi-bin/history',
-      getCookies: 'cgi-bin/sessions/cookies',
-      getTempFile: 'cgi-bin/sessions/get-temp-file'
+      getCookies: 'cgi-bin/cookies',
+      getTempFile: 'cgi-bin/temp/get',
+      getComposeData: 'cgi-bin/compose-data',
+      getSavedList: 'cgi-bin/saved/list',
+      getSavedSessions: 'cgi-bin/saved/sessions'
     },
     GET_CONF
   )
 );
+
+var getSavedList = exports.getSavedList;
+var savedListIndex = 0;
+var loadedSavedListIndex = -1;
+var saveDataTimer;
+function getSavedListSafe (cb) {
+  var index = ++savedListIndex;
+  clearTimeout(saveDataTimer);
+  saveDataTimer = null;
+  return getSavedList(function (data) {
+    ++loadedSavedListIndex;
+    if (index < loadedSavedListIndex) {
+      return;
+    }
+    if (index < savedListIndex || (data && !data.ec)) {
+      return data && !data.ec && cb(data.list);
+    }
+    saveDataTimer = saveDataTimer || setTimeout(function() {
+      getSavedListSafe(cb);
+    }, 160);
+  });
+}
+
+exports.getSavedListSafe = getSavedListSafe;
 
 exports.socket = $.extend(
   createCgiObj(
@@ -624,6 +760,57 @@ exports.getAccount = function() {
   return account;
 };
 
+function filterComposeData(key) {
+  return composeDataMap[key];
+}
+
+function getComposeData(keys, cb) {
+  return exports.getComposeData({ ids: keys.join() }, cb);
+}
+
+var INTERVAL = 1500;
+
+function loadComposeData(keys) {
+  var len = keys && keys.length;
+  if (len) {
+    keys = keys.filter(filterComposeData);
+    len = keys.length;
+  } else {
+    keys = Object.keys(composeDataMap);
+    len = keys.length;
+  }
+  if (!len) {
+    return setTimeout(loadComposeData, INTERVAL);
+  }
+  var curKeys = keys.slice(0, 5);
+  keys = keys.slice(5);
+  getComposeData(curKeys, function (data) {
+    if (data) {
+      curKeys.forEach(function(key) {
+        var base64 = data[key];
+        if (base64 === '') {
+          return;
+        }
+        var list = composeDataMap[key];
+        if (base64 == null) {
+          delete composeDataMap[key];
+        }
+        list && list.forEach(function(cb) {
+          cb(base64 || '');
+        });
+      });
+    }
+    setTimeout(function() {
+      loadComposeData(keys);
+    }, INTERVAL);
+  });
+}
+
+function resetLogInfo(data, hasClearedSvrLogs) {
+  curSvrLogId = data.curSvrLogId;
+  lastSvrLogTime = hasClearedSvrLogs ? curSvrLogId : (data.lastSvrLogId || lastSvrLogTime);
+}
+
 exports.getInitialData = function (callback) {
   if (!initialDataPromise) {
     initialDataPromise = $.Deferred();
@@ -633,43 +820,36 @@ exports.getInitialData = function (callback) {
         if (!data) {
           return setTimeout(load, 1000);
         }
+        loadComposeData();
         exports.isCapture = !!data.interceptHttpsConnects;
         var server = data.server;
         port = server && server.port;
         account = server && server.account;
-        updateCertStatus(data);
-        exports.enablePluginMgr = data.epm;
+        updateWhistleId(server);
+        hasUpdater = server && server.hasUpdater;
+        exports.version = server && server.version;
         exports.supportH2 = data.supportH2;
         exports.isWin = server && server.isWin;
-        exports.backRulesFirst = data.rules.backRulesFirst;
+        updateRulesInfo(data.rules);
         exports.custom1 = data.custom1;
         exports.custom2 = data.custom2;
         exports.custom1Key = data.custom1Key;
         exports.custom2Key = data.custom2Key;
-        exports.hasAccountRules = data.hasARules;
         initialData = data;
-        pageId = data.clientId;
-        DEFAULT_CONF.data.clientId = pageId;
-        if (data.lastLogId) {
-          lastPageLogTime = data.lastLogId;
-        }
-        if (data.lastSvrLogId) {
-          lastSvrLogTime = data.lastSvrLogId;
-        }
-        curLogId = data.curLogId;
-        curSvrLogId = data.curSvrLogId;
+        clientId = data.clientId;
+        DEFAULT_CONF.data.clientId = clientId;
+        resetLogInfo(data);
         if (data.lastDataId) {
           lastRowId = data.lastDataId;
         }
-        exports.pluginsRoot = data.pluginsRoot;
         exports.whistleName = data.wName;
         exports.account = data.account;
         exports.disableInstaller = data.disableInstaller;
         exports.upload = createCgiObj(
           {
-            importSessions: 'cgi-bin/sessions/import?clientId=' + pageId,
-            importRules: 'cgi-bin/rules/import?clientId=' + pageId,
-            importValues: 'cgi-bin/values/import?clientId=' + pageId
+            importSessions: 'cgi-bin/sessions/import?clientId=' + clientId,
+            importRules: 'cgi-bin/rules/import?clientId=' + clientId,
+            importValues: 'cgi-bin/values/import?clientId=' + clientId
           },
           $.extend(
             {
@@ -687,6 +867,7 @@ exports.getInitialData = function (callback) {
         if (data.clientIp) {
           exports.clientIp = data.clientIp;
         }
+        updateCertStatus(data);
       });
     };
     load();
@@ -743,7 +924,8 @@ function hasPluginColsChange(curCols, oldClos) {
   for (var i = 0; i < len; i++) {
     var cur = curCols[i];
     var old = oldClos[i];
-    if (cur.title !== old.title || cur.key !== old.key || cur.width !== old.width) {
+    if (cur.title !== old.title || cur.key !== old.key ||
+      cur.iconKey !== old.iconKey || cur.width !== old.width) {
       return true;
     }
   }
@@ -826,6 +1008,25 @@ function getStatus(item) {
   return result.join('-');
 }
 
+function getComposerItem() {
+  var elem = document.querySelector('#whistleComposerFrames');
+  return elem && elem.offsetWidth ? composerItem : null;
+}
+
+function getStartLogTime() {
+  if (!exports.pauseConsoleRefresh && logList.length < MAX_LOG_LEN) {
+    return (clearedLogs && curLogId) || lastPageLogTime;
+  }
+  return -1;
+}
+
+function getStartSvrLogTime() {
+  if (!exports.pauseServerLogRefresh && svrLogList.length < MAX_LOG_LEN) {
+    return (clearedSvrLogs && curSvrLogId) || lastSvrLogTime;
+  }
+  return -1;
+}
+
 var hiddenTime = Date.now();
 function startLoadData() {
   if (startedLoad) {
@@ -847,13 +1048,13 @@ function startLoadData() {
     }
 
     var startTime = getStartTime();
-    var len = logList.length;
-    var svrLen = svrLogList.length;
-    var startLogTime = -1;
-    var startSvrLogTime = -1;
+    var gettingLogs;
     var pendingIds = [];
     var statusIds = [];
     var tunnelIds = [];
+    var hasClearedLogs = clearedLogs;
+    var hasClearedSvrLogs = clearedSvrLogs;
+
     dataList.forEach(function (item) {
       if (!item.endTime && !item.lost) {
         pendingIds.push(item.id);
@@ -864,18 +1065,8 @@ function startLoadData() {
         tunnelIds.push(item.id);
       }
     });
-    var clearedLogs = exports.clearedLogs;
-    var clearedSvrLogs = exports.clearedSvrLogs;
-    exports.clearedLogs = exports.clearedSvrLogs = false;
-    if (!exports.pauseConsoleRefresh && len < MAX_LOG_LENGTH) {
-      startLogTime = (clearedLogs && curLogId) || lastPageLogTime;
-    }
 
-    if (!exports.pauseServerLogRefresh && svrLen < MAX_LOG_LENGTH) {
-      startSvrLogTime =  (clearedSvrLogs && curSvrLogId) || lastSvrLogTime;
-    }
-
-    var curActiveItem = networkModal.getActive();
+    var curActiveItem = getComposerItem() || networkModal.getActive();
     var curFrames = curActiveItem && curActiveItem.frames;
     var lastFrameId, curReqId;
     if (curFrames && !curActiveItem.pauseRecordFrames) {
@@ -888,9 +1079,14 @@ function startLoadData() {
       }
     }
     var count = inited ? 20 : networkModal.getDisplayCount();
+    var composerReqId = exports.curComposerReqId;
+    var logOpts = {
+      startLogTime: exports.stopConsoleRefresh ? -3 : getStartLogTime(),
+      logId: logId || '',
+      count: count || 20
+    };
     var options = {
-      startLogTime: exports.stopConsoleRefresh ? -3 : startLogTime,
-      startSvrLogTime: exports.stopServerLogRefresh ? -3 : startSvrLogTime,
+      startSvrLogTime: exports.stopServerLogRefresh ? -3 : getStartSvrLogTime(),
       ids: pendingIds.join(),
       status: statusIds.join(),
       startTime: startTime,
@@ -898,14 +1094,41 @@ function startLoadData() {
       lastRowId: inited || !count ? lastRowId : undefined,
       curReqId: curReqId,
       lastFrameId: lastFrameId,
-      logId: logId || '',
       count: count || 20,
-      tunnelIds: tunnelIds
+      tunnelIds: tunnelIds,
+      composerReqId: composerReqId
     };
     inited = true;
     $.extend(options, hashFilterObj);
     if (onlyViewOwnData) {
       options.ip = 'self';
+    }
+    if (!gettingLogs) {
+      cgi.getLogs(logOpts, function (data) {
+        gettingLogs = false;
+        if (!data) {
+          return;
+        }
+        var logLen = data.log.length;
+        if (clearedLogs) {
+          if (hasClearedLogs) {
+            clearedLogs = false;
+          } else {
+            logLen = 0;
+          }
+        }
+        if (logLen) {
+          logList.push.apply(logList, data.log);
+          lastPageLogTime = data.log[logLen - 1].id;
+        }
+        if (logList.length) {
+          logCallbacks.forEach(function (cb) {
+            cb(logList, svrLogList);
+          });
+        }
+        curLogId = data.curLogId;
+        lastPageLogTime = hasClearedLogs ? curLogId : (data.lastLogId || lastPageLogTime);
+      });
     }
     cgi.getData(options, function (data) {
       var hasNewData = data && data.data && data.data.hasNew;
@@ -913,6 +1136,9 @@ function startLoadData() {
       updateServerInfo(data);
       if (!data || data.ec !== 0) {
         return;
+      }
+      if (Array.isArray(data.installErrors) && data.installErrors.length) {
+        message.error(data.installErrors.join('\n'));
       }
       var preCapture = exports.isCapture;
       if (preCapture === 0) {
@@ -930,35 +1156,31 @@ function startLoadData() {
       var server = data.server;
       port = server && server.port;
       account = server && server.account;
-      exports.pluginsRoot = data.pluginsRoot;
+      hasUpdater = server && server.hasUpdater;
+      updateWhistleId(server);
       exports.whistleName = data.wName;
       exports.account = data.account;
       exports.disableInstaller = data.disableInstaller;
-      updateCertStatus(data);
-      exports.enablePluginMgr = data.epm;
       exports.supportH2 = data.supportH2;
+      exports.version = server && server.version;
       exports.isWin = server && server.isWin;
-      exports.backRulesFirst = data.backRulesFirst;
+      updateRulesInfo(data);
       exports.custom1 = data.custom1;
       exports.custom2 = data.custom2;
       exports.custom1Key = data.custom1Key;
       exports.custom2Key = data.custom2Key;
-      if (exports.hasAccountRules !== data.hasARules) {
-        exports.hasAccountRules = data.hasARules;
-        events.trigger('accountRulesChanged');
-      }
       if (options.dumpCount > 0) {
         dumpCount = 0;
       }
       if (data.clientIp) {
         exports.clientIp = data.clientIp;
       }
+      updateCertStatus(data);
       emitRulesChanged(data);
       emitValuesChanged(data);
       directCallbacks.forEach(function (cb) {
         cb(data);
       });
-      var len = data.log.length;
       var svrLen = data.svrLog.length;
       var _reqTabList = reqTabList;
       var _resTabList = resTabList;
@@ -1052,30 +1274,35 @@ function startLoadData() {
         updateWorkers(webWorkerList);
       }
       disabledAllPlugins = data.disabledAllPlugins;
-      if (len || svrLen) {
-        if (len) {
-          logList.push.apply(logList, data.log);
-          lastPageLogTime = data.log[len - 1].id;
+      if (clearedSvrLogs) {
+        if (hasClearedSvrLogs) {
+          clearedSvrLogs = false;
+        } else {
+          svrLen = 0;
         }
+      }
+      if (svrLen) {
+        svrLogList.push.apply(svrLogList, data.svrLog);
+        lastSvrLogTime = data.svrLog[svrLen - 1].id;
+      }
 
-        if (svrLen) {
-          svrLogList.push.apply(svrLogList, data.svrLog);
-          lastSvrLogTime = data.svrLog[svrLen - 1].id;
-        }
-
+      if (svrLogList.length) {
         logCallbacks.forEach(function (cb) {
           cb(logList, svrLogList);
         });
       }
-      if (data.lastLogId) {
-        lastPageLogTime = data.lastLogId;
-      }
-      if (data.lastSvrLogId) {
-        lastSvrLogTime = data.lastSvrLogId;
-      }
+      resetLogInfo(data, hasClearedSvrLogs);
       data = data.data;
       var hasChanged;
       var framesLen = data.frames && data.frames.length;
+      var time = data.composerTime;
+
+      if (time && composerReqId === exports.curComposerReqId && exports.onTakeTimeChange) {
+        if (time.endTime) {
+          exports.curComposerReqId = undefined;
+        }
+        exports.onTakeTimeChange(time);
+      }
 
       if (framesLen) {
         curActiveItem.lastFrameId = data.frames[framesLen - 1].frameId;
@@ -1135,6 +1362,7 @@ function startLoadData() {
         return;
       }
       var ids = data.newIds;
+      var curHLList = [];
       data = data.data;
       dataList.forEach(function (item) {
         var newItem = data[item.id];
@@ -1166,6 +1394,10 @@ function startLoadData() {
           var item = data[id];
           if (item) {
             workers.postMessage(item);
+            if (item.fc) {
+              curHLList.push(item);
+              item.highlight = true;
+            }
             if (
               (!excludeFilter || !checkFilter(item, excludeFilter)) &&
               (!includeFilter || checkFilter(item, includeFilter))
@@ -1176,6 +1408,13 @@ function startLoadData() {
             }
           }
         });
+        if (curHLList.length) {
+          setTimeout(function() {
+            curHLList.forEach(function(item) {
+              delete item.highlight;
+            });
+          }, 800);
+        }
       }
       dataCallbacks.forEach(function (cb) {
         cb(networkModal);
@@ -1198,39 +1437,49 @@ function getRawHeaders(headers, rawHeaderNames) {
 
 exports.getRawHeaders = getRawHeaders;
 
-window.getWhistlePageId = function () {
-  return pageId;
+window.getWhistlePageId = window.getWhistleClientId = function () {
+  return clientId;
 };
 
-function getIframe(win) {
-  if (win.parent !== window) {
-    return;
-  }
-  var list = document.querySelectorAll('iframe');
-  for (var i = 0, len = list.length; i < len; i++) {
-    var iframe = list[i];
-    if (iframe.contentWindow === win) {
-      return iframe;
-    }
-  }
+function getReqId() {
+  return clientId + '/' + (reqIndex++);
 }
 
-window.disableWhistleDarkModeIframe = function(win) {
-  var iframe = getIframe(win);
-  if (iframe) {
-    iframe.setAttribute('disabledDarkMode', '1');
+exports.getReqId = getReqId;
+
+exports.onComposeData = function(reqId, cb) {
+  var index = util.isString(reqId) && typeof cb === 'function' ? reqId.indexOf(clientId + '/') : -1;
+  if (index) {
+    return;
   }
+  index = reqId.substring(clientId.length + 1);
+  if (/[^\d]/.test(index) || !(index >= 0 && index < reqIndex)) {
+    return;
+  }
+  var list = composeDataMap[reqId] || [];
+  if (list.indexOf(cb) === -1) {
+    list.push(cb);
+  }
+  composeDataMap[reqId] = list;
+  return true;
 };
 
-window.enableWhistleDarkModeIframe = function(win) {
-  var iframe = getIframe(win);
-  if (iframe) {
-    iframe.removeAttribute('disabledDarkMode');
+exports.offComposeData = function(reqId, cb) {
+  var list = composeDataMap[reqId];
+  if (list) {
+    if (cb) {
+      var index = list.indexOf(cb);
+      if (index !== -1) {
+        list.splice(index, 1);
+      }
+    } else {
+      delete composeDataMap[reqId];
+    }
   }
 };
 
 exports.getPageId = function () {
-  return pageId;
+  return clientId;
 };
 
 function isFrames(item) {
@@ -1328,6 +1577,131 @@ function setStyle(item) {
   }
 }
 
+var APPS = 'alipay,baidu,brave,chrome,mac,android,ipad,iphone,windows,crmo,crios,cicc,edge,electron,firefox,huawei,opera,jd,pdd,qq,safari,uc,wework,wechat,dingtalk,weibo'.split(',');
+var APP_RE = /w[ex]work\/|Alipay|Brave\/|%e6%b7%98%e5%ae%9d\/|opera|%e6%94%af%e4%bb%98%e5%ae%9d\/|%e5%a4%a9%e7%8c%ab\/|uc%e6%b5%8f%e8%a7%88%e5%99%a8\/|pinduoduo|%e9%92%89%e9%92%89\/|UCBrowser\/|dingtalk|jd(?:4|mall)|weibo|tmall|qq\/|Firefox\/|FxiOS\/|ciccwm\/|WhistleClient\/|edg(?:e|ios|a)?\/|zztapp|baidu/i;
+var COMMON_APP_RE = /MicroMessenger|taobao|amap_sdk|Electron\/|CFNetwork\/|cronet/i;
+
+function getAppName(ua) {
+  var result = ua && (APP_RE.exec(ua) || COMMON_APP_RE.exec(ua));
+  if (!result) {
+    if (ua) {
+      if (/\b(?:chrome|crmo|crios)\//i.test(ua) || /^Chrome\s/.test(ua)) {
+        return 'chrome';
+      }
+      if (/Version\//.test(ua) && /Safari\//.test(ua)) {
+        return 'safari';
+      }
+      if (/Windows NT|Microsoft NCSI|Win64|Win32|Windows 10|Windows 11/i.test(ua)) {
+        return 'windows';
+      }
+      if (/android/i.test(ua)) {
+        return 'android';
+      }
+      if (/HarmonyOS|HMSCore|huawei/i.test(ua)) {
+        return 'huawei';
+      }
+      if (/iPad/i.test(ua) || (/Macintosh/i.test(ua) && /Mobile/i.test(ua))) {
+        return 'ipad';
+      }
+      if (/iPhone|iPod/i.test(ua)) {
+        return 'iphone';
+      }
+      if (/Macintosh/i.test(ua)) {
+        return 'mac';
+      }
+    }
+    return 'browser';
+  }
+  result = result[0].toLowerCase();
+  switch (result) {
+  case 'micromessenger':
+    return 'wechat';
+  case 'brave/':
+    return 'brave';
+  case 'qq/':
+    return 'qq';
+  case 'firefox/':
+  case 'fxios/':
+    return 'firefox';
+  case 'cfnetwork/':
+    return 'cfnetwork';
+  case 'ciccwm/':
+  case 'zztapp':
+    return 'cicc';
+  case 'wework/':
+  case 'wxwork/':
+    return 'wework';
+  case 'amap_sdk':
+    return 'amap';
+  case '%e6%94%af%e4%bb%98%e5%ae%9d/':
+    return 'alipay';
+  case 'electron/':
+    return 'electron';
+  case 'whistleclient/':
+    return 'whistle';
+  case '%e6%b7%98%e5%ae%9d/':
+    return 'taobao';
+  case '%e5%a4%a9%e7%8c%ab/':
+    return 'tmall';
+  case '%e9%92%89%e9%92%89/':
+    return 'dingtalk';
+  case 'ucbrowser/':
+  case 'uc%e6%b5%8f%e8%a7%88%e5%99%a8/':
+    return 'uc';
+  case 'pinduoduo':
+    return 'pdd';
+  case 'jd4':
+  case 'jdmall':
+    return 'jd';
+  case 'edg/':
+  case 'edge/':
+  case 'edga/':
+  case 'edgios/':
+    return 'edge';
+  default:
+    return result;
+  }
+}
+
+function setAppName(item) {
+  if (item.fc) {
+    item.appName = 'whistle';
+    return;
+  }
+  var appName = item.appName;
+  if (!appName || !APPS.indexOf(appName) !== -1) {
+    item.appName = getAppName(item.req.headers['user-agent']);
+  }
+}
+
+var NOT_BOLD_RULES = {
+  plugin: 1,
+  pac: 1,
+  reqWrite: 1,
+  resWrite: 1,
+  reqWriteRaw: 1,
+  resWriteRaw: 1,
+  responseFor: 1,
+  style: 1,
+  G: 1,
+  ignore: 1
+};
+
+function hasRules(rules) {
+  var keys = rules && Object.keys(rules);
+  if (keys && keys.length) {
+    for (var i = 0, len = keys.length; i < len; i++) {
+      var rule = rules[keys[i]];
+      var enable = rule && rule.list && rule.list.length === 1 && rule.list[0].matcher;
+      if (rule && !NOT_BOLD_RULES[keys[i]] && enable !== 'enable://capture' &&  enable !== 'enable://intercept') {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 function setReqData(item) {
   var url = item.url;
   var req = item.req;
@@ -1336,7 +1710,9 @@ function setReqData(item) {
   var end = item.endTime;
   var defaultValue = end ? '' : '-';
   var resHeaders = res.headers || '';
+  setAppName(item);
   item.hostIp = res.ip || defaultValue;
+  item[HAS_RULES_KEY] = item[HAS_RULES_KEY] || hasRules(item.rules);
   item.clientIp = req.ip || '127.0.0.1';
   item.date = item.date || util.toLocaleString(new Date(item.startTime));
   item.clientPort = req.port;
@@ -1402,8 +1778,8 @@ function setReqData(item) {
     } else {
       item.path = url;
     }
-    if (item.path.length > MAX_PATH_LENGTH) {
-      item.shortPath = item.path.substring(0, MAX_PATH_LENGTH) + '...';
+    if (item.path.length > MAX_PATH_LEN) {
+      item.shortPath = item.path.substring(0, MAX_PATH_LEN) + '...';
     }
   } else if (item.useH2) {
     item.protocol = 'H2';
@@ -1437,6 +1813,7 @@ exports.addNetworkList = function (list) {
   }
   var hasData;
   var curNewIdList = [];
+  var curNewList = [];
   list.forEach(function (data) {
     if (
       !data ||
@@ -1471,14 +1848,23 @@ exports.addNetworkList = function (list) {
       });
     }
     data.lost = true;
+    data.importedData = true;
+    data.highlight = true;
     data.id = data.startTime + '-' + ++dataIndex;
     setReqData(data);
     dataList.push(data);
     curNewIdList.push(data.id);
+    curNewList.push(data);
     hasData = true;
     workers.postMessage(data);
   });
   if (hasData) {
+    events.trigger('autoRefreshNetwork');
+    setTimeout(function() {
+      curNewList.forEach(function(item) {
+        delete item.highlight;
+      });
+    }, 800);
     exports.curNewIdList = curNewIdList;
     dataCallbacks.forEach(function (cb) {
       cb(networkModal);
@@ -1524,9 +1910,18 @@ function updateServerInfo(data) {
   if (exports.setServerInfo) {
     exports.setServerInfo(data);
   }
-  if (curServerInfo && curServerInfo.strictMode != data.strictMode) {
-    curServerInfo.strictMode = data.strictMode;
-    events.trigger('updateStrictMode');
+  if (curServerInfo) {
+    if (curServerInfo.strictMode != data.strictMode) {
+      curServerInfo.strictMode = data.strictMode;
+      events.trigger('updateStrictMode');
+    }
+    if (curServerInfo.version !== data.version || curServerInfo.latestVersion !== data.latestVersion
+      || curServerInfo.latestClientVersion !== data.latestClientVersion) {
+      curServerInfo.version = data.version;
+      curServerInfo.latestVersion = data.latestVersion;
+      curServerInfo.latestClientVersion = data.latestClientVersion;
+      events.trigger('updateVersion', data);
+    }
   }
   if (
     curServerInfo &&
@@ -1542,6 +1937,8 @@ function updateServerInfo(data) {
     curServerInfo.port == data.port &&
     curServerInfo.host == data.host &&
     curServerInfo.pid == data.pid &&
+    curServerInfo.whistleId == data.whistleId &&
+    curServerInfo.ipv6Only == data.ipv6Only &&
     curServerInfo.ipv4.sort().join() == data.ipv4.sort().join() &&
     curServerInfo.ipv6.sort().join() == data.ipv6.sort().join()
   ) {
@@ -1559,7 +1956,15 @@ exports.isDiableCustomCerts = function () {
 };
 
 exports.isMultiEnv = function () {
-  return curServerInfo && curServerInfo.multiEnv;
+  return curServerInfo && (curServerInfo.multiEnv || curServerInfo.notHTTPS);
+};
+
+exports.isPureProxy = function () {
+  return curServerInfo && curServerInfo.pureProxy;
+};
+
+exports.needEnableHttps = function () {
+  return !exports.isMultiEnv() &&  !exports.isCapture;
 };
 
 exports.isStrictMode = function () {
@@ -1634,11 +2039,28 @@ exports.stopServerLogRecord = function (stop) {
   exports.stopServerLogRefresh = stop;
 };
 
+function isDisabledPlugin(name) {
+  return disabledAllPlugins || disabledPlugins[name.slice(0, -1)];
+}
+
 exports.getPlugin = function (name) {
-  if (disabledAllPlugins || disabledPlugins[name.slice(0, -1)]) {
-    return;
-  }
-  return pluginsMap[name];
+  return isDisabledPlugin(name) ? null : pluginsMap[name];
+};
+
+exports.getInstalledPlugins = function () {
+  return Object.keys(pluginsMap).sort(util.getPluginComparator(pluginsMap))
+  .map(function (name) {
+    var plugin = pluginsMap[name];
+    var disabled = !!isDisabledPlugin(name);
+    name = name.slice(0, -1);
+    return {
+      active: !disabledPlugins[name],
+      disabled: disabled,
+      name: name,
+      moduleName: plugin.moduleName,
+      version: plugin.version
+    };
+  });
 };
 
 exports.setDisabledPlugins = function(plugins) {
@@ -1727,6 +2149,93 @@ exports.getDataKeys = function() {
     result.push('custom2');
   }
   return result.concat(dataKeys);
+};
+
+exports.getRemoteData = function (url, callback) {
+  var opts = {  url: url };
+  exports.importRemote(opts,  function (data, xhr) {
+    if (!data) {
+      util.showSystemError(xhr);
+      return callback(true);
+    }
+    if (data.ec !== 0) {
+      message.error(data.em || 'Error');
+      return callback(true);
+    }
+    try {
+      var value = data.body || data.value;
+      data = value && JSON.parse(value);
+      return callback(false, data || {});
+    } catch (e) {
+      message.error(e.message);
+    }
+    callback(true);
+  });
+};
+
+exports.showLatestClientVersion = function() {
+  if (!hasUpdater) {
+    return;
+  }
+  exports.updateClient(function (result, xhr) {
+    if (!result) {
+      return util.showSystemError(xhr);
+    }
+    if (result.ec) {
+      message.error(result.em || 'Update failed');
+    }
+  });
+  return true;
+};
+
+function toString(options) {
+  return typeof options === 'string' ? options : JSON.stringify(options);
+}
+
+function triggerWhistleIdChanged(server, byServer) {
+  var whistleId = server && server.whistleId;
+  var hasWhistleToken = server && server.hasWhistleToken;
+  if (!hasWhistleToken !== !exports.hasWhistleToken) {
+    exports.hasWhistleToken = hasWhistleToken;
+    events.trigger('hasWhistleTokenChanged', hasWhistleToken);
+  }
+  if (whistleId !== exports.whistleId) {
+    if (byServer) {
+      if (manualLogout) {
+        if (server) {
+          server.whistleId = undefined;
+        }
+        manualLogout = false;
+        return;
+      }
+    } else {
+      manualLogout = true;
+    }
+    exports.whistleId = whistleId;
+    events.trigger('whistleIdChanged', whistleId);
+  }
+}
+
+exports.triggerWhistleIdChanged = triggerWhistleIdChanged;
+
+function updateWhistleId(server) {
+  var whistleId = server && server.whistleId;
+  triggerWhistleIdChanged(server, true);
+  if (whistleId && rulesMFlag !== server.rulesMFlag) {
+    rulesMFlag = server.rulesMFlag;
+    events.trigger('rulesMFlagChanged', rulesMFlag);
+  }
+}
+
+exports.getRulesMFlag = function() {
+  return rulesMFlag || '';
+};
+
+exports.saveToService = function(options, callback) {
+  if (!exports.whistleId) {
+    return;
+  }
+  exports.save(toString(options), callback);
 };
 
 setDataCenter(exports);

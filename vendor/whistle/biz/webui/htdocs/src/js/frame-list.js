@@ -5,10 +5,12 @@ var util = require('./util');
 var FilterInput = require('./filter-input');
 var DropDown = require('./dropdown');
 var dataCenter = require('./data-center');
-var events = require('./events');
 var RecordBtn = require('./record-btn');
 var ContextMenu = require('./context-menu');
+var Icon = require('./icon');
+var BackToBottomBtn = require('./back-to-bottom-btn');
 
+var findDOMNode = ReactDOM.findDOMNode;
 var SEND_PERATORS = [
   {
     value: 0,
@@ -75,25 +77,26 @@ var FrameList = React.createClass({
   },
   componentDidMount: function () {
     var self = this;
-    events.on('autoRefreshFrames', self.autoRefresh);
-    events.on('composeFrameId', function (e, id) {
+    var framesCtx = this.props.framesCtx;
+    framesCtx.on('autoRefreshFrames', self.autoRefresh);
+    framesCtx.on('composeFrameId', function (e, id) {
       var modal = id && self.props.modal;
       var list = modal && modal.list;
       if (list) {
         for (var i = 0, len = list.length; i < len; i++) {
           var frame = list[i];
           if (frame && frame.frameId === id) {
-            return events.trigger('composeFrame', frame);
+            return framesCtx.trigger('composeFrame', frame);
           }
         }
       }
     });
-    events.on('enableRecordFrame', function () {
+    framesCtx.on('enableRecordFrame', function () {
       self.refs.recordBtn.enable();
     });
   },
   onDoubleClick: function () {
-    events.trigger('toggleFramesInspectors');
+    this.props.framesCtx.trigger('toggleFramesInspectors');
   },
   componentWillUpdate: function () {
     this.atBottom = this.shouldScrollToBottom();
@@ -119,7 +122,7 @@ var FrameList = React.createClass({
       this.autoRefresh();
       return;
     }
-    events.trigger('replayFrame', this.props.modal.getActive());
+    this.props.framesCtx.trigger('replayFrame', this.props.modal.getActive());
   },
   stopRefresh: function () {
     this.container.scrollTop = this.container.scrollTop - 10;
@@ -135,7 +138,7 @@ var FrameList = React.createClass({
     }
   },
   compose: function () {
-    events.trigger('composeFrame', this.props.modal.getActive());
+    this.props.framesCtx.trigger('composeFrame', this.props.modal.getActive());
   },
   checkActive: function () {
     var reqData = this.props.reqData;
@@ -206,9 +209,17 @@ var FrameList = React.createClass({
   },
   onClear: function (e) {
     if (e.ctrlKey || e.metaKey) {
+      e.stopPropagation();
       if (e.keyCode === 88) {
+        if (!util.hasShortcut('clearNetworkFrames')) {
+          return;
+        }
         this.clear();
-      } else if (e.keyCode === 82) {
+      } else if (e.keyCode === 13) {
+        e.stopPropagation();
+        if (!util.hasShortcut('replaySelectedFrame')) {
+          return;
+        }
         this.replay();
       }
     }
@@ -220,14 +231,17 @@ var FrameList = React.createClass({
     var atBottom = con.scrollTop + con.offsetHeight + 5 > ctn.offsetHeight;
     if (atBottom) {
       modal.update();
+      this.refs.backBtn.hide();
+    } else {
+      this.refs.backBtn.show();
     }
     return atBottom;
   },
   setContainer: function (container) {
-    this.container = ReactDOM.findDOMNode(container);
+    this.container = findDOMNode(container);
   },
   setContent: function (content) {
-    this.content = ReactDOM.findDOMNode(content);
+    this.content = findDOMNode(content);
   },
   handleAction: function (type) {
     if (type === 'top') {
@@ -278,13 +292,14 @@ var FrameList = React.createClass({
   },
   onClickContextMenu: function (action) {
     var item = this.currentFocusItem;
+    var framesCtx = this.props.framesCtx;
     this.currentFocusItem = null;
     switch (action) {
     case 'Replay':
-      item &&  events.trigger('replayFrame', item);
+      item &&  framesCtx.trigger('replayFrame', item);
       break;
     case 'Edit':
-      item && events.trigger('composeFrame', item);
+      item && framesCtx.trigger('composeFrame', item);
       break;
     case 'Abort':
       this.abort();
@@ -306,7 +321,7 @@ var FrameList = React.createClass({
     var list = modal.getList();
     util.socketIsClosed(reqData);
     return (
-      <div className="fill orient-vertical-box w-frames-list">
+      <div className="fill v-box w-frames-list">
         <div className="w-frames-action" onMouseDown={util.preventBlur}>
           <RecordBtn
             ref="recordBtn"
@@ -314,7 +329,7 @@ var FrameList = React.createClass({
             disabledRecord={reqData.closed}
           />
           <a onClick={self.clear} className="w-remove-menu" draggable="false">
-            <span className="glyphicon glyphicon-remove"></span>Clear
+            <Icon name="remove" />Clear
           </a>
           <a
             onClick={self.replay}
@@ -324,21 +339,21 @@ var FrameList = React.createClass({
             }
             draggable="false"
           >
-            <span className="glyphicon glyphicon-repeat"></span>Replay
+            <Icon name="repeat" />Replay
           </a>
           <a
             onClick={self.compose}
             className={'w-remove-menu' + (activeItem ? '' : ' w-disabled')}
             draggable="false"
           >
-            <span className="glyphicon glyphicon-edit"></span>Edit
+            <Icon name="send" />Edit
           </a>
           <a
             onClick={self.abort}
             className={'w-remove-menu' + (isClosed(reqData) ? ' w-disabled' : '')}
             draggable="false"
           >
-            <span className="glyphicon glyphicon-ban-circle"></span>Abort
+            <Icon name="ban-circle" />Abort
           </a>
           <DropDown
             disabled={reqData.closed}
@@ -356,7 +371,7 @@ var FrameList = React.createClass({
         <div
           tabIndex="0"
           onKeyDown={this.onClear}
-          style={{ background: keyword ? '#ffffe0' : undefined }}
+          style={{ background: keyword ? 'var(--b-filtered)' : undefined }}
           onScroll={self.shouldScrollToBottom}
           ref={self.setContainer}
           className="fill w-frames-list"
@@ -369,9 +384,9 @@ var FrameList = React.createClass({
                 reqData.closed = reqData.closed || item.closed;
                 reqData.err = item.err || item.data;
                 if (item.closed) {
-                  statusClass = ' w-connection-closed';
+                  statusClass = ' w-conn-closed';
                 } else {
-                  statusClass = ' w-connection-error';
+                  statusClass = ' w-conn-error';
                 }
                 item.title =
                   item.title ||
@@ -433,7 +448,7 @@ var FrameList = React.createClass({
                     statusClass
                   }
                 >
-                  <span className={'glyphicon glyphicon-' + icon}></span>
+                  <Icon name={icon} />
                   {notDec ? <em>[Not decompressed]</em> : null}
                   {item.data}
                 </li>
@@ -441,6 +456,7 @@ var FrameList = React.createClass({
             })}
           </ul>
         </div>
+        <BackToBottomBtn ref="backBtn" onClick={this.autoRefresh} />
         <FilterInput onChange={self.onFilterChange} />
         <ContextMenu onClick={this.onClickContextMenu} ref="contextMenu" />
       </div>

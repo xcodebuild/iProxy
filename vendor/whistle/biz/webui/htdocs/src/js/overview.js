@@ -1,4 +1,3 @@
-require('./base-css.js');
 require('../css/overview.css');
 var React = require('react');
 var ReactDOM = require('react-dom');
@@ -9,6 +8,7 @@ var storage = require('./storage');
 var Properties = require('./properties');
 var dataCenter = require('./data-center');
 var getHelpUrl = require('./protocols').getHelpUrl;
+var HelpIcon = require('./help-icon');
 
 var OVERVIEW = [
   'URL',
@@ -26,11 +26,12 @@ var OVERVIEW = [
   'Response Body',
   'Content Encoding',
   'Start Date',
-  'DNS Lookup',
-  'Request Sent',
-  'Response Headers',
-  'Content Loaded',
-  'Total'
+  'TTFB',
+  'DNS',
+  'Request',
+  'Response',
+  'Download',
+  'Total Duration'
 ];
 var OVERVIEW_PROPS = [
   'url',
@@ -48,6 +49,38 @@ var OVERVIEW_PROPS = [
   'res.size',
   'contentEncoding'
 ];
+var CSS_MAP = {
+  'TTFB': {
+    className: 'w-overview-timeline',
+    style: {
+      '--overview-bg': 'var(--b-active)'
+    }
+  },
+  'DNS': {
+    className: 'w-overview-timeline',
+    style: {
+      '--overview-bg': 'var(--b-tl-dns)'
+    }
+  },
+  'Request': {
+    className: 'w-overview-timeline',
+    style: {
+      '--overview-bg': 'var(--b-tl-req)'
+    }
+  },
+  'Response': {
+    className: 'w-overview-timeline',
+    style: {
+      '--overview-bg': 'var(--b-tl-res)'
+    }
+  },
+  'Download': {
+    className: 'w-overview-timeline',
+    style: {
+      '--overview-bg': 'var(--b-tl-load)'
+    }
+  }
+};
 /**
  * statusCode://, redirect://[statusCode:]url, [req, res]speed://,
  * [req, res]delay://, method://, [req, res][content]Type://自动lookup,
@@ -59,11 +92,11 @@ var DEFAULT_RULES_MODAL = {};
 var PROXY_PROTOCOLS = ['socks', 'http-proxy', 'https-proxy'];
 
 function getAtRule(rule) {
-  return rule.rawPattern + ' @' + rule.matcher.substring(4) + getPluginName(rule);
+  return rule.rawPattern + ' @' + getMatcher(rule).substring(4) + getPluginName(rule);
 }
 
 function getVarRule(rule) {
-  return rule.rawPattern + ' %' + rule.matcher.substring(4) + getPluginName(rule);
+  return rule.rawPattern + ' %' + getMatcher(rule).substring(4) + getPluginName(rule);
 }
 
 function getStr(str) {
@@ -75,8 +108,7 @@ function filterImportant(item) {
 }
 
 function getPluginName(rule) {
-  var root = rule && rule.root;
-  return root && /[\\/]whistle\.([a-z\d_\-]+)$/.test(root) ? ' (From: ' + RegExp.$1 + ')' : '';
+  return rule && rule.file ? util.SOURCE_SEP + rule.file + ')' : '';
 }
 
 function getRawProps(rule, all) {
@@ -99,11 +131,15 @@ function getInjectProps(rule) {
   return rule.safeHtml ? ' enable://safeHtml' : '';
 }
 
+function getMatcher(rule) {
+  return rule._matcher || rule.matcher;
+}
+
 function getRuleStr(rule) {
   if (!rule) {
     return;
   }
-  var matcher = rule.matcher;
+  var matcher = getMatcher(rule);
   if (rule.port) {
     var protoIndex = matcher.indexOf(':') + 3;
     var proto = matcher.substring(0, protoIndex);
@@ -139,15 +175,12 @@ var Overview = React.createClass({
       showOnlyMatchRules: storage.get('showOnlyMatchRules') == 1
     };
   },
-  shouldComponentUpdate: function (nextProps) {
-    var hide = util.getBoolean(this.props.hide);
-    return hide != util.getBoolean(nextProps.hide) || !hide;
-  },
+  shouldComponentUpdate: util.shouldComponentUpdate,
   componentDidMount: function () {
     var self = this;
     var container = ReactDOM.findDOMNode(self.refs.container);
     events.on('overviewScrollTop', function () {
-      if (!util.getBoolean(self.props.hide)) {
+      if (!util.getBool(self.props.hide)) {
         container.scrollTop = 0;
       }
     });
@@ -166,6 +199,34 @@ var Overview = React.createClass({
       return;
     }
     window.open(name === 'rule' ? helpUrl + 'rule/' : helpUrl);
+  },
+  updateCssMap: function () {
+    Object.keys(CSS_MAP).forEach(function (name) {
+      CSS_MAP[name].style['--overview-width'] = 0;
+    });
+    var modal = this.props.modal;
+    if (!modal || !modal.url) {
+      return;
+    }
+    var total = modal.endTime - modal.startTime;
+    if (!(total > 0)) {
+      return;
+    }
+    CSS_MAP['TTFB'].style['--overview-width'] = modal.ttfb * 100 / total + '%';
+    var width = (modal.dnsTime - modal.startTime) * 100 / total + '%';
+    CSS_MAP['DNS'].style['--overview-width'] = width;
+
+    var reqStyle = CSS_MAP['Request'].style;
+    reqStyle['--overview-left'] = width;
+    reqStyle['--overview-width'] = (modal.requestTime - modal.dnsTime) * 100 / total + '%';
+
+    reqStyle = CSS_MAP['Response'].style;
+    reqStyle['--overview-left'] = (modal.requestTime - modal.startTime) * 100 / total + '%';
+    reqStyle['--overview-width'] = (modal.responseTime - modal.requestTime) * 100 / total + '%';
+
+    reqStyle = CSS_MAP['Download'].style;
+    reqStyle['--overview-left'] = (modal.responseTime - modal.startTime) * 100 / total + '%';
+    reqStyle['--overview-width'] = (modal.endTime - modal.responseTime) * 100 / total + '%';
   },
   render: function () {
     var overviewModal = DEFAULT_OVERVIEW_MODAL;
@@ -216,8 +277,11 @@ var Overview = React.createClass({
           var lastIndex = OVERVIEW.length - 1;
           var time;
           switch (name) {
-          case OVERVIEW[lastIndex - 5]:
+          case OVERVIEW[lastIndex - 6]:
             time = util.toLocaleString(new Date(modal.startTime));
+            break;
+          case OVERVIEW[lastIndex - 5]:
+            time = modal.ttfb >= 0 ? modal.ttfb + 'ms' : '';
             break;
           case OVERVIEW[lastIndex - 4]:
             time = getTime(modal.dns);
@@ -312,6 +376,8 @@ var Overview = React.createClass({
             key = 'rulesFile';
           } else if (name === 'reqMerge') {
             key = 'params';
+          } else if (name === 'tlsOptions') {
+            key = 'cipher';
           } else if (name === 'pathReplace') {
             key = 'urlReplace';
           }
@@ -320,22 +386,21 @@ var Overview = React.createClass({
           if (pluginRule) {
             hasPluginRule = true;
             var ruleList = [
-              pluginRule.rawPattern + ' ' + pluginRule.matcher + getRawProps(pluginRule) + getPluginName(pluginRule)
+              pluginRule.rawPattern + ' ' + getMatcher(pluginRule) + getRawProps(pluginRule) + getPluginName(pluginRule)
             ];
             var titleList = [pluginRule.raw];
-            rule &&
-              rule.list &&
+            rule && Array.isArray(rule.list) &&
               rule.list.forEach(function (item) {
-                ruleList.push(item.rawPattern + ' ' + item.matcher + getRawProps(item) + getPluginName(item));
+                ruleList.push(item.rawPattern + ' ' + getMatcher(item) + getRawProps(item) + getPluginName(item));
                 titleList.push(item.raw);
               });
             rulesModal[name] = ruleList.join('\n');
             titleModal[name] = titleList.join('\n');
-          } else if (rule && rule.list) {
+          } else if (rule && Array.isArray(rule.list)) {
             var prop = getInjectProps(rule);
             rulesModal[name] = rule.list
               .map(function (rule) {
-                return rule.rawPattern + ' ' + rule.matcher + getRawProps(rule, true) + prop + getPluginName(rule);
+                return rule.rawPattern + ' ' + getMatcher(rule) + getRawProps(rule, true) + prop + getPluginName(rule);
               })
               .join('\n');
             titleModal[name] = rule.list
@@ -354,7 +419,7 @@ var Overview = React.createClass({
               }
               if (rules.proxy && rules.proxy.host) {
                 result.push(
-                  getRuleStr(rules.proxy.host) + ' (URL: ' + rules.proxy.matcher + ')' + getPluginName(rule)
+                  getRuleStr(rules.proxy.host) + ' (URL: ' + getMatcher(rules.proxy) + ')' + getPluginName(rule)
                 );
               }
               rulesModal[name] = result.join('\n');
@@ -372,28 +437,27 @@ var Overview = React.createClass({
         });
       }
     }
-
+    this.updateCssMap();
     return (
       <div
         ref="container"
         className={
-          'fill orient-vertical-box w-detail-content w-detail-overview' +
-          (util.getBoolean(this.props.hide) ? ' hide' : '')
+          'fill v-box w-detail-ctn w-detail-overview' +
+          (util.getBool(this.props.hide) ? ' hide' : '')
         }
       >
         <Properties
           modal={overviewModal}
           rawName="Original URL"
           rawValue={rawUrl}
-          showEnableBtn={true}
+          showEnableBtn={modal && !modal.importedData}
+          cssMap={CSS_MAP}
         />
         <p
           className="w-detail-overview-title"
-          style={{ background: showOnlyMatchRules ? 'lightyellow' : undefined }}
+          style={{ background: showOnlyMatchRules ? 'var(--b-filtered)' : undefined }}
         >
-          <a href="https://avwo.github.io/whistle/rules/" target="_blank">
-            <span className="glyphicon glyphicon-question-sign"></span>
-          </a>
+          <HelpIcon docsUrl="rules/protocols.html" />
           All Rules:
           <label>
             <input
@@ -406,7 +470,8 @@ var Overview = React.createClass({
         </p>
         <Properties
           onHelp={this.onHelp}
-          className={showOnlyMatchRules ? 'w-hide-no-value' : undefined}
+          className={showOnlyMatchRules ? 'w-hide-no-value w-rules-overview' : 'w-rules-overview'}
+          onClickLocate={util.handleClickLocate}
           modal={rulesModal}
           title={titleModal}
           enableCopyValue

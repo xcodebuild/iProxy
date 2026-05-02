@@ -1,4 +1,3 @@
-require('../css/list-dialog.css');
 var React = require('react');
 var Divider = require('./divider');
 var util = require('./util');
@@ -7,10 +6,7 @@ var RuleList = React.createClass({
   getInitialState: function () {
     return { active: 'Default', checkedList: [] };
   },
-  shouldComponentUpdate: function (nextProps) {
-    var hide = util.getBoolean(this.props.hide);
-    return hide != util.getBoolean(nextProps.hide) || !hide;
-  },
+  shouldComponentUpdate: util.shouldComponentUpdate,
   onClick: function (e) {
     this.setState({
       active: e.target.getAttribute('data-name')

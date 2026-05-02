@@ -1,4 +1,3 @@
-require('./base-css.js');
 require('../css/req-detail.css');
 var React = require('react');
 var Divider = require('./divider');
@@ -12,13 +11,13 @@ var PluginsTabs = require('./plugins-tabs');
 var events = require('./events');
 
 var BTNS = [
+  { name: 'Raw' },
   { name: 'Headers' },
   { name: 'WebForms' },
   { name: 'TextView', display: 'Body' },
   { name: 'JSONView' },
   { name: 'HexView' },
   { name: 'Cookies' },
-  { name: 'Raw' },
   { name: 'Plugins', hide: true }
 ];
 
@@ -41,10 +40,7 @@ var ReqDetail = React.createClass({
       self.setState({});
     });
   },
-  shouldComponentUpdate: function (nextProps) {
-    var hide = util.getBoolean(this.props.hide);
-    return hide != util.getBoolean(nextProps.hide) || !hide;
-  },
+  shouldComponentUpdate: util.shouldComponentUpdate,
   onClickBtn: function (btn) {
     this.selectBtn(btn);
     this.setState({});
@@ -53,6 +49,9 @@ var ReqDetail = React.createClass({
     btn.active = true;
     this.state.btn = btn;
     this.state['inited' + btn.name] = true;
+  },
+  onEdit: function () {
+    events.trigger('setComposerData', this.props.modal);
   },
   render: function () {
     var state = this.state;
@@ -94,11 +93,7 @@ var ReqDetail = React.createClass({
         null,
         decodeURIComponent
       );
-      var url = modal.url;
-      var realUrl = modal.realUrl;
-      if (!realUrl || !/^(?:http|wss)s?:\/\//.test(realUrl)) {
-        realUrl = url;
-      }
+      var realUrl = util.getRealUrl(modal);
       var index = realUrl.indexOf('?');
       query = index == -1 ? '' : realUrl.substring(index + 1);
       query = query && util.parseQueryString(
@@ -122,15 +117,7 @@ var ReqDetail = React.createClass({
       } else if (json && json.isJSONText) {
         form = json;
       }
-      headersStr = util.objectToString(headers, req.rawHeaderNames);
-      headersStr =
-        [
-          req.method,
-          req.method == 'CONNECT' ? headers.host : util.getPath(realUrl),
-          'HTTP/' + (req.httpVersion || '1.1')
-        ].join(' ') +
-        '\r\n' +
-        headersStr;
+      headersStr = util.getReqRawHeaders(modal);
       raw = headersStr + '\r\n\r\n' + body;
       if (modal.frames) {
         tips = { isFrames: true };
@@ -143,10 +130,10 @@ var ReqDetail = React.createClass({
         !/^ws/.test(modal.url)
       ) {
         if (req.size < 5120) {
-          tips = { message: 'No request body data' };
+          tips = { message: 'Empty request body' };
         } else {
-          raw += '(Request data too large to show)';
-          tips = { message: 'Request data too large to show' };
+          raw += '(Request body exceeds display limit)';
+          tips = { message: 'Request body exceeds display limit' };
         }
       }
     }
@@ -172,16 +159,29 @@ var ReqDetail = React.createClass({
     return (
       <div
         className={
-          'fill orient-vertical-box w-detail-content w-detail-request' +
-          (util.getBoolean(this.props.hide) ? ' hide' : '')
+          'fill v-box w-detail-ctn w-detail-request' +
+          (util.getBool(this.props.hide) ? ' hide' : '')
         }
       >
         <BtnGroup onClick={this.onClickBtn} btns={BTNS} />
+        {state.initedRaw ? (
+          <Textarea
+            reqData={modal}
+            onEdit={this.onEdit}
+            reqType="reqRaw"
+            defaultName={defaultName}
+            value={raw}
+            headers={headersStr}
+            base64={base64}
+            className="fill w-detail-request-raw"
+            hide={name != BTNS[0].name}
+          />
+        ) : undefined}
         {state.initedHeaders ? (
           <div
             className={
               'fill w-detail-request-headers' +
-              (name == BTNS[0].name ? '' : ' hide')
+              (name == BTNS[1].name ? '' : ' hide')
             }
           >
             <Properties modal={rawHeaders || headers} enableViewSource="1" />
@@ -197,18 +197,18 @@ var ReqDetail = React.createClass({
             splitRatio={0.6}
             className={
               'w-detail-request-webforms' +
-              (name == BTNS[1].name ? '' : ' hide')
+              (name == BTNS[2].name ? '' : ' hide')
             }
           >
-            <div className="fill orient-vertical-box">
+            <div className="fill v-box">
               <div className="w-detail-webforms-title">Query</div>
-              <div className="fill orient-vertical-box w-detail-request-query">
+              <div className="fill v-box w-detail-request-query">
                 <Properties modal={query} enableViewSource="1" showJsonView="1" />
               </div>
             </div>
-            <div className="fill orient-vertical-box">
+            <div className="fill v-box">
               <div className="w-detail-webforms-title">Body</div>
-              <div className="fill orient-vertical-box w-detail-request-form">
+              <div className="fill v-box w-detail-request-form">
                 {!json || !json.isJSONText ? <Properties modal={form} richKey="1" enableViewSource="1" showJsonView="1" /> :
                 <JSONViewer reqData={modal} data={json} />}
               </div>
@@ -226,7 +226,7 @@ var ReqDetail = React.createClass({
             base64={base64}
             value={body}
             className="fill w-detail-request-textview"
-            hide={name != BTNS[2].name}
+            hide={name != BTNS[3].name}
           />
         ) : undefined}
         {state.initedJSONView ? (
@@ -236,7 +236,7 @@ var ReqDetail = React.createClass({
             defaultName={defaultName}
             data={json}
             tips={tips}
-            hide={name != BTNS[3].name}
+            hide={name != BTNS[4].name}
           />
         ) : undefined}
         {state.initedHexView ? (
@@ -249,30 +249,18 @@ var ReqDetail = React.createClass({
             base64={base64}
             value={bin}
             className="fill n-monospace w-detail-request-hex"
-            hide={name != BTNS[4].name}
+            hide={name != BTNS[5].name}
           />
         ) : undefined}
         {state.initedCookies ? (
           <div
             className={
               'fill w-detail-request-cookies' +
-              (name == BTNS[5].name ? '' : ' hide')
+              (name == BTNS[6].name ? '' : ' hide')
             }
           >
             <Properties modal={cookies} enableViewSource="1" />
           </div>
-        ) : undefined}
-        {state.initedRaw ? (
-          <Textarea
-            reqData={modal}
-            reqType="reqRaw"
-            defaultName={defaultName}
-            value={raw}
-            headers={headersStr}
-            base64={base64}
-            className="fill w-detail-request-raw"
-            hide={name != BTNS[6].name}
-          />
         ) : undefined}
         {state.initedPlugins ? (
           <PluginsTabs

@@ -4,6 +4,15 @@ var Dialog = require('./dialog');
 var util = require('./util');
 var dataCenter = require('./data-center');
 var KVDialog = require('./kv-dialog');
+var Icon = require('./icon');
+
+var showLoading = function(time) {
+  return time && (Date.now() - time > 800);
+};
+
+var addHistory = function(url, history) {
+  return history ? url + (url.indexOf('?') === -1 ? '?' : '&') + 'history=' + encodeURIComponent(history) : url;
+};
 
 var SyncDialog = React.createClass({
   getInitialState: function () {
@@ -32,10 +41,8 @@ var SyncDialog = React.createClass({
     if (self.loadingRules || !util.isString(rulesUrl)) {
       return;
     }
-    self.loadingRules = true;
-    if (history) {
-      rulesUrl += (rulesUrl.indexOf('?') === -1 ? '?' : '&') + 'history=' + encodeURIComponent(history);
-    }
+    self.loadingRules = Date.now() || 1;
+    rulesUrl = addHistory(rulesUrl, history);
     var loadRules = dataCenter.createCgi(
       util.getPluginCgiUrl(self.state.moduleName, rulesUrl)
     );
@@ -56,10 +63,8 @@ var SyncDialog = React.createClass({
     if (self.loadingValues || !util.isString(valuesUrl)) {
       return;
     }
-    self.loadingValues = true;
-    if (history) {
-      valuesUrl += (valuesUrl.indexOf('?') === -1 ? '?' : '&') + 'history=' + encodeURIComponent(history);
-    }
+    self.loadingValues = Date.now() || 1;
+    valuesUrl = addHistory(valuesUrl, history);
     var loadValues = dataCenter.createCgi(
       util.getPluginCgiUrl(self.state.moduleName, valuesUrl)
     );
@@ -92,26 +97,28 @@ var SyncDialog = React.createClass({
   },
   render: function () {
     var state = this.state;
+    var loadingRules = this.loadingRules;
+    var loadingValues = this.loadingValues;
     return (
       <Dialog ref="syncDialog" wstyle="w-sync-dialog">
         <div className="modal-body">
           <button
             onClick={this.syncRules}
-            disabled={this.loadingRules || !util.isString(state.rulesUrl)}
+            disabled={loadingRules || !util.isString(state.rulesUrl)}
             type="button"
             className="btn btn-primary"
           >
-            <span className="glyphicon glyphicon-list" />{' '}
-            {this.loadingRules ? 'Loading' : 'Sync'} Rules
+            <Icon name="list" />{' '}
+            {showLoading(loadingRules) ? 'Loading' : 'Sync'} Rules
           </button>
           <button
             onClick={this.syncValues}
-            disabled={this.loadingValues || !util.isString(state.valuesUrl)}
+            disabled={loadingValues || !util.isString(state.valuesUrl)}
             type="button"
             className="btn btn-default"
           >
-            <span className="glyphicon glyphicon-folder-close" />{' '}
-            {this.loadingValues ? 'Loading' : 'Sync'} Values
+            <Icon name="folder-close" />{' '}
+            {showLoading(loadingValues) ? 'Loading' : 'Sync'} Values
           </button>
         </div>
         <div className="modal-footer">

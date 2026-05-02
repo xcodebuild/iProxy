@@ -8,7 +8,6 @@ var ssi2 = fs.readFileSync(path.join(__dirname, '../assets/files/ssi2.html'), {e
 var ssi3 = fs.readFileSync(path.join(__dirname, '../assets/files/ssi3.html'), {encoding: 'utf8'});
 
 module.exports = function(server, options) {
-  util.init(options);
   server.on('request', app);
   app.use(function(req, res, next) {
     req.on('error', next);
@@ -101,12 +100,12 @@ module.exports = function(server, options) {
     }
 
     if (/mp1.w2.org/.test(fullUrl)) {
-      rules.push('/./ host://127.0.0.1:8080');
+      rules.push('* host://127.0.0.1:8080');
     }
 
     if (/values1.avenwu.com/.test(fullUrl)) {
       return res.end(JSON.stringify({
-        rules: '/./ file://{test} reqHeaders://{reqHeaders} resHeaders://{resHeaders}',
+        rules: '* file://{test} reqHeaders://{reqHeaders} resHeaders://{resHeaders}',
         values: {
           test: {
             abc: 123
@@ -123,7 +122,7 @@ module.exports = function(server, options) {
 
     if (/values2.test.com/.test(fullUrl)) {
       return res.end(JSON.stringify({
-        rules: '/./  reqHeaders://{reqHeaders} resHeaders://{resHeaders} reqReplace://{reqReplace}',
+        rules: '*  reqHeaders://{reqHeaders} resHeaders://{resHeaders} reqReplace://{reqReplace}',
         values: {
           test: {
             abc: 123
@@ -145,7 +144,7 @@ module.exports = function(server, options) {
 
     if (/ssi-include.whistlejs.com/.test(fullUrl)) {
       return res.end(JSON.stringify({
-        rules: '/./  resReplace://{resReplace}',
+        rules: '* resReplace://{resReplace}',
         values: {
           resReplace: {
             '#include(\'assets/files/ssi2.html\')': ssi2,
@@ -154,11 +153,6 @@ module.exports = function(server, options) {
           }
         }
       }));
-    }
-
-    var nextRule = util.getNextRule(req);
-    if (nextRule) {
-      rules.push(nextRule);
     }
 
     res.end(rules.join('\n'));

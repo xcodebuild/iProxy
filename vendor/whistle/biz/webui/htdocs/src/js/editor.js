@@ -20,7 +20,6 @@ require('codemirror/addon/dialog/dialog.css');
 require('codemirror/addon/search/matchesonscrollbar.css');
 require('codemirror/addon/fold/foldgutter.css');
 
-require('../css/list.css');
 require('../css/editor.css');
 
 var $ = require('jquery');
@@ -28,6 +27,10 @@ var React = require('react');
 var ReactDOM = require('react-dom');
 var CodeMirror = require('codemirror');
 var message = require('./message');
+var util = require('./util');
+
+var findDOMNode = ReactDOM.findDOMNode;
+var themes = util.EDITOR_THEMES;
 var INIT_LENGTH = 1024 * 16;
 var GUTTER_STYLE = [
   'CodeMirror-linenumbers',
@@ -54,30 +57,9 @@ require('codemirror/addon/fold/comment-fold');
 var rulesHint = require('./rules-hint');
 var events = require('./events');
 
-var themes = [
-  'default',
-  'neat',
-  'elegant',
-  'erlang-dark',
-  'night',
-  'monokai',
-  'cobalt',
-  'eclipse',
-  'rubyblue',
-  'lesser-dark',
-  'xq-dark',
-  'xq-light',
-  'ambiance',
-  'blackboard',
-  'vibrant-ink',
-  'solarized dark',
-  'solarized light',
-  'twilight',
-  'midnight'
-];
 require('./rules-mode');
 var DEFAULT_THEME = 'cobalt';
-var DEFAULT_FONT_SIZE = '16px';
+var DEFAULT_FONT_SIZE = '14px';
 var RULES_COMMENT_RE = /^(\s*)#\s*/;
 var JS_COMMENT_RE = /^(\s*)\/\/+\s?/;
 var NO_SPACE_RE = /\S/;
@@ -175,7 +157,7 @@ var Editor = React.createClass({
   setFontSize: function (fontSize) {
     fontSize = this._fontSize = fontSize || DEFAULT_FONT_SIZE;
     if (this._editor) {
-      ReactDOM.findDOMNode(this.refs.editor).style.fontSize = fontSize;
+      findDOMNode(this.refs.editor).style.fontSize = fontSize;
     }
   },
   showLineNumber: function (show) {
@@ -244,7 +226,7 @@ var Editor = React.createClass({
     var timeout;
     var timer;
     var self = this;
-    var elem = ReactDOM.findDOMNode(self.refs.editor);
+    var elem = findDOMNode(self.refs.editor);
     var $elem = $(elem);
     var editor = CodeMirror(elem);
     var preKeyeord;
@@ -341,9 +323,10 @@ var Editor = React.createClass({
     self._init(true);
     $(elem).find('.CodeMirror').addClass('fill');
     setTimeout(resize, 10);
-    $(window).on('resize', resetDebounce);
-    events.on('editorResize', resetDebounce);
+    $(window).on('resize', resetThrottle);
+    events.on('editorResize', resetThrottle);
     function resize() {
+      timeout = null;
       var height = elem.offsetHeight || 0;
       var width = elem.offsetWidth || 0;
       if (height < 10 || width < 10) {
@@ -353,10 +336,8 @@ var Editor = React.createClass({
         editor.setSize(width, height);
       }
     }
-    function resetDebounce() {
-      timeout && clearTimeout(timeout);
-      timeout = null;
-      timeout = setTimeout(resize, 30);
+    function resetThrottle() {
+      timeout = timeout || setTimeout(resize, 30);
     }
     var getCh = function (ch, dis) {
       return Math.max(0, ch + dis);
@@ -423,7 +404,10 @@ var Editor = React.createClass({
         };
         if (!e.ctrlKey && !e.metaKey && e.keyCode === 112) {
           var helpUrl = rulesHint.getHelpUrl(self._editor, options);
-          helpUrl && window.open(helpUrl);
+          if (!helpUrl) {
+            return;
+          }
+          window.open(helpUrl);
           e.stopPropagation();
           e.preventDefault();
           return true;
@@ -585,8 +569,8 @@ var Editor = React.createClass({
       <div
         tabIndex="0"
         ref="editor"
-        className="fill orient-vertical-box w-list-content"
-      ></div>
+        className="fill v-box w-list-content w-fix-drag"
+      />
     );
   }
 });

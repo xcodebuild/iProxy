@@ -2,6 +2,7 @@ var Pac = require('node-pac');
 var net = require('net');
 var LRU = require('lru-cache');
 var path = require('path');
+var iconv = require('iconv-lite');
 var parseUrl = require('../util/parse-url-safe');
 var extend = require('extend');
 var parseQuery = require('querystring').parse;
@@ -17,7 +18,6 @@ var config = require('../config');
 var values = rulesUtil.values;
 var globalRules = rulesUtil.rules;
 var tplCache = new LRU({ max: 36 });
-var rulesMgrCache = new LRU({ max: 16 });
 var clientCerts = new LRU({ max: 60, maxAge: 1000 * 60 * 60 });
 var rules = new Rules();
 var tempRules = new Rules();
@@ -35,6 +35,8 @@ var COMMENT_RE = /^\s*#/;
 var VALUE_RE = /^\s*``/m;
 var BRACKET_RE = /[(\[]/;
 var SCRIPT_RE = /\b(?:rules|values)\b/;
+var SEP_CIPHER_RE = /[^a-z\d:!-]/i;
+var CERT_RE = /^\s*-----/;
 
 function isRulesContent(ctn) {
   return !BRACKET_RE.test(ctn) || COMMENT_RE.test(ctn) || VALUE_RE.test(ctn) || !SCRIPT_RE.test(ctn);
@@ -43,24 +45,17 @@ function isRulesContent(ctn) {
 rules._isGlobal = true;
 
 exports.Rules = Rules;
-if (config.networkMode && !config.shadowRulesMode) {
-  exports.parse = util.noop;
-} else {
-  exports.parse = function (text, root, _values) {
-    if (config.pluginsMode || config.shadowRulesMode) {
-      text = config.shadowRules || '';
-    }
-    if (config.shadowValues) {
-      _values = _values
-        ? extend({}, config.shadowValues, _values)
-        : config.shadowValues;
-    }
-    rules.parse(text, root, _values);
-  };
-}
+exports.getEnabledRules = function() {
+  return rules._enabledList || [];
+};
+exports.getMFlag = function() {
+  return rules._mflag;
+};
+exports.parse = rules.parse.bind(rules);
 exports.append = rules.append.bind(rules);
 exports.resolveSNICallback = rules.resolveSNICallback.bind(rules);
 exports.resolveHost = rules.resolveHost.bind(rules);
+exports.getGRuleList = rules.getGRuleList.bind(rules);
 exports.resolveInternalHost = rules.resolveInternalHost.bind(rules);
 exports.resolveProxy = rules.resolveProxy.bind(rules);
 exports.resolveEnable = rules.resolveEnable.bind(rules);
@@ -68,7 +63,6 @@ exports.hasReqScript = rules.hasReqScript.bind(rules);
 exports.resolveDisable = rules.resolveDisable.bind(rules);
 exports.resolvePipe = rules.resolvePipe.bind(rules);
 exports.resolveRule = rules.resolveRule.bind(rules);
-exports.resolveRules = resolveReqRules;
 exports.resolveResRules = rules.resolveResRules.bind(rules);
 exports.resolveBodyFilter = rules.resolveBodyFilter.bind(rules);
 exports.lookupHost = rules.lookupHost.bind(rules);
@@ -142,9 +136,6 @@ exports.getProxy = function (url, req, callback) {
   delete reqRules.pac;
   var pRules = req.pluginRules;
   var fRules = req.rulesFileMgr;
-  if (fRules) {
-    fRules._values = req._scriptValues;
-  }
   var hRules = req.headerRulesMgr;
   var filter = extend(
     rules.resolveFilter(req),
@@ -162,12 +153,11 @@ exports.getProxy = function (url, req, callback) {
   } else {
     proxy = resolveRulesFromList([pRules, rules, fRules, hRules], 'resolveProxy', req, hostValue);
   }
-  var proxyHostOnly = isLineProp(proxy, 'proxyHostOnly');
-  var proxyHost =
-    proxyHostOnly ||
-    util.isEnable(req, 'proxyHost') ||
-    isProxyEnable(req, 'proxyHost');
+  var proxyHostOnly;
+  var proxyHost = util.isEnable(req, 'proxyHost') || isProxyEnable(req, 'proxyHost');
   if (proxy) {
+    proxyHostOnly = isLineProp(proxy, 'proxyHostOnly');
+    proxyHost = proxyHost || proxyHostOnly;
     var protocol = proxy.matcher.substring(0, proxy.matcher.indexOf(':'));
     ignoreProxy =
       !filter['ignore:' + protocol] &&
@@ -261,14 +251,15 @@ exports.getProxy = function (url, req, callback) {
   if (!pacUrl) {
     return setHost() || callback();
   }
+  var auth;
   if (AUTH_RE.test(pacUrl)) {
-    var auth = RegExp.$1;
-    req._pacAuth = auth;
+    auth = RegExp.$1;
     pacUrl = pacUrl.substring(auth.length + 1);
   }
-  pacUrl = util.isUrl(pacUrl)
-    ? pacUrl
-    : util.join(pacRule.root, pacUrl);
+  if (!util.isUrl(pacUrl) && !(pacUrl = util.joinPath(pacRule.root, pacUrl))) {
+    return setHost() || callback();
+  }
+  req._pacAuth = auth;
   var pac = cachedPacs[pacUrl];
   if (pac) {
     delete cachedPacs[pacUrl];
@@ -285,6 +276,7 @@ exports.getProxy = function (url, req, callback) {
     url.replace('tunnel:', 'https:'),
     function (err, rule) {
       if (rule) {
+        tempRules._file = pacRule.file;
         tempRules.parse(pacRule.rawPattern + ' ' + rule);
         req.curUrl = url;
         if ((proxy = tempRules.resolveProxy(req, hostValue))) {
@@ -354,20 +346,31 @@ function tpl(str, data) {
   return fn(data || {}).replace(/\t/g, '\n');
 }
 
-function getScriptContext(req, res, body, pattern) {
+function getScriptContext(req, res, body, pattern, frameOpts) {
   var ip = req.clientIp || LOCALHOST;
   var ctx = req.scriptContenxt;
   if (!ctx) {
     var headers = extend(true, {}, req.headers);
     ctx = req.scriptContenxt = {
+      Buffer: Buffer,
       pattern: pattern,
       version: config.version,
       port: config.port,
       uiHost: 'local.wproxy.org',
       uiPort: config.uiport,
       url: req.fullUrl,
+      fullUrl: req.fullUrl,
       method: util.toUpperCase(req.method) || 'GET',
       httpVersion: req.httpVersion || '1.1',
+      decodeBuffer: function (buf, encoding) {
+        return iconv.decode(buf, encoding || 'utf8');
+      },
+      encodeString: function (str, encoding) {
+        return iconv.encode(str, encoding || 'utf8');
+      },
+      encodingExists: function (encoding) {
+        return iconv.encodingExists(encoding);
+      },
       isLocalAddress: function (_ip) {
         return util.isLocalAddress(_ip || ip);
       },
@@ -381,8 +384,17 @@ function getScriptContext(req, res, body, pattern) {
       res: null
     };
   }
-  ctx.rules = [];
-  ctx.values = {};
+  if (frameOpts) {
+    ctx.ctx = {
+      sendToServer: frameOpts.sendToServer,
+      sendToClient: frameOpts.sendToClient,
+      handleSendToClientFrame: null,
+      handleSendToServerFrame: null
+    };
+  } else {
+    ctx.rules = [];
+    ctx.values = {};
+  }
   ctx.value = req.globalValue;
   ctx.getValue = function (key, onlyValues) {
     var value = !onlyValues && req._inlineValues && req._inlineValues[key];
@@ -420,16 +432,30 @@ function getReqPayload(req, res, cb) {
   }
 }
 
-function execRulesScript(script, req, res, body, pattern) {
-  var context = getScriptContext(req, res, body, pattern);
-  if (util.execScriptSync(script, context) && Array.isArray(context.rules)) {
-    return {
-      rules: context.rules.join('\n').trim(),
-      values: context.values
-    };
+function execRulesScript(script, req, res, body, pattern, frameOpts) {
+  var context = getScriptContext(req, res, body, pattern, frameOpts);
+  if (!util.execScriptSync(script, context)) {
+    return '';
   }
-  return '';
+  if (frameOpts) {
+    return context.ctx;
+  }
+  return Array.isArray(context.rules) ? {
+    rules: context.rules.join('\n').trim(),
+    values: context.values
+  } : '';
 }
+
+var CTX_RE = /\bctx\b/;
+
+exports.getFrameScriptCtx = function(script, req, res, options, cb) {
+  util.getRuleValue(script, function (text) {
+    if (!text || !CTX_RE.test(text)) {
+      return cb();
+    }
+    cb(execRulesScript(text, req, res, '', script.rawPattern, options));
+  }, null, null, null, req);
+};
 
 function handleDynamicRules(script, req, res, cb) {
   util.getRuleValue(script, function (list) {
@@ -450,53 +476,56 @@ function handleDynamicRules(script, req, res, cb) {
   }, null, null, null, req);
 }
 
-function resolveRulesFile(req, callback) {
-  if (req.rules.G) {
-    var varMap = {};
-    var globalValue;
-    var pList;
-    req.rules.G.list.forEach(function (item) {
-      if (item.matcher[0] !== 'P') {
-        if (!globalValue) {
-          globalValue = item;
-        }
+function resolvePluginVars(req, list) {
+  var varMap = {};
+  var globalValue;
+  var pList;
+  list.forEach(function (item) {
+    if (item.matcher[0] !== 'P') {
+      if (!globalValue) {
+        globalValue = item;
+      }
+      return;
+    }
+    var value = util.getMatcherValue(item);
+    var index = value.indexOf(PLUGIN_VAR_RE.test(value) ? '.' : '=');
+    if (index !== -1) {
+      var name = value.substring(0, index);
+      var plugin = getPluginName(name);
+      if (!plugin) {
         return;
       }
-      var value = util.getMatcherValue(item);
-      var index = value.indexOf(PLUGIN_VAR_RE.test(value) ? '.' : '=');
-      if (index !== -1) {
-        var name = value.substring(0, index);
-        var plugin = exports.getPlugin(name);
-        if (!plugin || !plugin.pluginVars) {
-          return;
-        }
-        value = value.substring(index + 1);
-        if (value) {
-          pList = pList || [];
-          pList.push(item);
-          var list = varMap[name] || [];
-          varMap[name] = list;
-          if (list.indexOf(value) === -1) {
-            list.push(value);
-          }
+      value = value.substring(index + 1);
+      if (value) {
+        pList = pList || [];
+        pList.push(item);
+        var list = varMap[name] || [];
+        varMap[name] = list;
+        if (list.indexOf(value) === -1) {
+          list.push(value);
         }
       }
-    });
-    req._pluginVars = varMap;
-    req.rules.P = pList;
-    req.rules.G = globalValue;
-    req.globalValue = util.getMatcherValue(globalValue);
-  }
-  handleDynamicRules(req.rules.rulesFile, req, null, function (text, vals) {
+    }
+  });
+  req.rules = req.rules || {};
+  req._pluginVars = varMap;
+  req.rules.P = pList;
+  req.rules.G = globalValue;
+  req.globalValue = util.getMatcherValue(globalValue);
+}
+
+exports.resolvePluginVars = resolvePluginVars;
+
+exports.resolveRulesFile = function (req, callback) {
+  !req._resolvedG && req.rules.G && resolvePluginVars(req, req.rules.G.list);
+  req._resolvedG = true;
+  var rule = req.rules.rulesFile;
+  handleDynamicRules(rule, req, null, function (text, vals) {
     if (text) {
-      var rulesFileMgr = rulesMgrCache.get(text);
-      if (!rulesFileMgr) {
-        rulesFileMgr = new Rules(vals);
-        rulesFileMgr.parse(text);
-        rulesMgrCache.set(text, rulesFileMgr);
-      }
-      rulesFileMgr._values = vals;
-      req._scriptValues = vals;
+      vals = util.toPrivateValues(vals, rule.file);
+      var rulesFileMgr = new Rules(vals);
+      rulesFileMgr._file = rule.file;
+      rulesFileMgr.parse(text);
       req.rulesFileMgr = rulesFileMgr;
       req.curUrl = req.fullUrl;
       text = req.rulesFileMgr.resolveReqRules(req);
@@ -505,20 +534,21 @@ function resolveRulesFile(req, callback) {
     util.mergeRules(req, text);
     callback();
   });
-}
+};
 
-exports.resolveRulesFile = resolveRulesFile;
 exports.resolveResRulesFile = function (req, res, callback) {
+  var rule = req.rules && req.rules.resScript;
   handleDynamicRules(
-    req.rules && req.rules.resScript,
+    rule,
     req,
     res,
     function (text, vals) {
       text = text && text.trim();
       callback(
         text && {
+          file: rule.file,
           text: text,
-          values: vals
+          values: util.toPrivateValues(vals, rule.file)
         }
       );
     }
@@ -528,7 +558,7 @@ exports.resolveResRulesFile = function (req, res, callback) {
 function getValue(req, key, keep) {
   var value = req.headers[key];
   if (value) {
-    if (!keep && config.strict) {
+    if (!req.fromComposer && !keep && (config.strict || (!config.enableRequestHeaderRules && !config.multiEnv))) {
       value = null;
     } else {
       req.rulesHeaders[key] = value;
@@ -539,6 +569,10 @@ function getValue(req, key, keep) {
     return value && decodeURIComponent(value);
   } catch (e) {}
   return value;
+}
+
+function getPluginName(key) {
+  return exports.getPlugin(key);
 }
 
 function initHeaderRules(req, needBodyFilters) {
@@ -572,10 +606,20 @@ function initHeaderRules(req, needBodyFilters) {
     }
   }
   var curVars = rules._globalPluginVars;
+  var globalVars = {};
   var value;
-  req._globalPluginVars = {};
+  req._globalPluginVars = globalVars;
+  Object.keys(curVars).forEach(function (key) {
+    if (getPluginName(key)) {
+      value = curVars[key];
+      globalVars[key] = value;
+    }
+  });
   if (ruleValue) {
-    var rulesMgr = new Rules(util.parseJSON(kvHeader));
+    var file = 'Header Rules';
+    var vals = util.toPrivateValues(util.parseJSON(kvHeader), file);
+    var rulesMgr = new Rules(vals);
+    rulesMgr._file = file;
     rulesMgr.parse(ruleValue);
     req.headerRulesMgr = rulesMgr;
     var bodyFilters = needBodyFilters && rulesMgr._rules._bodyFilters;
@@ -583,25 +627,11 @@ function initHeaderRules(req, needBodyFilters) {
       req._bodyFilters = rules._rules._bodyFilters.concat(bodyFilters);
     }
     var headerVars = rulesMgr._globalPluginVars;
-    var vars = extend({}, curVars, headerVars);
-    Object.keys(vars).forEach(function (key) {
-      var plugin = exports.getPlugin(key);
-      if (!plugin || !plugin.pluginVars) {
-        return;
-      }
-      var headerVal = headerVars[key];
-      var curVal = curVars[key];
-      if (curVal && headerVal) {
-        vars[key] = headerVal.concat(curVal);
-      }
-      value = vars[key];
-      req._globalPluginVars[key] = value;
-    });
-  } else {
-    Object.keys(curVars).forEach(function (key) {
-      if (!exports.getPlugin || exports.getPlugin(key)) {
-        value = curVars[key];
-        req._globalPluginVars[key] = value;
+    Object.keys(headerVars).forEach(function (key) {
+      var headerVal = getPluginName(key) && headerVars[key];
+      if (headerVal) {
+        var curVal = curVars[key];
+        globalVars[key] = curVal ? curVal.concat(headerVal) : headerVal;
       }
     });
   }
@@ -647,6 +677,66 @@ function checkCache(cacheKey, callback) {
   }
 }
 
+function getTlsOptions(req, cb) {
+  var cipher = req.rules.cipher;
+  if (!cipher) {
+    return cb();
+  }
+  cipher.list.forEach(function (rule) {
+    var value = rule && util.getMatcherValue(rule);
+    if (value && !SEP_CIPHER_RE.test(value)) {
+      rule.jsonObject = { ciphers: value };
+    }
+  });
+  util.parseRuleJson(cipher, function (data) {
+    if (!data) {
+      return cb();
+    }
+    var opts;
+    var addOption = function(name, value) {
+      if (!opts) {
+        opts = {};
+        cipher.__tlsOptions = function () {};
+        cipher.__tlsOptions._opts = opts;
+      }
+      opts[name] = value;
+    };
+    var addStrOption = function(name, opName) {
+      var value = (opName && data[opName]) || data[name];
+      if (util.isString(value)) {
+        addOption(name, value);
+      }
+    };
+    var addNumOption = function(name) {
+      var value = +data[name];
+      if (value >= 0) {
+        addOption(name, value);
+      }
+    };
+    addStrOption('ciphers', 'cipher');
+    addStrOption('secureProtocol');
+    addStrOption('maxVersion');
+    addStrOption('minVersion');
+    addStrOption('ca');
+    addStrOption('crl');
+    addStrOption('allowPartialTrustChain');
+    addStrOption('sessionIdContext');
+    addStrOption('sigalgs');
+    addStrOption('dhparam');
+    addStrOption('ecdhCurve');
+    addNumOption('secureOptions');
+    addNumOption('sessionTimeout');
+    if (data.honorCipherOrder) {
+      addOption('honorCipherOrder', true);
+    }
+    cb(data);
+  }, req);
+}
+
+function isCert(str) {
+  return CERT_RE.test(str);
+}
+
 exports.getClientCert = function (req, cb) {
   if (!req) {
     return cb();
@@ -655,36 +745,39 @@ exports.getClientCert = function (req, cb) {
   if (!HTTPS_RE.test(req.curUrl)) {
     return cb();
   }
-  var pRules = req.pluginRules;
-  var fRules = req.rulesFileMgr;
-  var hRules = req.headerRulesMgr;
-  var rule;
-  if (config.multiEnv || req._headerRulesFirst) {
-    rule = resolveRulesFromList([pRules, hRules, rules, fRules], 'resolveClientCert', req);
-  } else {
-    rule = resolveRulesFromList([pRules, rules, fRules, hRules], 'resolveClientCert', req);
-  }
-  if (!rule) {
-    return cb();
-  }
-  req.rules.clientCert = rule;
-  var matcher = rule.matcher.substring(17);
-  matcher = matcher && util.parseJSON(matcher);
-  if (!matcher) {
-    return cb();
-  }
-  var base = util.getString(matcher.base);
-  var key = util.getString(matcher.key);
-  var cert = util.getString(matcher.cert);
-  var cacheKey;
-  try {
-    if (key && cert) {
-      if (base) {
-        key = path.join(base, key);
-        cert = path.join(base, cert);
-      }
-      cacheKey = 'cert\n' + key + '\n' + cert;
-      if (
+  getTlsOptions(req, function(options) {
+    var pRules = req.pluginRules;
+    var fRules = req.rulesFileMgr;
+    var hRules = req.headerRulesMgr;
+    var rule;
+    if (config.multiEnv || req._headerRulesFirst) {
+      rule = resolveRulesFromList([pRules, hRules, rules, fRules], 'resolveClientCert', req);
+    } else {
+      rule = resolveRulesFromList([pRules, rules, fRules, hRules], 'resolveClientCert', req);
+    }
+    if (rule) {
+      req.rules.clientCert = rule;
+      rule = util.parseJSON(rule.matcher.substring(17));
+      options = rule ? extend({}, rule, options) : options;
+    }
+    if (!options) {
+      return cb();
+    }
+    var base = util.getString(options.base);
+    var key = util.getString(options.key);
+    var cert = util.getString(options.cert);
+    var cacheKey;
+    try {
+      if (key && cert) {
+        if (base) {
+          key = path.join(base, key);
+          cert = path.join(base, cert);
+        }
+        cacheKey = 'cert\n' + key + '\n' + cert;
+        if (isCert(key) && isCert(cert)) {
+          return cb(key, cert, false, cacheKey);
+        }
+        if (
         checkCache(cacheKey, function (data) {
           if (data) {
             cb(data[0], data[1], false, cacheKey);
@@ -693,29 +786,32 @@ exports.getClientCert = function (req, cb) {
           }
         })
       ) {
-        return;
-      }
-      return fileMgr.readFileList([key, cert], function (data) {
-        var list = clientCerts.peek(cacheKey);
-        if (data[0] && data[1] && data[0].length && data[1].length) {
-          clientCerts.set(cacheKey, data);
-        } else {
-          clientCerts.del(cacheKey);
-          data = '';
+          return;
         }
-        list.forEach(function (fn) {
-          fn(data);
+        return fileMgr.readFileList([key, cert], function (data) {
+          var list = clientCerts.peek(cacheKey);
+          if (data[0] && data[1] && data[0].length && data[1].length) {
+            clientCerts.set(cacheKey, data);
+          } else {
+            clientCerts.del(cacheKey);
+            data = '';
+          }
+          list.forEach(function (fn) {
+            fn(data);
+          });
         });
-      });
-    }
-    var pwd = util.getString(matcher.pwd || matcher.passphrase);
-    var pfx = util.getString(matcher.pfx);
-    if (pfx) {
-      if (base) {
-        pfx = path.join(base, key);
       }
-      cacheKey = 'pfx\n' + pwd + '\n' + pfx;
-      if (
+      var pwd = util.getString(options.pwd || options.passphrase);
+      var pfx = util.getString(options.pfx);
+      if (pfx) {
+        if (base) {
+          pfx = path.join(base, key);
+        }
+        cacheKey = 'pfx\n' + pwd + '\n' + pfx;
+        if (isCert(pfx)) {
+          return cb(pwd, pfx, true, cacheKey);
+        }
+        if (
         checkCache(cacheKey, function (buf) {
           if (buf) {
             cb(pwd, buf, true, cacheKey);
@@ -724,21 +820,22 @@ exports.getClientCert = function (req, cb) {
           }
         })
       ) {
-        return;
-      }
-      return fileMgr.readFile(pfx, function (buf) {
-        var list = clientCerts.peek(cacheKey);
-        if (buf && buf.length) {
-          clientCerts.set(cacheKey, buf);
-        } else {
-          clientCerts.del(cacheKey);
-          buf = '';
+          return;
         }
-        list.forEach(function (fn) {
-          fn(buf);
+        return fileMgr.readFile(pfx, function (buf) {
+          var list = clientCerts.peek(cacheKey);
+          if (buf && buf.length) {
+            clientCerts.set(cacheKey, buf);
+          } else {
+            clientCerts.del(cacheKey);
+            buf = '';
+          }
+          list.forEach(function (fn) {
+            fn(buf);
+          });
         });
-      });
-    }
-  } catch (e) {}
-  cb();
+      }
+    } catch (e) {}
+    cb();
+  });
 };

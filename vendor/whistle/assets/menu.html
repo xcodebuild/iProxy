@@ -1,3 +1,4 @@
+<style>html {background: #fff;}</style>
 <script>
   ;(function() {
     var config = window.whistleMenuConfig;
@@ -195,15 +196,37 @@
         whistleBridge.copyText = options.copyText;
         whistleBridge.pageId = options.pageId;
         whistleBridge.compose = options.compose;
+        whistleBridge.composeInterrupt = options.createComposeInterrupt();
+        whistleBridge.getWhistleId = options.getWhistleId;
+        whistleBridge.hasWhistleToken = options.hasWhistleToken;
         whistleBridge.decodeBase64 = options.decodeBase64;
+        whistleBridge.joinBase64 = options.joinBase64;
+        whistleBridge.getReqId = options.getReqId;
+        whistleBridge.onComposeData = options.onComposeData;
+        whistleBridge.offComposeData = options.offComposeData;
         whistleBridge.importSessions = options.importSessions;
         whistleBridge.exportSessions = options.exportSessions;
         whistleBridge.importMockData = options.importMockData;
         whistleBridge.download = options.download;
         whistleBridge.setNetworkSettings = options.setNetworkSettings;
+        whistleBridge.setRulesSettings = options.setRulesSettings;
+        whistleBridge.setValuesSettings = options.setValuesSettings;
         whistleBridge.setComposerData = options.setComposerData;
         whistleBridge.showHttpsSettings = options.showHttpsSettings;
         whistleBridge.showCustomCerts = options.showCustomCerts;
+        whistleBridge.uploadCustomCerts = options.uploadCustomCerts;
+        whistleBridge.showNetwork = options.showNetwork;
+        whistleBridge.showRules = options.showRules;
+        whistleBridge.showValues = options.showValues;
+        whistleBridge.showPlugins = options.showPlugins;
+        whistleBridge.showService = options.showService;
+        whistleBridge.hideService = options.hideService;
+        whistleBridge.getInstalledPlugins = options.getInstalledPlugins;
+        whistleBridge.showInstallPlugins = options.showInstallPlugins;
+        whistleBridge.showUpdatePlugins = options.showUpdatePlugins;
+        whistleBridge.readFileAsText = options.readFileAsText;
+        whistleBridge.readFileAsBase64 = options.readFileAsBase64;
+        whistleBridge.getVersion = options.getVersion;
         whistleBridge.request = options.request;
         whistleBridge.createRequest = options.createRequest;
         whistleBridge.parseRules = options.parseRules;

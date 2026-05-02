@@ -31,6 +31,10 @@ test.internal.path.com proxy://127.0.0.1:8080
 %test32=test1
 %test32=test2
 
+http://test1.pass.through.com/index.html pass://passThrough 127.0.0.1:8080 includeFilter://clientIp:3.3.5.5
+http://test2.pass.through.com/index.html pass://passThrough 127.0.0.1:8080 includeFilter://reqH.x-whistle-client-id:avenwu-test-id
+http://test3.pass.through.com/index.html pass://passThrough 127.0.0.1:8080 includeFilter://remoteAddress:6.6.6.6
+http://test-*.pass.through.com/index.html pass://passThrough 127.0.0.1:8080
 
 params.test.whistlejs.com/index.html resMerge://(resMerge=test) resType://js
 weinre1.test2.whistlejs.com:1234 weinre://xxx file://(hello) log://test resType://html enable://capture ignore://plugin
@@ -41,7 +45,7 @@ filter.com/index.html file://({"ec":0}) excludeFilter://m:post excludeFilter://m
 filter.com/index.html file://({"ec":1}) includeFilter://m:delete includeFilter://b:test
 filter.com/index.html file://({"ec":2}) includeFilter://b:555 excludeFilter://reqH:x-test=/\d+/
 filter.com/index.html file://({"ec":3}) excludeFilter://h:x-test=/\d+/
-filter.com/index.html file://({"ec":4}) 
+filter.com/index.html file://({"ec":4})
 
 filter2.com/test.html file://({"ec":123}) includeFilter:///abc/
 filter2.com/test.html file://({"ec":321}) excludeFilter:///cba/
@@ -83,3 +87,17 @@ list[40].a: "123"
 .test.wildcard5.com resMerge://{w1.json}
 
 /testx.whistlejs.com/ enable://capture
+
+``` test.txt
+Default
+```
+
+default.key.test.w2.org/test file://{test.txt}
+htt*://wilcardx.wd* file://({"ec":"x"})
+h*t*p://wilcardy.wd*.w2.org file://({"ec":"y"})
+enable://capture ***.wilcardz.wd*.w2.org
+h*t*p*://***.wilcardz.wd*.w2.org file://({"ec":"z"})
+
+http://sep.path.test.w2.org/.././../index.html file://({"ec":"sep"})
+
+http://sep1.path.test.w2.org/.././../index.html?doNotParseJson file://{notExist.test} resBody://{notExist.test2} excludeFilter://b:test

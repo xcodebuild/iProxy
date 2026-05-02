@@ -1,8 +1,9 @@
 .w-table > thead > tr > th {
-  background: #eee;
-  font-weight: normal;
-  border-bottom: 1px solid #ccc;
-  vertical-align: top;
+  white-space: nowrap;
+  background: var(--b-bar);
+  border-bottom: 1px;
+  font-weight: 500;
+  color: var(--c-default);
 }
 
 .w-table th,
@@ -10,6 +11,49 @@
   font-size: 12px;
   padding: 3px 5px !important;
   border-top: none;
-  border-bottom: 1px solid #ccc;
+  border-bottom: 1px solid var(--c-border);
   word-break: break-word;
+}
+
+.w-order-table table  tr > th:first-child {
+  width: 50px;
+}
+
+.w-order-table-head {
+  background: var(--b-bar);
+}
+
+.w-order-table .table td, .w-order-table .table th {
+  border-top: none;
+  border-bottom: 1px solid var(--c-border);
+  vertical-align: middle;
+}
+
+.w-order-table .w-order-table-head th {
+  padding: 4px 8px !important;
+}
+
+.w-order-table-body {
+  max-height: calc(100% - 28px);
+  overflow-y: auto;
+}
+
+.w-order-table-body td, .w-order-table-body th {
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.w-table-cell-middle {
+  vertical-align: middle!important;
+}
+
+.w-order-table-operation {
+  white-space: nowrap;
+}
+
+.w-order-table-operation a {
+  margin-right: 20px;
+}
+.w-order-table-operation a:last-child {
+  margin-right: 0;
 }

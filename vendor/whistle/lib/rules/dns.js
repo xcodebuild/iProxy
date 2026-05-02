@@ -39,25 +39,19 @@ function getIpFromAnswer(data) {
 }
 
 function lookDnsOverHttps(hostname, callback) {
-  util.request(
-    {
-      url: dnsOverHttps + hostname,
-      rejectUnauthorized: config.rejectUnauthorized
-    },
-    function (err, data) {
-      if (err) {
-        return callback(err);
-      }
-      try {
-        data = JSON.parse(data);
-        data = data && data.Answer;
-        return callback(null, data && getIpFromAnswer(data));
-      } catch (e) {
-        err = data || e;
-      }
-      return callback(err || 'DNS Over HTTPS Look Failed.');
+  util.request({ url: dnsOverHttps + hostname  }, function (err, data) {
+    if (err) {
+      return callback(err);
     }
-  );
+    try {
+      data = JSON.parse(data);
+      data = data && data.Answer;
+      return callback(null, data && getIpFromAnswer(data));
+    } catch (e) {
+      err = data || e;
+    }
+    return callback(err || 'DNS Over HTTPS Look Failed');
+  });
 }
 
 function lookupDNS(hostname, callback) {
@@ -80,7 +74,7 @@ function lookupDNS(hostname, callback) {
   var optional = dnsOptional || dnsFallback;
   var handleDns = function (fn, retry) {
     timer = setTimeout(function () {
-      execCallback(new Error('Timeout'));
+      execCallback(util.TIMEOUT_ERR);
     }, TIMEOUT);
     if (!fn) {
       if (dnsServer) {

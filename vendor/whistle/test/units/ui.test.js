@@ -119,14 +119,6 @@ module.exports = function() {
     method: 'post'
   });
   util.request({
-    url: 'http://local.whistlejs.com/cgi-bin/log/set',
-    method: 'get',
-    form: {
-      level: 'error',
-      text: 'teset error log'
-    }
-  });
-  util.request({
     url: 'http://local.whistlejs.com/cgi-bin/composer',
     method: 'post',
     form: {
@@ -257,14 +249,6 @@ module.exports = function() {
   util.request({
     url: 'http://local.wproxy.org:1234/cgi-bin/rules/allow-multiple-choice',
     method: 'post'
-  });
-  util.request({
-    url: 'http://local.wproxy.org:1234/cgi-bin/log/set',
-    method: 'get',
-    form: {
-      level: 'warn',
-      text: 'teset warn log'
-    }
   });
   util.request({
     url: 'http://local.wproxy.org:1234/cgi-bin/composer',
@@ -401,10 +385,6 @@ module.exports = function() {
     method: 'post'
   });
   util.request({
-    url: 'http://local.whistle.com/cgi-bin/log/set',
-    method: 'post'
-  });
-  util.request({
     url: 'http://local.whistle.com/cgi-bin/composer',
     method: 'post',
     form: {
@@ -436,4 +416,42 @@ module.exports = function() {
     method: 'post'
   });
 
+  var mockUrl = 'http://mock.remote-key2.test.w2.org/test/path?doNotParseJson';
+  var serviceUrl = 'http://service.remote-key2.test.w2.org/test/path?doNotParseJson';
+  var shadowUrl = 'http://shadow.remote-key2.test.w2.org/test/path?doNotParseJson';
+
+  util.request('http://mock.remote-key.test.w2.org/test/path?doNotParseJson', function(_, data) {
+    data.should.equal('mock');
+  });
+  util.request('http://service.remote-key.test.w2.org/test/path?doNotParseJson', function(_, data) {
+    data.should.equal('service');
+  });
+  util.request('http://shadow.remote-key.test.w2.org/test/path?doNotParseJson', function(_, data) {
+    data.should.equal('shadow');
+  });
+  util.request(mockUrl, function(_, data) {
+    data.should.equal(mockUrl + 'mock123');
+  });
+  util.request(serviceUrl, function(_, data) {
+    data.should.equal(serviceUrl + 'service123');
+  });
+  util.request(shadowUrl, function(_, data) {
+    data.should.equal(shadowUrl + 'shadow123');
+  });
+
+  ['shadow', 'service', 'mock'].forEach(function(name) {
+    util.request({
+      url: 'http://' + name + '.remote-key3.test.w2.org/test/script/api',
+      headers: { test: 'abc' }
+    }, function(res, data) {
+      data.url.should.containEql('api');
+    });
+
+    util.request({
+      url: 'http://' + name + '.remote-key4.test.w2.org/test/script/proxy',
+      headers: { test: 'abc' }
+    }, function(res, data) {
+      data.url.should.containEql('proxy');
+    });
+  });
 };

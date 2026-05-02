@@ -1,38 +1,18 @@
 var fs = require('fs');
 var iconv = require('iconv-lite');
-var Buffer = require('safe-buffer').Buffer;
-var config = require('../config');
+var common = require('./common');
 var isUtf8 = require('./is-utf8');
 
-var UTF8_RE = /^utf-?8$/i;
 var isWin32 = process.platform === 'win32';
 var MAX_SIZE = 1024 * 1024 * 64;
 var CRLF = Buffer.from('\r\n');
-var RSLASH_RE = /\\/g;
 var noop = function (_) {
   return _;
 };
 
-function toBuffer(buf, charset) {
-  if (buf == null || Buffer.isBuffer(buf)) {
-    return buf;
-  }
-  buf += '';
-  if (charset && typeof charset === 'string' && !UTF8_RE.test(charset)) {
-    try {
-      charset = charset.toLowerCase();
-      if (charset === 'base64') {
-        return Buffer.from(buf, 'base64');
-      }
-      return iconv.encode(buf, charset);
-    } catch (e) {}
-  }
-  return Buffer.from(buf);
-}
-
 function convertSlash(filePath) {
-  filePath = config.getHomePath(filePath);
-  return isWin32 ? filePath : filePath.replace(RSLASH_RE, '/');
+  filePath = common.getHomePath(filePath);
+  return isWin32 ? filePath : common.formatPathSep(filePath);
 }
 
 function decode(buf) {
@@ -120,7 +100,7 @@ function joinData(list, isText, charset) {
   var result = [];
   list.forEach(function (buf) {
     if (buf) {
-      buf = toBuffer(buf, charset);
+      buf = common.toBuffer(buf, charset);
       result.push(buf, CRLF);
     }
   });
@@ -184,7 +164,6 @@ function readFileText(path, callback) {
   );
 }
 
-exports.toBuffer = toBuffer;
 exports.joinData = joinData;
 exports.decode = decode;
 exports.readFile = readFile;

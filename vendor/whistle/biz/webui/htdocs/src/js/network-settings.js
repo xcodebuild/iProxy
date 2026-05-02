@@ -1,4 +1,3 @@
-require('./base-css.js');
 require('../css/network-settings.css');
 var $ = require('jquery');
 var React = require('react');
@@ -11,9 +10,13 @@ var events = require('./events');
 var util = require('./util');
 var win = require('./win');
 var storage = require('./storage');
+var Icon = require('./icon');
+var HelpIcon = require('./help-icon');
+var CloseBtn = require('./close-btn');
 
-var NOT_EMPTY_STYLE = { backgroundColor: 'lightyellow' };
+var NOT_EMPTY_STYLE = { backgroundColor: 'var(--b-filtered)' };
 var NOT_EMPTY_RE = /[^\s]/;
+var DATA_KEY_TIPS = 'e.g.: res.body or res.body:/"msgno":"(\w+)"/ ...';
 
 var Settings = React.createClass({
   getInitialState: function () {
@@ -33,7 +36,7 @@ var Settings = React.createClass({
   },
   resetColumns: function () {
     var self = this;
-    win.confirm('Are you sure to reset the columns of network table?', function(sure) {
+    win.confirm('Do you confirm resetting the network table\'s columns?', function(sure) {
       if (sure) {
         self.setState({ urlType: '' });
         storage.set('urlType', '');
@@ -41,6 +44,9 @@ var Settings = React.createClass({
         self.onColumnsResort();
       }
     });
+  },
+  shouldComponentUpdate: function () {
+    return this.refs.networkSettingsDialog.isVisible();
   },
   componentDidMount: function () {
     var self = this;
@@ -51,12 +57,16 @@ var Settings = React.createClass({
       if (!settings) {
         return;
       }
-      win.confirm('Are you sure to modify network settings?', function(sure) {
+      win.confirm('Do you confirm the changes to the network settings?', function(sure) {
         if (sure) {
           self.setSettings(settings);
         }
       });
     });
+  },
+  componentWillUnmount: function () {
+    events.off('toggleTreeView');
+    events.off('setNetworkSettings');
   },
   onNetworkSettingsChange: function (e) {
     var target = e.target;
@@ -289,9 +299,9 @@ var Settings = React.createClass({
     });
   },
   import: function(e) {
-    events.trigger('importSessions', e);
+    events.trigger('showImportDialog', 'networkSettings');
   },
-  export: function() {
+  getSettings: function() {
     var state = this.state;
     var columns = [];
     state.columns.forEach(function(col) {
@@ -299,7 +309,7 @@ var Settings = React.createClass({
         columns.push(col.name);
       }
     });
-    var settings = {
+    return {
       type: 'setNetworkSettings',
       disabledExcludeText: state.disabledExcludeText,
       excludeText: state.excludeText,
@@ -316,10 +326,9 @@ var Settings = React.createClass({
       treeView: storage.get('isTreeView') === '1',
       disabledHNR: storage.get('disabledHNR') === '1'
     };
-    events.trigger('download', {
-      name: 'network_settings_' + Date.now() + '.txt',
-      value: JSON.stringify(settings, null, '  ')
-    });
+  },
+  export: function() {
+    events.trigger('showExportDialog', ['networkSettings', this.getSettings()]);
   },
   onUrlType: function(e) {
     var urlType = e.target.value;
@@ -334,17 +343,10 @@ var Settings = React.createClass({
     var viewAllInNewWindow = storage.get('viewAllInNewWindow') === '1';
 
     return (
-      <Dialog ref="networkSettingsDialog" wstyle="w-network-settings-dialog">
+      <Dialog ref="networkSettingsDialog" wstyle="w-ns-dialog">
         <div onChange={self.onNetworkSettingsChange} className="modal-body">
-          <button
-            type="button"
-            className="close"
-            data-dismiss="modal"
-            aria-label="Close"
-          >
-            <span aria-hidden="true">&times;</span>
-          </button>
-          <fieldset className="network-settings-filter">
+          <CloseBtn />
+          <fieldset className="w-ns-filter">
             <legend>
               <label>
                 <input
@@ -355,14 +357,7 @@ var Settings = React.createClass({
                 />
                 <span className="w-va-mdl">Exclude Filter</span>
               </label>
-              <a
-                className="w-help-menu"
-                title="Click here to learn how to use the filter"
-                href="https://avwo.github.io/whistle/webui/filter.html"
-                target="_blank"
-              >
-                <span className="glyphicon glyphicon-question-sign"></span>
-              </a>
+              <HelpIcon docsUrl="gui/network.html#settings" />
             </legend>
             <textarea
               disabled={state.disabledExcludeText}
@@ -374,7 +369,7 @@ var Settings = React.createClass({
               maxLength={dataCenter.MAX_EXCLUDE_LEN}
             />
           </fieldset>
-          <fieldset className="network-settings-filter">
+          <fieldset className="w-ns-filter">
             <legend>
               <label>
                 <input
@@ -385,14 +380,7 @@ var Settings = React.createClass({
                 />
                 <span className="w-va-mdl">Include Filter</span>
               </label>
-              <a
-                className="w-help-menu"
-                title="Click here to learn how to use the filter"
-                href="https://avwo.github.io/whistle/webui/filter.html"
-                target="_blank"
-              >
-                <span className="glyphicon glyphicon-question-sign"></span>
-              </a>
+              <HelpIcon docsUrl="gui/network.html#settings" />
             </legend>
             <textarea
               disabled={state.disabledFilterText}
@@ -404,7 +392,7 @@ var Settings = React.createClass({
               maxLength={dataCenter.MAX_INCLUDE_LEN}
             />
           </fieldset>
-          <fieldset className="network-settings-columns">
+          <fieldset className="w-ns-columns">
             <legend>
               <label>Network Columns</label>
               <label onClick={self.resetColumns} className="btn btn-default">
@@ -456,11 +444,11 @@ var Settings = React.createClass({
                     </select> : null
                   }
                   {canEdit ? (
-                    <span
+                    <Icon
+                      name="edit"
                       onClick={self.editCustomCol}
                       data-name={col.title}
                       title={'Edit ' + col.title}
-                      className="glyphicon glyphicon-edit"
                     />
                   ) : undefined}
                 </label>
@@ -468,8 +456,8 @@ var Settings = React.createClass({
             })}
           </fieldset>
 
-          <label className="w-network-settings-own">
-            Max Rows Number:
+          <label className="w-ns-own">
+            Maximum Rows:
             <select
               className="form-control"
               onChange={self.onRowsChange}
@@ -483,44 +471,31 @@ var Settings = React.createClass({
               <option value="3000">3000</option>
             </select>
           </label>
-          <label className="w-network-settings-own">
+          <label className="w-ns-own">
             <input
               checked={dataCenter.isOnlyViewOwnData()}
               data-name="viewOwn"
               type="checkbox"
-              className="w-va-mdl"
             />
-            <span className="w-va-mdl">
-              Only view the requests of own computer (IP: {dataCenter.clientIp})
-            </span>
+            Viewing only your computer's network requests (IP: {dataCenter.clientIp})
           </label>
-          <label className="w-network-settings-own">
-            <input checked={viewAllInNewWindow} data-name="viewAllInNewWindow" type="checkbox" className="w-va-mdl" />
-            <span className="w-va-mdl">
-            ViewAll in a new window
-            </span>
+          <label className="w-ns-own">
+            <input checked={viewAllInNewWindow} data-name="viewAllInNewWindow" type="checkbox" />
+            ViewAll in new window
           </label>
-          <label className="w-network-settings-own">
-            <input checked={isTreeView} data-name="treeView" type="checkbox"className="w-va-mdl" />
-            <span
-              className="glyphicon glyphicon-tree-conifer w-va-mdl"
-              style={{ marginRight: 2 }}
-            ></span>
-            <span className="w-va-mdl">
+          <label className="w-ns-own">
+            <input checked={isTreeView} data-name="treeView" type="checkbox" />
+            <Icon name="tree-conifer" />
             Show Tree View (Ctrl[Command] + B)
-            </span>
           </label>
           {isTreeView ? (
-            <label style={{textIndent: 20}} className="w-network-settings-own">
+            <label style={{marginLeft: 20}} className="w-ns-own">
               <input
                 checked={storage.get('disabledHNR') !== '1'}
                 data-name="disabledHNR"
                 type="checkbox"
-                className="w-va-mdl"
               />
-              <span className="w-va-mdl">
               Highlight new requests
-              </span>
             </label>
           ) : null}
         </div>
@@ -547,16 +522,9 @@ var Settings = React.createClass({
             Export
           </button>
         </div>
-        <Dialog ref="editCustomColumn" wstyle="w-network-settings-edit">
+        <Dialog ref="editCustomColumn" wstyle="w-ns-edit">
           <div onChange={self.onNetworkSettingsChange} className="modal-body">
-            <button
-              type="button"
-              className="close"
-              data-dismiss="modal"
-              aria-label="Close"
-            >
-              <span aria-hidden="true">&times;</span>
-            </button>
+            <CloseBtn />
             <label>
               <span>Column Name:</span>
               <input
@@ -565,7 +533,7 @@ var Settings = React.createClass({
                 value={state.value}
                 className="form-control"
                 maxLength="16"
-                placeholder="Input the custom column name"
+                placeholder="Enter custom column name"
               />
             </label>
             <label>
@@ -575,7 +543,7 @@ var Settings = React.createClass({
                 value={state.key}
                 className="form-control"
                 maxLength="72"
-                placeholder="Input the key of data (as: res.headers.x-server ...)"
+                placeholder={DATA_KEY_TIPS}
               />
             </label>
           </div>

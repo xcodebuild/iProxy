@@ -1,12 +1,11 @@
-require('./base-css.js');
 var $ = require('jquery');
 var React = require('react');
 var util = require('./util');
 var storage = require('./storage');
-
 var Divider = require('./divider');
 var ReqData = require('./req-data');
 var Detail = require('./detail');
+var events = require('./events');
 
 var getWidth = function (vertical) {
   var docElem = document.documentElement;
@@ -60,11 +59,10 @@ var Network = React.createClass({
           e.preventDefault();
         }
       });
+    events.trigger('networkDidMount');
+    events.on('toggleNetworkDock', self.onDockChange);
   },
-  shouldComponentUpdate: function (nextProps) {
-    var hide = util.getBoolean(this.props.hide);
-    return hide != util.getBoolean(nextProps.hide) || !hide;
-  },
+  shouldComponentUpdate: util.shouldComponentUpdate,
   onDockChange: function () {
     var self = this;
     var dockToBottom = !self.state.dockToBottom;
@@ -76,6 +74,16 @@ var Network = React.createClass({
       },
       function () {
         self.refs.divider.reset();
+        var elems = document.querySelectorAll('.w-detail .w-divider');
+        elems.forEach(function (elem) {
+          if (window.MouseEvent) {
+            elem.dispatchEvent(new MouseEvent('dblclick', {
+              bubbles: true,
+              cancelable: true,
+              view: window
+            }));
+          }
+        });
       }
     );
   },
@@ -83,19 +91,21 @@ var Network = React.createClass({
     var modal = this.props.modal;
     var dockToBottom = this.state.dockToBottom;
     return (
-      <Divider
-        ref="divider"
-        hide={this.props.hide}
-        vertical={dockToBottom}
-        rightWidth={this.state.rightWidth}
-      >
-        <ReqData modal={modal} />
-        <Detail
-          dockToBottom={dockToBottom}
-          onDockChange={this.onDockChange}
-          modal={modal}
-        />
-      </Divider>
+      <div className={'v-box fill' + (this.props.hide ? ' hide' : '')}>
+        <Divider
+          ref="divider"
+          vertical={dockToBottom}
+          rightWidth={this.state.rightWidth}
+        >
+          <ReqData modal={modal} />
+          <Detail
+            dockToBottom={dockToBottom}
+            onDockChange={this.onDockChange}
+            modal={modal}
+            rulesModal={this.props.rulesModal}
+          />
+        </Divider>
+      </div>
     );
   }
 });

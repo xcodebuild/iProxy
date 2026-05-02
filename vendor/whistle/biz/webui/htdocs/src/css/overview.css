@@ -1,5 +1,5 @@
-.w-detail-overview > .w-properties-wrap:last-child {
-  border-top: 1px solid #ccc;
+.w-detail-overview > .w-props-wrap:last-child {
+  border-top: 1px solid var(--c-border);
 }
 .w-detail-overview-title {
   margin: 0;
@@ -10,19 +10,38 @@
   display: block;
   clear: both;
 }
-.w-detail-overview-title a {
-  text-decoration: none !important;
-  color: #333;
-  float: left;
-}
 .w-detail-overview-title label {
   float: right;
   font-weight: normal;
+  display: flex;
+  align-items: center;
 }
 .w-detail-overview-title label input {
   margin-right: 5px;
   vertical-align: text-bottom;
 }
-.w-detail-overview-title a:hover {
-  color: #337ab7;
+
+.w-overview-timeline {
+  position: relative;
+}
+
+.w-overview-timeline > pre {
+  z-index: 1;
+  position: relative;
+}
+
+.w-overview-timeline::before {
+  position: absolute;
+  content: '';
+  display: block;
+  background: var(--overview-bg, none);
+  width: var(--overview-width, 0);
+  left: var(--overview-left, 0);
+  top: 0;
+  height: 100%;
+}
+
+.w-props-wrap td pre[data-rule-source]:hover {
+  cursor: pointer;
+  color: var(--c-link);
 }

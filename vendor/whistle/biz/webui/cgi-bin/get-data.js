@@ -22,10 +22,8 @@ module.exports = function(req, res) {
     data.ids = null;
   }
   var clientIp = util.getClientIp(req);
-  var stopRecordConsole = data.startLogTime == -3;
   var stopRecordSvrLog = data.startSvrLogTime == -3;
   var h = req.headers;
-  var curLogId = proxy.getLatestId();
   var curSvrLogId = logger.getLatestId();
   util.sendGzip(req, res, {
     ec: 0,
@@ -33,7 +31,7 @@ module.exports = function(req, res) {
     disableInstaller: config.disableInstaller,
     account: config.account,
     version: config.version,
-    epm: config.epm,
+    installErrors: config.getInstallPluginErrors && config.getInstallPluginErrors(data.clientId),
     custom1: properties.get('Custom1'),
     custom2: properties.get('Custom2'),
     custom1Key: properties.get('Custom1Key'),
@@ -46,18 +44,14 @@ module.exports = function(req, res) {
     mvaluesClientId: config.mvaluesClientId,
     mvaluesTime: config.mvaluesTime,
     server: util.getServerInfo(req),
-    hasARules: rulesUtil.hasAccountRules ? 1 : undefined,
-    curLogId: stopRecordConsole ? undefined : curLogId,
     curSvrLogId: stopRecordSvrLog ? undefined : curSvrLogId,
-    lastLogId: stopRecordConsole ? curLogId : undefined,
     lastSvrLogId: stopRecordSvrLog ? curSvrLogId : undefined,
-    log: stopRecordConsole ? [] : proxy.getLogs(data.startLogTime, data.count, data.logId),
     svrLog: stopRecordSvrLog ? [] : logger.getLogs(data.startSvrLogTime, data.count),
     plugins: pluginMgr.getPlugins(),
-    pluginsRoot: config.PLUGIN_INSTALL_ROOT,
     disabledPlugins: !config.notAllowedDisablePlugins && properties.get('disabledPlugins') || {},
     allowMultipleChoice: properties.get('allowMultipleChoice'),
     backRulesFirst: properties.get('backRulesFirst'),
+    enabledCount: rules.getEnabledRules().length,
     disabledAllPlugins: !config.notAllowedDisablePlugins && properties.get('disabledAllPlugins'),
     disabledAllRules: !config.notAllowedDisableRules && properties.get('disabledAllRules'),
     interceptHttpsConnects: properties.isEnableCapture(),

@@ -12,3 +12,21 @@
   font-family: consolas, monospace;
   font-size: 14px;
 }
+
+.CodeMirror-search-label {
+  white-space: nowrap;
+  width: calc(100% - 320px);
+}
+
+.CodeMirror-search-label .CodeMirror-search-field {
+  width: calc(100% - 50px)!important;
+}
+
+.cm-s-cobalt.CodeMirror {
+  color: var(--c-cobalt);
+  background: var(--b-cobalt);
+}
+
+.cm-s-cobalt .CodeMirror-gutters {
+  background: var(--b-cobalt);
+}

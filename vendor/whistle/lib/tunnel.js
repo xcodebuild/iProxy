@@ -10,6 +10,7 @@ var util = require('./util');
 var rules = require('./rules');
 var socketMgr = require('./socket-mgr');
 var rulesUtil = require('./rules/util');
+var common = require('./util/common');
 var ca = require('./https/ca');
 var pluginMgr = require('./plugins');
 var config = require('./config');
@@ -23,6 +24,10 @@ var STATUS_CODES = require('http').STATUS_CODES || {};
 var getRawHeaderNames = hparser.getRawHeaderNames;
 var formatHeaders = hparser.formatHeaders;
 var getRawHeaders = hparser.getRawHeaders;
+var CRONET_RE = /\bCronet\b/;
+var SYS_HOST_RE = /^(?:[^/:]+\.)?(?:apple|cdn-apple|icloud|office|office365|mzstatic|apple-cloudkit|microsoft|parallels)\.(?:com|cn|com\.cn)$/;
+var TUNNEL_RE = /^tunnel:\/\//;
+var clientIpKey = config.CLIENT_IP_HEADER;
 
 function emitAborted(data, reqEmitter, code) {
   data.reqError = true;
@@ -42,8 +47,7 @@ function tunnelProxy(server, proxy, type) {
     var headers = req.headers;
     if (headers[config.WEBUI_HEAD]) {
       delete headers[config.WEBUI_HEAD];
-      reqSocket.destroy();
-      return;
+      return reqSocket.destroy();
     }
     req.fromHttpServer = reqSocket.fromHttpServer = fromHttpServer;
     req.fromHttpsServer = reqSocket.fromHttpsServer = fromHttpsServer;
@@ -78,11 +82,10 @@ function tunnelProxy(server, proxy, type) {
     var clientInfo = util.parseClientInfo(req);
     reqSocket._disabledProxyRules = req._disabledProxyRules;
     reqSocket.clientIp = req.clientIp = util.getClientIp(req, clientInfo[0]);
-    reqSocket.clientPort = req.clientPort =
-      clientInfo[1] || util.getClientPort(req);
+    reqSocket.clientPort = req.clientPort = clientInfo[1] || util.getClientPort(req);
     req._remoteAddr = clientInfo[2] || util.getRemoteAddr(req);
     req._remotePort = clientInfo[3] || util.getRemotePort(req);
-    delete headers[config.CLIENT_PORT_HEAD];
+    delete headers[config.CLIENT_PORT_HEADER];
     var now = Date.now();
     req.reqId = reqSocket.reqId = util.getReqId(now);
     reqSocket.headers = headers;
@@ -91,7 +94,7 @@ function tunnelProxy(server, proxy, type) {
     req.isPluginReq = reqSocket.isPluginReq = util.checkPluginReqOnce(req, true);
     util.onSocketEnd(reqSocket, function (err) {
       // 处理可能的证书校验出错
-      if (config.captureData && dispatch.getTunnelDataOnce(reqSocket)) {
+      if (config.captureData && !util.checkHideProp(req.enable || '', req.disable || '', 'CaptureError') && dispatch.getTunnelDataOnce(reqSocket)) {
         resData = {headers: {}};
         data = {
           id: req.reqId,
@@ -141,7 +144,7 @@ function tunnelProxy(server, proxy, type) {
     var inspect = useTunnelPolicy;
     useTunnelPolicy = useTunnelPolicy || policy == 'connect';
     var enableTunnelAck =
-      useTunnelPolicy && req.headers['x-whistle-request-tunnel-ack'];
+      useTunnelPolicy && req.headers[common.ACK_HEADER];
     var isLocalUIUrl = !useTunnelPolicy && config.isLocalUIUrl(hostname);
     if (isLocalUIUrl ? isIPHost : util.isLocalHost(hostname)) {
       isLocalUIUrl =
@@ -190,7 +193,8 @@ function tunnelProxy(server, proxy, type) {
           matchCustomCert = !!existsCustomCert(hostname);
           return matchCustomCert;
         }
-        return true;
+        var ua = headers['user-agent'];
+        return ua ? !CRONET_RE.test(ua) : !SYS_HOST_RE.test(hostname);
       };
       var isIntercept = function () {
         if (isLocalUIUrl || ((!isDisableIntercept() && isEnableIntercept()) ||
@@ -249,6 +253,7 @@ function tunnelProxy(server, proxy, type) {
           reqSocket.disable = req.disable;
           reqSocket.tunnelHostname = hostname;
           reqSocket.rules = _rules;
+          reqSocket._pluginVars = req._pluginVars;
           dispatch(
             reqSocket,
             function (chunk) {
@@ -322,11 +327,7 @@ function tunnelProxy(server, proxy, type) {
             inspect: inspect,
             rulesHeaders: req.rulesHeaders
           };
-          if (
-            util.showPluginReq(req) &&
-            config.captureData &&
-            (!filter.hide || disable.hide)
-          ) {
+          if (util.showPluginReq(req) && !util.isHide(req)) {
             data.abort = emitError;
             if (req.isPluginReq) {
               data.isPR = 1;
@@ -344,23 +345,23 @@ function tunnelProxy(server, proxy, type) {
             var customXFF;
             if (reqHeaders) {
               reqHeaders = util.lowerCaseify(reqHeaders, reqRawHeaderNames);
-              customXFF = reqHeaders[config.CLIENT_IP_HEAD];
-              delete reqHeaders[config.CLIENT_IP_HEAD];
+              customXFF = reqHeaders[clientIpKey];
+              delete reqHeaders[clientIpKey];
               extend(headers, reqHeaders);
             }
 
             if (disable.clientIp || disable.clientIP) {
-              delete headers[config.CLIENT_IP_HEAD];
+              delete headers[clientIpKey];
             } else {
               var forwardedFor = util.getMatcherValue(_rules.forwardedFor);
               if (net.isIP(forwardedFor)) {
-                headers[config.CLIENT_IP_HEAD] = forwardedFor;
+                headers[clientIpKey] = forwardedFor;
               } else if (net.isIP(customXFF)) {
-                headers[config.CLIENT_IP_HEAD] = customXFF;
+                headers[clientIpKey] = customXFF;
               } else if (util.isLocalAddress(req.clientIp)) {
-                delete headers[config.CLIENT_IP_HEAD];
+                delete headers[clientIpKey];
               } else {
-                headers[config.CLIENT_IP_HEAD] = req.clientIp;
+                headers[clientIpKey] = req.clientIp;
               }
             }
 
@@ -402,7 +403,7 @@ function tunnelProxy(server, proxy, type) {
                   proxyUrl = 'proxy://127.0.0.1:' + tunnelPort;
                   reqSocket.customParser = req.customParser =
                     util.getParserStatus(req);
-                  pluginMgr.addRuleHeaders(req, _rules);
+                  pluginMgr.addSessionInfo(req, _rules);
                   headers[config.PLUGIN_HOOK_NAME_HEADER] =
                     config.PLUGIN_HOOKS.TUNNEL;
                   socketMgr.setPending(req);
@@ -417,7 +418,7 @@ function tunnelProxy(server, proxy, type) {
                     realUrl =
                       'tunnel' + realUrl.substring(realUrl.indexOf(':'));
                   }
-                  if (/^tunnel:\/\//.test(realUrl) && realUrl != tunnelUrl) {
+                  if (TUNNEL_RE.test(realUrl) && realUrl != tunnelUrl) {
                     _parseUrl(realUrl, isHttp ? 80 : 443);
                     tunnelUrl = 'tunnel://' + options.host;
                     data.realUrl = tunnelUrl.replace('tunnel://', '');
@@ -433,11 +434,9 @@ function tunnelProxy(server, proxy, type) {
                   proxyUrl ? null : req,
                   function (err, hostIp, hostPort) {
                     var isInternalProxy;
-                    var proxyRule = _rules.proxy || '';
-                    if (!proxyUrl) {
-                      proxyUrl = proxyRule
-                        ? util.rule.getMatcher(proxyRule)
-                        : null;
+                    var proxyRule = (!proxyUrl && _rules.proxy) || '';
+                    if (!proxyUrl && proxyRule) {
+                      proxyUrl = util.rule.getMatcher(proxyRule);
                     }
                     var isXProxy;
                     if (proxyUrl) {
@@ -502,7 +501,7 @@ function tunnelProxy(server, proxy, type) {
                           if (isProxyPort || util.isLocalPHost(req, true)) {
                             _headers[config.WEBUI_HEAD] = 1;
                           }
-                          _headers['x-whistle-request-tunnel-ack'] = 1;
+                          _headers[common.ACK_HEADER] = 1;
                         }
                         var netMgr = isSocks ? socks : config;
                         var reqDelay = util.getMatcherValue(_rules.reqDelay);
@@ -567,6 +566,7 @@ function tunnelProxy(server, proxy, type) {
         }
         var retryConnect;
         var retryXHost = 0;
+        var newIp;
         function tunnel(hostIp, hostPort) {
           getServerIp(
             tunnelUrl,
@@ -590,8 +590,10 @@ function tunnelProxy(server, proxy, type) {
               if (retryConnect) {
                 handleError(resSocket);
               } else {
-                retryConnect = function () {
-                  if (
+                retryConnect = function (err) {
+                  if (!newIp && (newIp = util.getLocalhostIP(err, req, hostname, ip))) {
+                    ip = newIp;
+                  } else if (
                     retryXHost < 2 &&
                     _rules.host &&
                     X_RE.test(_rules.host.matcher)
@@ -612,14 +614,14 @@ function tunnelProxy(server, proxy, type) {
                   tunnel(ip, port);
                 };
                 var retried;
-                resSocket.on('error', function () {
+                resSocket.on('error', function (err) {
                   if (!retried) {
                     retried = true;
                     this.destroy && this.destroy();
                     !respond &&
                       !reqSocket._hasError &&
                       retryConnect &&
-                      retryConnect();
+                      retryConnect(err);
                   }
                 });
               }
@@ -648,6 +650,7 @@ function tunnelProxy(server, proxy, type) {
           reqSocket.headerRulesMgr = req.headerRulesMgr;
           reqSocket.clientPort = req.clientPort;
           reqSocket.globalValue = req.globalValue;
+          reqSocket._pluginVars = req._pluginVars;
           resSocket.statusCode = resData.statusCode;
           pluginMgr.resolvePipePlugin(reqSocket, function () {
             if (reqSocket._hasError) {
@@ -720,7 +723,7 @@ function tunnelProxy(server, proxy, type) {
           if (res) {
             code = res.statusCode || 200;
             if (!res.headers['proxy-agent']) {
-              res.headers['proxy-agent'] = config.name;
+              res.headers['proxy-agent'] = config.appName;
               res.rawHeaders = res.rawHeaders || [];
               res.rawHeaders.push('proxy-agent', 'Proxy-Agent');
             }
@@ -729,14 +732,14 @@ function tunnelProxy(server, proxy, type) {
             res = {
               statusCode: code,
               headers: {
-                'proxy-agent': config.name
+                'proxy-agent': config.appName
               },
               rawHeaders: ['proxy-agent', 'Proxy-Agent']
             };
           }
           var tunnelAck = enableTunnelAck && cb && code == 200;
           if (tunnelAck) {
-            res.headers['x-whistle-allow-tunnel-ack'] = 1;
+            res.headers[common.ALLOW_ACK] = 1;
           }
           var resHeaders = res.headers;
           pluginMgr.getResRules(req, res, function () {
@@ -763,21 +766,24 @@ function tunnelProxy(server, proxy, type) {
                   util.setResponseFor(reqRules, resHeaders, req, req.hostIp, req._phost);
                   util.deleteResHeaders(req, resHeaders);
                   code = util.getMatcherValue(reqRules.replaceStatus) || code;
+                  var isSuccess = code == 200;
                   var message =
-                    code == 200
+                    isSuccess
                       ? 'Connection Established'
                       : STATUS_CODES[code] || 'unknown';
                   var statusLine = ['HTTP/1.1', code, message].join(' ');
                   var curHeaders = resHeaders;
+                  var rawData = statusLine;
                   if (req.fromComposer) {
                     curHeaders = extend({}, resHeaders);
                     curHeaders['x-whistle-req-id'] = req.reqId;
+                    util.setFramesMode(curHeaders, isSuccess && inspect);
                   }
-                  var rawData = [
-                    statusLine,
-                    getRawHeaders(formatHeaders(curHeaders, rawHeaderNames)),
-                    '\r\n'
-                  ].join('\r\n');
+                  curHeaders = getRawHeaders(formatHeaders(curHeaders, rawHeaderNames));
+                  if (curHeaders) {
+                    rawData += '\r\n' + curHeaders;
+                  }
+                  rawData += '\r\n\r\n';
                   try {
                     if (code != 200) {
                       reqSocket.end(rawData, cb);

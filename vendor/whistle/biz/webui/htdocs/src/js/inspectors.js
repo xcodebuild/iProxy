@@ -1,4 +1,3 @@
-require('./base-css.js');
 var React = require('react');
 var util = require('./util');
 var Inspector = require('./inspector');
@@ -9,15 +8,13 @@ var events = require('./events');
 var TabMgr = require('./tab-mgr');
 var ContextMenu = require('./context-menu');
 var Properties = require('./properties');
+var Icon = require('./icon');
 
 var Inspectors = React.createClass({
   getInitialState: function () {
     return { activeName: 'Request', urlModal: { URL: '' } };
   },
-  shouldComponentUpdate: function (nextProps) {
-    var hide = util.getBoolean(this.props.hide);
-    return hide != util.getBoolean(nextProps.hide) || !hide;
-  },
+  shouldComponentUpdate: util.shouldComponentUpdate,
   componentDidMount: function () {
     var self = this;
     events.on('tabsChange', function () {
@@ -44,7 +41,7 @@ var Inspectors = React.createClass({
     var modal = props.modal;
     var urlModal = self.state.urlModal;
     var hideFrames = !self.isActive('Frames');
-    var hide = util.getBoolean(props.hide);
+    var hide = util.getBool(props.hide);
     var tabs = dataCenter.getTabs();
     var active = this.state.activeName;
     urlModal.URL = modal && ((modal.isHttps ? 'tunnel://' : '') + modal.url);
@@ -52,7 +49,7 @@ var Inspectors = React.createClass({
     return (
       <div
         className={
-          'fill orient-vertical-box w-detail-inspectors' + (hide ? ' hide' : '')
+          'fill v-box w-detail-inspectors' + (hide ? ' hide' : '')
         }
       >
         <Properties className="w-detail-inspectors-url" modal={urlModal}  showEnableBtn={true} />
@@ -64,7 +61,7 @@ var Inspectors = React.createClass({
             }}
             className={self.getStyle('Request')}
           >
-            <span className="glyphicon glyphicon-arrow-right"></span>Request
+            <Icon name="arrow-right" />Request
           </button>
           <button
             type="button"
@@ -73,20 +70,22 @@ var Inspectors = React.createClass({
             }}
             className={self.getStyle('Frames')}
           >
-            <span className="glyphicon glyphicon-menu-hamburger"></span>Frames
+            <Icon name="menu-hamburger" />Frames
           </button>
           <div className="fill w-custom-tabs">
             {tabs.map(function (tab) {
               var pluginName = tab.plugin;
+              var icon = util.getTabIcon(tab);
               return (
                 <button
                   key={pluginName}
                   onClick={function () {
                     self.showTab(pluginName);
                   }}
-                  className={self.getStyle(pluginName)}
+                  className={'w-custom-tab-btn ' + self.getStyle(pluginName)}
                   title={pluginName}
                 >
+                  {icon ? <img className="w-tab-icon" src={icon} /> : null}
                   {tab.name}
                 </button>
               );

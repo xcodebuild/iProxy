@@ -3,6 +3,10 @@ require('../css/message.css');
 
 var cache = {};
 
+$(document).on('click', '.w-message', function () {
+  $(this).stop(true, true).hide();
+});
+
 function showMessage(msg, level) {
   if (level === 'warn') {
     level = 'warning';
@@ -12,13 +16,13 @@ function showMessage(msg, level) {
   var elem = cache[level];
   if (!elem) {
     elem = $('<div class="alert alert-' + level + ' w-message"></div>');
-    elem.appendTo(document.body);
     cache[level] = elem;
   }
+  elem.appendTo(document.body);
   elem.text(msg);
   elem.stop(true, true).show();
   elem.css('marginLeft', -elem[0].offsetWidth / 2);
-  elem.delay(2000).fadeOut(1600);
+  elem.delay(2000).fadeOut(2000);
   return elem;
 }
 

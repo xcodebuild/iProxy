@@ -4,44 +4,44 @@ var os = require('os');
 var fs = require('fs');
 var vm = require('vm');
 var net = require('net');
-var tls = require('tls');
 var crypto = require('crypto');
 var fse = require('fs-extra2');
 var qs = require('querystring');
 var extend = require('extend');
 var LRU = require('lru-cache');
-var json5 = require('json5');
 var iconv = require('iconv-lite');
 var zlib = require('zlib');
 var dns = require('dns');
+var mime = require('mime');
 var PipeStream = require('pipestream');
-var Buffer = require('safe-buffer').Buffer;
 var protoMgr = require('../rules/protocols');
-var protocols = protoMgr.protocols;
 var logger = require('./logger');
 var config = require('../config');
 var isUtf8 = require('./is-utf8');
 var fileMgr = require('./file-mgr');
 var httpMgr = require('./http-mgr');
 var ReplacePatternTransform = require('./replace-pattern-transform');
-var parseQuery = require('./parse-query');
 var common = require('./common');
 var proc = require('./process');
 var parseUrl = require('./parse-url');
 var h2Consts = config.enableH2 ? require('http2').constants : {};
 
-var supportsBr = zlib.createBrotliDecompress && zlib.createBrotliCompress;
-var toBuffer = fileMgr.toBuffer;
+var protocols = protoMgr.protocols;
+var resProtocols = protoMgr.resProtocols;
+var uid = config.uid;
+var parseQuery = common.parseQuery;
+var supportsBr = common.supportsBr;
+var isLocalIp = common.isLocalIp;
+var getStat = common.getStat;
+var toBuffer = common.toBuffer;
 var pendingFiles = {};
 var localIpCache = new LRU({ max: 120 });
-var CRLF_RE = /\r\n|\r|\n/g;
 var LOCALHOST = '127.0.0.1';
 var aliasProtocols = protoMgr.aliasProtocols;
 var CONTEXT = vm.createContext();
-var END_WIDTH_SEP_RE = /[/\\]$/;
+var END_SLASH_RE = /[/\\]$/;
 var GEN_URL_RE = /^\s*(?:https?:)?\/\/\w[^\s]*\s*$/i;
 var CORS_KEY_RE = /^(?:enable|use-credentials|useCredentials|credentials)$/i;
-var G_NON_LATIN1_RE = /\s|[^\x00-\xFF]/gu;
 var NON_LATIN1_RE = /[^\x00-\xFF]/;
 var SCRIPT_START = toBuffer('<script');
 var SCRIPT_END = toBuffer('</script>');
@@ -60,58 +60,10 @@ var resetContext = function () {
   ctxTimer = null;
   CONTEXT = vm.createContext();
 };
-var TIMEOUT_ERR = new Error('Timeout');
+var TIMEOUT_ERR = common.TIMEOUT_ERR;
 var SUB_MATCH_RE = /\$[&\d]/;
 var PROTO_NAME_RE = /^([\w.-]+):\/\//;
 var replacePattern = ReplacePatternTransform.replacePattern;
-var CIPHER_OPTIONS = [
-  'NULL-SHA256',
-  'AES128-SHA256',
-  'AES256-SHA256',
-  'AES128-GCM-SHA256',
-  'AES256-GCM-SHA384',
-  'DH-RSA-AES128-SHA256',
-  'DH-RSA-AES256-SHA256',
-  'DH-RSA-AES128-GCM-SHA256',
-  'DH-RSA-AES256-GCM-SHA384',
-  'DH-DSS-AES128-SHA256',
-  'DH-DSS-AES256-SHA256',
-  'DH-DSS-AES128-GCM-SHA256',
-  'DH-DSS-AES256-GCM-SHA384',
-  'DHE-RSA-AES128-SHA256',
-  'DHE-RSA-AES256-SHA256',
-  'DHE-RSA-AES128-GCM-SHA256',
-  'DHE-RSA-AES256-GCM-SHA384',
-  'DHE-DSS-AES128-SHA256',
-  'DHE-DSS-AES256-SHA256',
-  'DHE-DSS-AES128-GCM-SHA256',
-  'DHE-DSS-AES256-GCM-SHA384',
-  'ECDHE-RSA-AES128-SHA256',
-  'ECDHE-RSA-AES256-SHA384',
-  'ECDHE-RSA-AES128-GCM-SHA256',
-  'ECDHE-RSA-AES256-GCM-SHA384',
-  'ECDHE-ECDSA-AES128-SHA256',
-  'ECDHE-ECDSA-AES256-SHA384',
-  'ECDHE-ECDSA-AES128-GCM-SHA256',
-  'ECDHE-ECDSA-AES256-GCM-SHA384',
-  'ADH-AES128-SHA256',
-  'ADH-AES256-SHA256',
-  'ADH-AES128-GCM-SHA256',
-  'ADH-AES256-GCM-SHA384',
-  'AES128-CCM',
-  'AES256-CCM',
-  'DHE-RSA-AES128-CCM',
-  'DHE-RSA-AES256-CCM',
-  'AES128-CCM8',
-  'AES256-CCM8',
-  'DHE-RSA-AES128-CCM8',
-  'DHE-RSA-AES256-CCM8',
-  'ECDHE-ECDSA-AES128-CCM',
-  'ECDHE-ECDSA-AES256-CCM',
-  'ECDHE-ECDSA-AES128-CCM8',
-  'ECDHE-ECDSA-AES256-CCM8'
-];
-var TLSV2_CIPHERS = 'ECDHE-ECDSA-AES256-GCM-SHA384';
 var cryptoConsts = crypto.constants || {};
 var EMPTY_BUFFER = toBuffer('');
 var encodeHtml = common.encodeHtml;
@@ -120,22 +72,84 @@ var removeIPV6Prefix = common.removeIPV6Prefix;
 var hasBody = common.hasBody;
 var hasProtocol = common.hasProtocol;
 var removeProtocol = common.removeProtocol;
+var getTlsOptions = common.getTlsOptions;
 var isUrl = common.isUrl;
 var joinIpPort = common.joinIpPort;
+var getContentEncoding = common.getContentEncoding;
+var getUnzipStream = common.getUnzipStream;
+var toLowerCase = common.toLowerCase;
+var safeEncodeURIComponent = common.safeEncodeURIComponent;
+var encodeNonLatin1Char = common.encodeNonLatin1Char;
+var toUpperCase = common.toUpperCase;
+var getCharset = common.getCharset;
+var hasRequestBody = common.hasRequestBody;
+var parseRawJson = common.parseRawJson;
+var getMatcher = common.getMatcher;
+var getMatcherValue = common.getMatcherValue;
+var getRemoteAddr = common.getRemoteAddr;
+var getRemotePort = common.getRemotePort;
 var workerIndex = process.env && process.env.workerIndex;
-var INTERNAL_ID = process.pid + '-' + Math.random();
+var INTERNAL_ID = Date.now().toString(16) +  Math.floor(Math.random() * 10000000).toString(16);
 var pluginMgr;
 var RESOLVE_KEY_RE = /^re[qs]Merge:\/\//;
+var CONTROL_RE =
+  /[\u001e\u001f\u200e\u200f\u200d\u200c\u202a\u202d\u202e\u202c\u206e\u206f\u206b\u206a\u206d\u206c]+/g;
+var MULTI_LINE_VALUE_RE =
+  /^[^\n\r\S]*(```+)[^\n\r\S]*(\S+)[^\n\r\S]*[\r\n](?:([\s\S]*?)[\r\n])??[^\n\r\S]*\1\s*$/gm;
+var SPACE_RE = /\s/;
+var PATH_RE = /^[\w./-]+$/;
+var SLASH_RE = /[\\/]/;
+var ROOT_STYLE = ':root{background-color:#121212;color:#f0f0f0;}';
+var THEME_STYLE = '<style>@media (prefers-color-scheme: dark) {:not([data-theme="light"])'
+  + ROOT_STYLE + '}\n' + '[data-theme="dark"]' + ROOT_STYLE + '</style>\n';
 
-workerIndex = workerIndex >= 0 ? padReqId(config.workerIndex) : '';
+var SNI_PLUGIN_HEADER = 'x-whistle-sni-plugin-' + uid;
+var INTERNAL_ID_HEADER = 'x-whistle-internal-id';
+var TEMP_TUNNEL_DATA_HEADER = 'x-whistle-tunnel-data-' + uid;
+var TUNNEL_DATA_HEADER = 'x-whistle-tunnel-data';
+var FWD_HOST_HEADER = 'x-forwarded-host';
+var FWD_PROPS_HEADER = 'x-whistle-forwarded-props';
+var REAL_HOST_HEADER = common.REAL_HOST_HEADER;
+var HTTPS_PROTO_HEADER = 'x-forwarded-proto';
+var clientIpKey = common.CLIENT_IP_HEADER;
+var clientInfoKey = config.CLIENT_INFO_HEADER;
 
+exports.SNI_PLUGIN_HEADER = SNI_PLUGIN_HEADER;
+exports.INTERNAL_ID_HEADER = INTERNAL_ID_HEADER;
+exports.TEMP_TUNNEL_DATA_HEADER = TEMP_TUNNEL_DATA_HEADER;
+exports.TUNNEL_DATA_HEADER = TUNNEL_DATA_HEADER;
+exports.REAL_HOST_HEADER = REAL_HOST_HEADER;
+exports.HTTPS_PROTO_HEADER = HTTPS_PROTO_HEADER;
+exports.ADDITIONAL_HEAD = 'x-whistle-additional-headers';
+
+workerIndex = workerIndex >= 0 ? common.padLeft(config.workerIndex, 3) : '';
+
+
+exports.sendRes = common.sendRes;
+exports.THEME_STYLE = THEME_STYLE;
+exports.encodeNonLatin1Char = encodeNonLatin1Char;
+exports.isJson = common.isJson;
+exports.encodeURIComponent = safeEncodeURIComponent;
+exports.getStat = getStat;
+exports.toLowerCase = toLowerCase;
+exports.toUpperCase = toUpperCase;
+exports.getCharset = getCharset;
+exports.getContentEncoding = getContentEncoding;
+exports.getUnzipStream = getUnzipStream;
+exports.hasRequestBody = hasRequestBody;
 exports.TIMEOUT_ERR = TIMEOUT_ERR;
+exports.getTlsOptions = getTlsOptions;
 exports.encodeHtml = encodeHtml;
 exports.hasProtocol = hasProtocol;
 exports.removeProtocol = removeProtocol;
+exports.parseRawJson = parseRawJson;
+exports.getMatcherValue = getMatcherValue;
 exports.setProtocol = common.setProtocol;
 exports.getProtocol = common.getProtocol;
 exports.replaceProtocol = common.replaceProtocol;
+exports.getMethod = common.getMethod;
+exports.sendGzip = common.sendGzip;
+exports.sendGzipText = common.sendGzipText;
 exports.getPureUrl = common.getPureUrl;
 exports.isTunnelHost = common.isTunnelHost;
 exports.joinIpPort = joinIpPort;
@@ -143,19 +157,16 @@ exports.isWebSocket = common.isWebSocket;
 exports.wrapRuleValue = common.wrapRuleValue;
 exports.createTransform = common.createTransform;
 exports.readFileSync = common.readFileTextSync;
+exports.parseHeaders = common.parseHeaders;
+exports.connect = common.connect;
 exports.isUrl = isUrl;
 exports.workerIndex = workerIndex;
 exports.proc = proc;
 exports.INTERNAL_ID = INTERNAL_ID;
 // 避免属性被 stringify ，减少冗余数据传给前端
-exports.PLUGIN_VALUES =
-  typeof Symbol === 'undefined' ? '_values' : Symbol('_values'); // eslint-disable-line
-exports.PLUGIN_MENU_CONFIG =
-  typeof Symbol === 'undefined' ? '_menuConfig' : Symbol('_menuConfig'); // eslint-disable-line
-exports.PLUGIN_INSPECTOR_CONFIG =
-  typeof Symbol === 'undefined'
-    ? '_inspectorConfig'
-    : Symbol('_inspectorConfig'); // eslint-disable-line
+exports.PLUGIN_VALUES = Symbol('values');
+exports.PLUGIN_MENU_CONFIG = Symbol('menuConfig');
+exports.PLUGIN_INSPECTOR_CONFIG = Symbol('inspectorConfig');
 exports.drain = require('./drain');
 exports.isWin = process.platform === 'win32';
 exports.isUtf8 = isUtf8;
@@ -169,14 +180,63 @@ exports.getServer = require('hagent').getServer;
 exports.parseUrl = parseUrl;
 exports.parseQuery = parseQuery;
 exports.localIpCache = localIpCache;
+exports.getRemoteAddr = getRemoteAddr;
+exports.getRemotePort = getRemotePort;
 exports.listenerCount = require('./patch').listenerCount;
 exports.EMPTY_BUFFER = EMPTY_BUFFER;
 
+var NOT_SUPPORTED_ERR = new Error('Unsupported');
+NOT_SUPPORTED_ERR.code = 502;
+
 function request(options, callback) {
-  return httpMgr.request(common.setInternalOptions(options, config), callback);
+  if (options && options.isInternalReq) {
+    return callback && callback(NOT_SUPPORTED_ERR, '', '');
+  }
+  return httpMgr.request(common.setInternalOptions(options, config, true), callback);
 }
 
 exports.request = request;
+
+function getInlineKey(key, file) {
+  return file ? key + '\n\r' + file : key;
+}
+
+exports.getInlineKey = getInlineKey;
+
+function resolveInlineValues(str, inlineValues, file) {
+  str = str && str.replace(CONTROL_RE, '').trim();
+  if (!str || str.indexOf('```') === -1) {
+    return str;
+  }
+  return str.replace(MULTI_LINE_VALUE_RE, function (_, __, key, value) {
+    key = getInlineKey(key, file);
+    if (inlineValues && inlineValues[key] == null) {
+      inlineValues[key] = value || '';
+    }
+    return '';
+  });
+}
+
+exports.resolveInlineValues = resolveInlineValues;
+
+exports.getPluginFile = function(name) {
+  return 'Plugin: ' + name;
+};
+
+exports.toPrivateValues = function(vals, file) {
+  if (!vals) {
+    return vals;
+  }
+  var keys = Object.keys(vals);
+  if (!keys.length) {
+    return vals;
+  }
+  var result = {};
+  keys.forEach(function(key) {
+    result[getInlineKey(key, file)] = vals[key];
+  });
+  return result;
+};
 
 function setSecureOptions(options) {
   var secureOptions = cryptoConsts.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION;
@@ -195,15 +255,22 @@ function noop(_) {
 exports.noop = noop;
 
 function isCiphersError(e) {
+  var c = e.code;
   return (
-    e.code === 'EPROTO' ||
-    String(e.message).indexOf(
-      'disconnected before secure TLS connection was established'
-    ) !== -1
+    c === 'EPROTO' || c === 'ERR_SSL_BAD_ECPOINT' || c === 'ERR_SSL_VERSION_OR_CIPHER_MISMATCH' ||
+    String(e.message).indexOf('disconnected before secure TLS connection was established') !== -1
   );
 }
 
 exports.isCiphersError = isCiphersError;
+
+exports.setFramesMode = function(headers, enable) {
+  if (enable) {
+    headers['x-whistle-frames-mode'] = '1';
+  } else {
+    delete headers['x-whistle-frames-mode'];
+  }
+};
 
 function getScriptProps(props) {
   var result = '';
@@ -253,47 +320,41 @@ function wrapCss(css, charset, isUrl) {
   return Buffer.concat([STYLE_START, toBuffer(css, charset), STYLE_END]);
 }
 
-function evalJson(str) {
-  try {
-    return json5.parse(str);
-  } catch (e) {}
-}
-
-exports.parseRawJson = evalJson;
-
 var MAX_LEN = 1024 * 1024 * 5;
 
-function getLatestVersion(registry, cb) {
-  // if (registry && typeof registry !== 'string') {
-  //   var name = registry.moduleName;
-  //   registry = registry.registry || 'https://registry.npmjs.org';
-  //   registry = registry.replace(/\/$/, '') + '/' + name;
-  // }
-  // if (!registry) {
-  //   return cb();
-  // }
-  // request(
-  //   {
-  //     url: registry,
-  //     maxLength: MAX_LEN
-  //   },
-  //   function (err, body, res) {
-  //     if (err || res.statusCode !== 200) {
-  //       body = null;
-  //     } else if (body) {
-  //       body = parseJSON(body);
-  //     }
-  //     body = body && body['dist-tags'];
-  //     cb(body && body['latest']);
-  //   }
-  // );
-}
+exports.getLatestVersion =  function(registry, cb, field) {
+  if (registry && typeof registry !== 'string') {
+    var name = registry.moduleName;
+    registry = registry.registry  ||
+      (registry.installRegistry && registry.installRegistry[0]) ||
+      'https://registry.npmjs.org';
+    registry = registry.replace(/\/$/, '') + '/' + name;
+  }
+  if (!registry) {
+    return cb();
+  }
+  request(
+    {
+      url: registry,
+      maxLength: MAX_LEN,
+      responseType: 'json'
+    },
+    function (_, body) {
+      if (isString(field)) {
+        body = body && body[field];
+      } else {
+        body = body && body['dist-tags'];
+        body = body && body['latest'];
+      }
+      cb(body);
+    }
+  );
+};
 
 exports.getRegistry = function(pkg) {
   var registry = pkg.whistleConfig && pkg.whistleConfig.registry;
   return common.getRegistry(registry);
 };
-exports.getLatestVersion = getLatestVersion;
 exports.isEmptyObject = common.isEmptyObject;
 exports.isGroup = common.isGroup;
 exports.addTrailerNames = common.addTrailerNames;
@@ -303,7 +364,7 @@ exports.hasBody = hasBody;
 
 var ESTABLISHED_CTN =
   'HTTP/1.1 200 Connection Established\r\nProxy-Agent: ' +
-  config.name +
+  config.appName +
   '\r\n\r\n';
 exports.setEstablished = function (socket) {
   socket.write(ESTABLISHED_CTN);
@@ -436,24 +497,18 @@ exports.execScriptSync = function(script, context) {
   }
 };
 
-function stat(file, callback, force) {
+function checkWriterFile(file, callback, force) {
   if (force) {
     return callback(true);
   }
-  fs.stat(file, function (err) {
+  getStat(file, function (err) {
     if (!err || err.code === 'ENOTDIR') {
       return callback();
     }
     if (err.code === 'ENOENT') {
       return callback(true);
     }
-    fs.stat(file, callback);
-  });
-}
-
-function spreadPromise(promise, callback) {
-  promise.then(function(list) {
-    callback.apply(null, list);
+    callback(err);
   });
 }
 
@@ -472,45 +527,46 @@ function getFileWriter(file, callback, force) {
     callback(writer);
   };
   pendingFiles[file] = 1;
-  stat(
-    file,
-    function (notExists) {
-      if (!notExists) {
+  checkWriterFile(file, function (notExists) {
+    if (!notExists) {
+      return execCb();
+    }
+    fse.ensureFile(file, function (err) {
+      if (err) {
+        logger.error(err);
         return execCb();
       }
-      fse.ensureFile(file, function (err) {
-        if (err) {
-          logger.error(err);
-          return execCb();
-        }
-        execCb(fs.createWriteStream(file).on('error', logger.error));
-      });
-    },
+      execCb(fs.createWriteStream(file).on('error', logger.error));
+    });
+  },
     force
   );
 }
 
-function getFileWriters(files, callback, force) {
-  if (!Array.isArray(files)) {
-    files = [files];
+function handleCallback(list, fn, callback) {
+  if (!Array.isArray(list)) {
+    list = [list];
   }
-
-  spreadPromise(Promise.all(
-    files.map(function (file) {
-      return new Promise(function(resolve) {
-        getFileWriter(
-          file,
-          function (writer) {
-            resolve(writer);
-          },
-          force
-        );
-      });
-    })
-  ), callback);
+  var len = list.length;
+  if (!len) {
+    return callback();
+  }
+  var result = [];
+  list.forEach(function(item, i) {
+    fn(item, function(value) {
+      result[i] = value;
+      if (--len === 0) {
+        callback.apply(null, result);
+      }
+    });
+  });
 }
 
-exports.getFileWriters = getFileWriters;
+exports.getFileWriters = function (files, callback, force) {
+  handleCallback(files, function(file, cb) {
+    getFileWriter(file, cb, force);
+  }, callback);
+};
 exports.toBuffer = toBuffer;
 
 function getErrorStack(err) {
@@ -524,7 +580,7 @@ function getErrorStack(err) {
   } catch (e) {}
   stack = stack || err.message || err;
   var result = [
-    'From: ' + config.name + '@' + config.version,
+    'From: ' + config.appName + '@' + config.version,
     'Node: ' + process.version,
     'Host: ' + hostname,
     'Date: ' + formatDate(),
@@ -551,9 +607,10 @@ function isRegExp(regExp) {
 exports.isRegExp = isRegExp;
 
 var ORIG_REG_EXP = /^\/(.+)\/([igmu]{0,4})$/;
+var FLAGS_RE = /[igmu]{2}/;
 
 function isOriginalRegExp(regExp) {
-  if (!ORIG_REG_EXP.test(regExp) || /[igmu]{2}/.test(regExp.$2)) {
+  if (!ORIG_REG_EXP.test(regExp) || FLAGS_RE.test(regExp.$2)) {
     return false;
   }
 
@@ -578,8 +635,6 @@ exports.emitError = function (obj, err) {
     obj.emit('error', err || new Error('Unknown'));
   }
 };
-
-exports.indexOfList = require('./buf-util').indexOf;
 
 exports.startWithList = function (buf, subBuf, start) {
   var len = subBuf.length;
@@ -620,6 +675,10 @@ function isEnable(req, name) {
 }
 
 exports.isEnable = isEnable;
+
+exports.isDisable = function(req, name) {
+  return req.disable[name] && !req.enable[name];
+};
 
 exports.formatUrl = common.formatUrl;
 
@@ -689,20 +748,21 @@ var hostname = os.hostname();
 var simpleHostname = '';
 var cpus = os.cpus();
 var addressList = [];
-(function updateSystyemInfo() {
+var usiTimer;
+
+function updateSystyemInfo() {
+  clearTimeout(usiTimer);
   interfaces = os.networkInterfaces();
   hostname = os.hostname();
   addressList = [];
-  for (var i in interfaces) {
-    var list = interfaces[i];
-    if (Array.isArray(list)) {
-      list.forEach(function (info) {
-        addressList.push(info.address.toLowerCase());
-      });
-    }
-  }
-  setTimeout(updateSystyemInfo, 30000);
-})();
+  common.walkInterfaces(function (info) {
+    addressList.push(info.address.toLowerCase());
+  });
+  usiTimer = setTimeout(updateSystyemInfo, 36000);
+}
+
+updateSystyemInfo();
+process.on('w2NetworkInterfacesChange', updateSystyemInfo);
 
 if (isString(hostname)) {
   simpleHostname = hostname.replace(/[^\w.-]+/g, '').substring(0, 20);
@@ -739,10 +799,8 @@ config.runtimeId =
   '/' +
   config.port;
 config.runtimeHeaders = { 'x-whistle-runtime-id': config.runtimeId };
-config.pluginHeaders = {
-  'x-whistle-runtime-id': config.runtimeId,
-  'x-whistle-internal-id': INTERNAL_ID
-};
+config.pluginHeaders = { 'x-whistle-runtime-id': config.runtimeId };
+config.pluginHeaders[INTERNAL_ID_HEADER] = INTERNAL_ID;
 config.pluginHeaders[config.PLUGIN_HOOK_NAME_HEADER] = config.PLUGIN_HOOKS.UI;
 
 exports.setClientId = function (
@@ -793,7 +851,7 @@ exports.getUpdateUrl = common.getUpdateUrl;
 
 exports.getTunnelKey = function (conf) {
   var tunnelKey = conf.tunnelKey || conf.tunnelKeys;
-  if (tunnelKey && typeof tunnelKey === 'string') {
+  if (isString(tunnelKey)) {
     tunnelKey = tunnelKey.toLowerCase().split(/[:,|]/);
     tunnelKey = tunnelKey.map(trim).filter(noop);
     return tunnelKey.slice(0, 10);
@@ -870,29 +928,6 @@ function parseHost(host) {
 
 exports.parseHost = parseHost;
 
-/**
- * 解析一些字符时，encodeURIComponent可能会抛异常，对这种字符不做任何处理
- * see: http://stackoverflow.com/questions/16868415/encodeuricomponent-throws-an-exception
- * @param ch
- * @returns
- */
-function safeEncodeURIComponent(ch) {
-  try {
-    return encodeURIComponent(ch);
-  } catch (e) {}
-
-  return ch;
-}
-
-exports.encodeNonLatin1Char = function (str) {
-  if (!isString(str)) {
-    return '';
-  }
-  return str.replace(G_NON_LATIN1_RE, safeEncodeURIComponent);
-};
-
-exports.encodeURIComponent = safeEncodeURIComponent;
-
 function compareUrl(url, fullUrl) {
   url = common.getAbsUrl(url, fullUrl);
   if (url === fullUrl) {
@@ -955,8 +990,14 @@ function disableResStore(headers) {
 
 exports.disableResStore = disableResStore;
 
-function parsePathReplace(urlPath, params) {
-  if (!params || !/^(?:ws|http)s?:/.test(urlPath)) {
+function notNull(value) {
+  return value != null;
+}
+
+var HTTP_PROTO_RE = /^(?:ws|http)s?:/;
+
+function parsePathReplace(urlPath, params, delPaths) {
+  if ((!params && !delPaths) || !HTTP_PROTO_RE.test(urlPath)) {
     return;
   }
   var index = urlPath.indexOf('://');
@@ -964,39 +1005,73 @@ function parsePathReplace(urlPath, params) {
     return;
   }
   index = urlPath.indexOf('/', index + 3) + 1;
-  if (index <= 0) {
+  if (!index) {
     return;
   }
-
-  var root = urlPath.substring(0, index);
-  urlPath = urlPath.substring(index);
-
-  Object.keys(params).forEach(function (pattern) {
+  var curPath = urlPath.substring(index);
+  params && Object.keys(params).forEach(function (pattern) {
     var value = params[pattern];
     value = value == null ? '' : value + '';
     if (isOriginalRegExp(pattern) && (pattern = toOriginalRegExp(pattern))) {
-      urlPath = urlPath.replace(pattern, value);
+      curPath = curPath.replace(pattern, value);
     } else if (pattern) {
-      urlPath = urlPath.split(pattern).join(value);
+      curPath = curPath.split(pattern).join(value);
     }
   });
-  root += urlPath;
-  return root !== urlPath ? root : null;
+  if (curPath && delPaths) {
+    var query = '';
+    var qIdx = curPath.indexOf('?');
+    if (qIdx !== -1) {
+      query = curPath.substring(qIdx);
+      curPath = curPath.substring(0, qIdx);
+    }
+    if (curPath) {
+      if (delPaths.all) {
+        delete delPaths.all;
+        curPath = query;
+      } else {
+        curPath = curPath.split('/');
+        var len = curPath.length;
+        var last = delPaths.last;
+        if (last) {
+          delete delPaths.last;
+          delPaths[len - 1] = 1;
+        }
+        Object.keys(delPaths).forEach(function (key) {
+          key = +key;
+          key = key < 0 ? len + key : key;
+          if (key >= 0 && key < len) {
+            curPath[key] = null;
+          }
+        });
+
+        curPath = curPath.filter(notNull);
+        if (last && curPath[curPath.length - 1]) {
+          curPath.push('');
+        }
+        curPath = curPath.join('/');
+      }
+    }
+    curPath += query;
+  }
+  var newUrl = urlPath.substring(0, index) + curPath;
+  return newUrl === urlPath ? null : newUrl;
 }
 
 exports.parsePathReplace = parsePathReplace;
 
-function wrapResponse(res) {
-  var passThrough = common.createTransform();
-  passThrough.statusCode = res.statusCode;
-  passThrough.rawHeaderNames = res.rawHeaderNames;
-  passThrough.headers = lowerCaseify(res.headers);
-  passThrough.headers['x-server'] = config.name;
+function wrapResponse(res, realUrl) {
+  var newRes = common.createTransform();
+  newRes.statusCode = res.statusCode;
+  newRes.rawHeaderNames = res.rawHeaderNames;
+  newRes.headers = lowerCaseify(res.headers);
+  newRes.headers['x-server'] = config.appName;
   res.body != null &&
-    passThrough.push(Buffer.isBuffer(res.body) ? res.body : String(res.body));
-  passThrough.push(null);
-  passThrough.isCustomRes = true;
-  return passThrough;
+    newRes.push(Buffer.isBuffer(res.body) ? res.body : String(res.body));
+  newRes.push(null);
+  newRes.isCustomRes = true;
+  newRes.realUrl = realUrl;
+  return newRes;
 }
 
 exports.wrapResponse = wrapResponse;
@@ -1027,14 +1102,14 @@ exports.sendStatusCodeError = sendStatusCodeError;
 exports.getQueryValue = function (value) {
   if (value && typeof value === 'object') {
     try {
-      return JSON.stringify(value);
+      return JSON.stringify(value) || '';
     } catch (e) {}
   }
   return value || '';
 };
 
 function parseInlineJSON(text, isValue) {
-  if (!isValue || /\s/.test(text)) {
+  if (!isValue || SPACE_RE.test(text)) {
     return;
   }
   return parseQuery(text, null, null, true);
@@ -1055,7 +1130,7 @@ function parseJSON(data) {
 }
 
 function parsePureJSON(data, isValue) {
-  return evalJson(data) || parseInlineJSON(data, isValue);
+  return parseRawJson(data) || parseInlineJSON(data, isValue);
 }
 
 exports.parseJSON = parseJSON;
@@ -1067,52 +1142,22 @@ function trim(text) {
 exports.trim = trim;
 exports.lowerCaseify = lowerCaseify;
 
-function parseHeaders(headers, rawNames) {
-  if (typeof headers == 'string') {
-    headers = headers.split(CRLF_RE);
-  }
-  var _headers = {};
-  headers.forEach(function (line) {
-    var index = line.indexOf(':');
-    var value;
-    if (index != -1) {
-      value = line.substring(index + 1).trim();
-      var rawName = line.substring(0, index).trim();
-      var name = rawName.toLowerCase();
-      var list = _headers[name];
-      if (rawNames) {
-        rawNames[name] = rawName;
-      }
-      if (list) {
-        if (!Array.isArray(list)) {
-          _headers[name] = list = [list];
-        }
-        list.push(value);
-      } else {
-        _headers[name] = value;
-      }
-    }
-  });
-
-  return lowerCaseify(_headers);
-}
-
-exports.parseHeaders = parseHeaders;
-
 var QUERY_PARAM_RE = /^[^\\/]+=/;
 
 
-exports.parseRuleJson = function(rules, callback, req) {
-  if (!Array.isArray(rules)) {
-    rules = [rules];
+function tryParseMatcher(text, rule) {
+  var matcher = !text && removeProtocol(getMatcher(rule), true);
+  if (!matcher || matcher.indexOf('=') === -1) {
+    return;
   }
-  spreadPromise(Promise.all(
-    rules.map(function (rule) {
-      return new Promise(function(resolve) {
-        readRuleList(rule, resolve, true, null, null, req);
-      });
-    })
-  ), callback);
+  return parseQuery(matcher, null, null, true);
+}
+
+exports.parseRuleJson = function(rules, callback, req) {
+  handleCallback(rules, function(rule, cb) {
+    readRuleList(rule, cb, true, null, null, req);
+  }, callback);
+
 };
 
 function getTempFilePath(filePath, rule) {
@@ -1121,8 +1166,7 @@ function getTempFilePath(filePath, rule) {
     rule._suffix = RegExp.$2;
     return path.join(config.TEMP_FILES_PATH, RegExp.$1);
   }
-  filePath = decodePath(filePath);
-  return root ? join(root, filePath) : filePath;
+  return joinPath(root, decodePath(filePath));
 }
 
 function readRuleValue(rule, callback, checkUrl, needRawData, req) {
@@ -1143,8 +1187,11 @@ function readRuleValue(rule, callback, checkUrl, needRawData, req) {
     return readFile(opts, callback);
   }
 
-  readFile = fileMgr[needRawData ? 'readFile' : 'readFileText'];
   filePath = getTempFilePath(filePath, rule);
+  if (!filePath) {
+    return callback();
+  }
+  readFile = fileMgr[needRawData ? 'readFile' : 'readFileText'];
   readFile(filePath, callback);
 }
 
@@ -1224,15 +1271,19 @@ function readRuleList(rule, callback, isJson, charset, isHtml, req) {
   var isBin = protoMgr.isBinProtocol(rule.name);
   var needRawData = isBin && !isJson;
   if (!len) {
-    var json = isJson && getMatcherJson(rule);
-    if (json) {
-      return callback(json);
+    if (isJson) {
+      var val = removeProtocol(getMatcher(rule), true);
+      val = val && val.trim();
+      var json = getMatcherJson(rule, val) || parsePureJSON(val, QUERY_PARAM_RE.test(val));
+      if (json) {
+        return callback(json);
+      }
     }
     return readRuleValue(
       rule,
       isJson
         ? function (value) {
-          callback(_parseJSON(value, RESOLVE_KEY_RE.test(rule.matcher)));
+          callback(tryParseMatcher(value, rule) || _parseJSON(value, RESOLVE_KEY_RE.test(rule.matcher)));
         }
         : callback,
         false,
@@ -1252,7 +1303,7 @@ function readRuleList(rule, callback, isJson, charset, isHtml, req) {
       var deepMerge = isDeep(result);
       result = result.map(function(text, i) {
         var item = rule.list[i];
-        return _parseJSON(text, item && RESOLVE_KEY_RE.test(item.matcher));
+        return tryParseMatcher(text, item) || _parseJSON(text, item && RESOLVE_KEY_RE.test(item.matcher));
       }).filter(noop);
       if (result.length > 1) {
         result.reverse();
@@ -1277,8 +1328,14 @@ function readRuleList(rule, callback, isJson, charset, isHtml, req) {
   var checkUrl = isJsHtml || isCssHtml;
   rule.list.forEach(function (r, i) {
     if (isJson) {
-      var value = removeProtocol(getMatcher(r), true);
-      var json = getMatcherJson(r, value);
+      var json = r.jsonObject;
+      var value;
+      if (json) {
+        r.jsonObject = undefined;
+      } else {
+        value = removeProtocol(getMatcher(r), true);
+        json = getMatcherJson(r, value);
+      }
       if (json) {
         result[i] = json;
         return execCallback();
@@ -1336,16 +1393,9 @@ exports.getRuleValue = function(rules, callback, noBody, charset, isHtml, req) {
   if (noBody || !rules) {
     return callback();
   }
-  if (!Array.isArray(rules)) {
-    rules = [rules];
-  }
-  spreadPromise(Promise.all(
-    rules.map(function (rule) {
-      return new Promise(function(resolve) {
-        readRuleList(rule, resolve, false, charset, isHtml, req);
-      });
-    })
-  ), callback);
+  handleCallback(rules, function(rule, cb) {
+    readRuleList(rule, cb, false, charset, isHtml, req);
+  }, callback);
 };
 
 function decodePath(path) {
@@ -1366,73 +1416,44 @@ function decodePath(path) {
 }
 
 exports.getRuleFiles = function(rule, req) {
+  if (rule.key) {
+    return [];
+  }
   var files = rule.files || [getPath(getUrl(rule))];
   var rawFiles = rule.rawFiles || files;
   var result = [];
-  files.map(function (file, i) {
+  files.forEach(function (file, i) {
     var opts = pluginMgr.resolveKey(rawFiles[i], rule, req);
     if (opts) {
       result.push(opts);
-    } else {
-      file = getTempFilePath(file, rule);
+    } else if (file = getTempFilePath(file, rule)) {
       file = fileMgr.convertSlash(file);
-      if (END_WIDTH_SEP_RE.test(file)) {
+      if (END_SLASH_RE.test(file)) {
         result.push(file.slice(0, -1));
-        result.push(join(file, 'index.html'));
+        result.push(file + 'index.html');
       } else {
         result.push(file);
       }
+    } else {
+      result.push(file);
     }
   });
   return result;
 };
 
-exports.getRuleFile = function(rule) {
+exports.getWriteFilePath = function(rule) {
   var filePath = getPath(getUrl(rule));
-  if (!filePath) {
-    return filePath;
-  }
-  return rule.root
-    ? join(rule.root, decodePath(filePath))
-    : decodePath(filePath);
+  return filePath && joinPath(rule.root, decodePath(filePath));
 };
 
-function getValue(rule) {
-  return rule.value || rule.path;
-}
-
-function trimUrl(url) {
-  if (!url) {
-    return url;
-  }
-  var index = url.indexOf('://');
-  if (index === -1) {
-    return url.trim();
-  }
-  index += 3;
-  var protocol = url.substring(0, index);
-  return protocol + url.substring(index).trim();
-}
-
-function getMatcher(rule) {
-  return trimUrl(rule && (getValue(rule) || rule.matcher));
-}
-
 function getUrl(rule) {
-  return trimUrl(rule && (getValue(rule) || rule.url));
+  return common.trimUrl(rule && (common.getRuleValue(rule) || rule.url));
 }
 
 exports.rule = {
   getMatcher: getMatcher,
   getUrl: getUrl
 };
-
-function getMatcherValue(rule) {
-  rule = getMatcher(rule);
-  return rule && removeProtocol(rule, true);
-}
-
-exports.getMatcherValue = getMatcherValue;
 
 exports.getUrlValue = function(rule) {
   rule = getUrl(rule);
@@ -1548,32 +1569,6 @@ function removeUnsupportsHeaders(headers, supportsDeflate) {
 
 exports.removeUnsupportsHeaders = removeUnsupportsHeaders;
 
-function hasRequestBody(req) {
-  req = typeof req == 'string' ? req : req.method;
-  if (typeof req != 'string') {
-    return false;
-  }
-
-  req = req.toUpperCase();
-  return !(
-    req === 'GET' ||
-    req === 'HEAD' ||
-    req === 'OPTIONS' ||
-    req === 'CONNECT'
-  );
-}
-
-exports.hasRequestBody = hasRequestBody;
-
-function getContentEncoding(headers) {
-  var encoding = toLowerCase(
-    (headers && headers['content-encoding']) || headers
-  );
-  return encoding === 'gzip' || (supportsBr && encoding === 'br') ||
-    encoding === 'deflate' ? encoding : null;
-}
-
-exports.getContentEncoding = getContentEncoding;
 
 function getZipStream(headers) {
   switch (getContentEncoding(headers)) {
@@ -1596,19 +1591,10 @@ exports.isZip = function(encoding, chunk) {
   return encoding === 'deflate';
 };
 
-function getUnzipStream(headers) {
-  switch (getContentEncoding(headers)) {
-  case 'gzip':
-    return zlib.createGunzip();
-  case 'br':
-    return supportsBr && zlib.createBrotliDecompress();
-  case 'deflate':
-    return zlib.createInflate();
-  }
-}
+
 
 exports.getZipStream = getZipStream;
-exports.getUnzipStream = getUnzipStream;
+
 exports.isWhistleTransformData = function (obj) {
   if (!obj) {
     return false;
@@ -1662,34 +1648,6 @@ function getPipeIconvStream(headers) {
 
 exports.getPipeIconvStream = getPipeIconvStream;
 
-function toLowerCase(str) {
-  return typeof str == 'string' ? str.trim().toLowerCase() : str;
-}
-
-exports.toLowerCase = toLowerCase;
-
-function toUpperCase(str) {
-  return typeof str == 'string' ? str.trim().toUpperCase() : str;
-}
-
-exports.toUpperCase = toUpperCase;
-
-var CHARSET_RE = /charset=([\w-]+)/i;
-
-function getCharset(str) {
-  var charset;
-  if (CHARSET_RE.test(str)) {
-    charset = RegExp.$1;
-    if (!iconv.encodingExists(charset)) {
-      return;
-    }
-  }
-
-  return charset;
-}
-
-exports.getCharset = getCharset;
-
 function getClientIpFH(headers, name) {
   var val = headers[name];
   if (!isString(val)) {
@@ -1704,7 +1662,7 @@ function getClientIpFH(headers, name) {
 }
 
 function getForwardedFor(headers) {
-  var ip = getClientIpFH(headers, config.CLIENT_IP_HEAD);
+  var ip = getClientIpFH(headers, clientIpKey);
   var cipKey = config.cipKey;
   if (cipKey && (!ip || config.overCipKey)) {
     ip = getClientIpFH(headers, cipKey) || ip;
@@ -1713,33 +1671,6 @@ function getForwardedFor(headers) {
 }
 exports.getForwardedFor = getForwardedFor;
 
-function isLocalIp(ip) {
-  if (!isString(ip)) {
-    return true;
-  }
-  return ip.length < 7 || ip === LOCALHOST;
-}
-
-function getRemoteAddr(req) {
-  try {
-    var socket = req.socket || req;
-    if (!socket._remoteAddr) {
-      var ip = req.headers && req.headers[config.REMOTE_ADDR_HEAD];
-      if (ip) {
-        socket._remoteAddr = ip;
-        delete req.headers[config.REMOTE_ADDR_HEAD];
-      } else {
-        socket._remoteAddr =
-          removeIPV6Prefix(socket.remoteAddress) || LOCALHOST;
-      }
-    }
-    return socket._remoteAddr;
-  } catch (e) {}
-  return LOCALHOST;
-}
-
-exports.getRemoteAddr = getRemoteAddr;
-
 function getClientIp(req, ip) {
   ip = ip || getForwardedFor(req.headers || {}) || getRemoteAddr(req);
   return isLocalIp(ip) ? LOCALHOST : ip;
@@ -1747,33 +1678,12 @@ function getClientIp(req, ip) {
 
 exports.getClientIp = getClientIp;
 
-function getRemotePort(req) {
-  try {
-    var socket = req.socket || req;
-    if (socket._remotePort == null) {
-      var port = req.headers && req.headers[config.REMOTE_PORT_HEAD];
-      if (port) {
-        delete req.headers[config.REMOTE_PORT_HEAD];
-      } else {
-        port = socket.remotePort;
-      }
-      socket._remotePort = port > 0 ? port : '0';
-    }
-    return socket._remotePort;
-  } catch (e) {}
-  return 0;
+
+function getClientPort(req) {
+  return common.getClientPort(req, config);
 }
 
-exports.getRemotePort = getRemotePort;
-
-exports.getClientPort = function (req) {
-  var headers = req.headers || {};
-  var port = headers[config.CLIENT_PORT_HEAD];
-  if (port > 0) {
-    return port;
-  }
-  return getRemotePort(req);
-};
+exports.getClientPort = getClientPort;
 
 exports.removeIPV6Prefix = removeIPV6Prefix;
 
@@ -1809,8 +1719,9 @@ exports.isLocalPHost = function(req, isHttps) {
   return isLocalHost(hostname);
 };
 
+var MULTIPART_RE = /multipart/i;
 function isMultipart(req) {
-  return /multipart/i.test(req.headers['content-type']);
+  return MULTIPART_RE.test(req.headers['content-type']);
 }
 
 exports.isMultipart = isMultipart;
@@ -1834,7 +1745,7 @@ function replaceQueryString(query, replaceQuery, delProps) {
   var params = {};
   var curParams = {};
   var name, value;
-  var parseKey = (item) => {
+  var parseKey = function (item) {
     var index = item.indexOf('=');
     if (index == -1) {
       name = item;
@@ -1913,9 +1824,9 @@ function setHeaders(data, obj) {
   if (!data.headers) {
     data.headers = {};
   }
-  for (var i in obj) {
-    data.headers[i] = obj[i];
-  }
+  Object.keys(obj).forEach(function (key) {
+    data.headers[key] = obj[key];
+  });
   return data;
 }
 
@@ -1931,29 +1842,35 @@ function setHeader(data, name, value) {
 
 exports.setHeader = setHeader;
 
-function join(root, dir) {
-  return root ? path.resolve(root, dir) : dir;
+function joinPath(root, dir) {
+  if (common.existsUpPath(dir)) {
+    return;
+  }
+  if (!root) {
+    return dir;
+  }
+  var fullPath = path.resolve(root, dir);
+  var slash = END_SLASH_RE.exec(dir || root);
+  return slash && !END_SLASH_RE.test(fullPath) ? fullPath + slash[0] : fullPath;
 }
 
-exports.join = join;
+exports.joinPath = joinPath;
 
-function resolveProperties(list, result) {
+function parseRuleProps(list, result) {
   result = result || {};
   if (list) {
-    list
-      .map(getMatcherValue)
-      .join('|')
-      .split(SEP_RE)
-      .forEach(function (action) {
-        if (action) {
+    list.forEach(function(rule) {
+      if (rule = getMatcherValue(rule)) {
+        common.parseProps(rule).forEach(function (action) {
           result[action] = true;
-        }
-      });
+        });
+      }
+    });
   }
   return result;
 }
 
-exports.resolveProperties = resolveProperties;
+exports.parseRuleProps = parseRuleProps;
 
 exports.parseLineProps = function (str) {
   str = str && removeProtocol(str, true);
@@ -2080,17 +1997,7 @@ exports.checkSkip = function(skip, rule, curUrl) {
 };
 
 function resolveRuleProps(rule, result) {
-  result = result || {};
-  if (rule) {
-    rule.list.forEach(function (rule) {
-      getMatcherValue(rule)
-        .split(SEP_RE)
-        .forEach(function (action) {
-          result[action] = true;
-        });
-    });
-  }
-  return result;
+  return parseRuleProps(rule && rule.list, result);
 }
 
 var PLUGIN_RE = /^(?:plugin|whistle)\.[a-z\d_\-]+$/;
@@ -2171,7 +2078,7 @@ function ignoreRules(rules, ignore, isResRules) {
     if (name === 'filter' || name === 'ignore' || exclude[name]) {
       return;
     }
-    if (!isResRules || protoMgr.resProtocols.indexOf(name) !== -1) {
+    if (!isResRules || resProtocols.indexOf(name) !== -1) {
       if (
         ignorePlugins(rules, name, exclude) ||
         ignoreProxy(rules, name, exclude) ||
@@ -2271,10 +2178,12 @@ function mergeRules(req, add, isResRules) {
       origin[protocol] = rule;
     }
   };
-  if (isResRules && origAdd) {
-    protoMgr.resProtocols.forEach(merge);
-  } else if (origAdd) {
-    Object.keys(origAdd).forEach(merge);
+  if (origAdd) {
+    if (isResRules) {
+      resProtocols.forEach(merge);
+    } else {
+      Object.keys(origAdd).forEach(merge);
+    }
   }
 
   req['delete'] = resolveRuleProps(origin['delete'], req['delete']);
@@ -2350,7 +2259,10 @@ function replaceHeader(str, regExp, key, value) {
   }
   str = String(str);
   if (!regExp || !SUB_MATCH_RE.test(value)) {
-    return str.replace(regExp || key, value);
+    if (regExp) {
+      return str.replace(regExp, value);
+    }
+    return key ? str.split(key).join(value) : str;
   }
   return str.replace(regExp, function () {
     return replacePattern(value, arguments);
@@ -2381,22 +2293,20 @@ exports.handleHeaderReplace = handleHeaderReplace;
 
 var HTML_RE = /html/i;
 
+function addClientInfo(req) {
+  var headers = req.headers;
+  headers[clientIpKey] = req.clientIp || getClientIp(req);
+  headers[common.CLIENT_PORT_HEADER] = req.clientPort || getClientPort(req);
+  headers['x-whistle-remote-address'] = req._remoteAddr || getRemoteAddr(req);
+  headers['x-whistle-remote-port'] = req._remotePort || getRemotePort(req);
+}
+
+exports.addClientInfo = addClientInfo;
+
 exports.transformReq = function(req, res, port, host, html) {
   var options = common.getReqOptions(req, port, host);
   var headers = req.headers;
-  if (req.fromComposer) {
-    headers[config.REQ_FROM_HEADER] = 'W2COMPOSER';
-  } else if (req.fromInternalPath) {
-    headers[config.REQ_FROM_HEADER] = 'W2INTERNAL_PATH';
-  }
-  if (req.clientIp || !net.isIP(headers[config.CLIENT_IP_HEAD])) {
-    var clientIp = req.clientIp || getClientIp(req);
-    if (isLocalAddress(clientIp)) {
-      delete headers[config.CLIENT_IP_HEAD];
-    } else {
-      headers[config.CLIENT_IP_HEAD] = clientIp;
-    }
-  }
+  addClientInfo(req);
   options.hostname = null;
   html && removeUnsupportsHeaders(headers);
   var destroyed;
@@ -2480,9 +2390,11 @@ function getCgiUrl(url) {
     return;
   }
   if (url[0] === '.' && url[1] === '/') {
-    return url.substring(2);
+    url = url.substring(2);
+  } else {
+    url = url[0] === '/' ? url.substring(1) : url;
   }
-  return url[0] === '/' ? url.substring(1) : url;
+  return url.substring(0, 10240);
 }
 exports.getCgiUrl = getCgiUrl;
 
@@ -2513,7 +2425,8 @@ exports.getCustomTab = function (tab, pluginName) {
   }
   return {
     action: 'plugin.' + pluginName + '/' + page,
-    name: name.substring(0, 32)
+    name: name.substring(0, 32),
+    icon: getCgiUrl(tab.icon || tab.iconUrl)
   };
 };
 
@@ -2554,9 +2467,11 @@ function getString(str) {
 
 exports.getString = getString;
 
+var HTML_PAGE_RE = /\.html?$/i;
+
 function getPage(page) {
   page = getCgiUrl(page);
-  return !page || page.length > 128 || !/\.html?$/i.test(page) ? null : page;
+  return !page || page.length > 128 || !HTML_PAGE_RE.test(page) ? null : page;
 }
 
 exports.getPluginMenu = function (menus, pluginName) {
@@ -2603,6 +2518,7 @@ exports.getNetworkColumn = function(conf) {
   return {
     title: title.substring(0, 16),
     key: key.substring(0, 72),
+    iconKey: isString(column.iconKey) ? column.iconKey.substring(0, 72) : undefined,
     showTitle: (column.showTips || column.showTitle) ? 1 : undefined,
     width: Math.min(360, Math.max(parseInt(column.width) || 120, 70))
   };
@@ -2708,7 +2624,7 @@ exports.getStaticDir = function (conf) {
   if (
     !staticDir ||
     typeof staticDir !== 'string' ||
-    !/^[\w./-]+$/.test(staticDir) ||
+    !PATH_RE.test(staticDir) ||
     staticDir.length > 100
   ) {
     return;
@@ -2722,7 +2638,7 @@ function toString(str) {
       return str;
     }
     try {
-      return JSON.stringify(str);
+      return JSON.stringify(str) || '';
     } catch (e) {}
   }
   return '';
@@ -2731,21 +2647,11 @@ exports.toString = toString;
 
 var index = 0;
 
-function padReqId(num) {
-  if (num > 99) {
-    return num;
-  }
-  if (num > 9) {
-    return '0' + num;
-  }
-  return '00' + num;
-}
-
 exports.getReqId = function (now) {
   if (index > 999) {
     index = 0;
   }
-  return (now || Date.now()) + '-' + padReqId(index++) + workerIndex;
+  return (now || Date.now()) + '-' + common.padLeft(index++, 3) + workerIndex;
 };
 
 exports.onSocketEnd = common.onSocketEnd;
@@ -2763,16 +2669,18 @@ var REQ_HEADER_RE = /^req\.?H(?:eaders?)?\.(.+)$/i;
 var RES_HEADER_RE = /^res\.?H(?:eaders?)?\.(.+)$/i;
 var TRAILER_RE = /trailer\.(.+)$/;
 var HEADER_RE = /^headers\.(.+)$/;
-var REQ_COOKIE_RE = /^req\.?C(?:ookies?)?\.(.+)$/i;
-var RES_COOKIE_RE = /^res\.?C(?:ookies?)?\.(.+)$/i;
-var REQ_BODY_RE = /^req\.?B(?:ody?)?\.(.+)$/i;
-var RES_BODY_RE = /^res\.?B(?:ody?)?\.(.+)$/i;
-var COOKIE_RE = /^cookies?\.(.+)$/i;
-var QUERY_RE = /^(?:query|params|url\.?Params?)\.(.+)$/i;
+var REQ_COOKIE_RE = /^req\.?C(?:ookies?)?\.([\s\S]+)$/i;
+var RES_COOKIE_RE = /^res\.?C(?:ookies?)?\.([\s\S]+)$/i;
+var REQ_BODY_RE = /^req\.?B(?:ody?)?\.([\s\S]+)$/i;
+var RES_BODY_RE = /^res\.?B(?:ody?)?\.([\s\S]+)$/i;
+var COOKIE_RE = /^cookies?\.([\s\S]+)$/i;
+var QUERY_RE = /^(?:query|params|url\.?Params?)\.([\s\S]+)$/i;
 var QUERY_STRING_RE = /^(?:query|params|url\.?Params?)$/i;
+var PATH_INDEX_RE = /^pathname(?:\.?(-?\d+|first|last))?$/i;
 
 exports.parseDelQuery = function(req, delType) {
   var query;
+  var paths;
   var deleteRule = req['delete'];
   if (deleteRule) {
     Object.keys(deleteRule).forEach(function (prop) {
@@ -2781,6 +2689,10 @@ exports.parseDelQuery = function(req, delType) {
         query[RegExp.$1] = 1;
       } else if (QUERY_STRING_RE.test(prop)) {
         req._delQueryString = true;
+      } else if (PATH_INDEX_RE.test(prop)) {
+        paths = paths || {};
+        prop = RegExp.$1;
+        paths[prop === 'first' ? '0' : prop || 'all'] = 1;
       } else if (delType) {
         if (prop === 'reqType' || prop === 'req.type') {
           delType.reqType = true;
@@ -2790,7 +2702,7 @@ exports.parseDelQuery = function(req, delType) {
       }
     });
   }
-  return query;
+  return { query: query, paths: paths };
 };
 
 exports.deleteQuery = function(url, props, clear) {
@@ -2843,12 +2755,11 @@ exports.parseDelResBody = function(req) {
 
 exports.deleteProps = function(obj, keys) {
   keys = obj && keys && Object.keys(keys);
-  if (!keys || !keys.length) {
-    return;
+  if (keys && keys.length) {
+    keys.forEach(function(key) {
+      common.deleteProps(obj, key);
+    });
   }
-  keys.forEach(function(key) {
-    common.deleteProps(obj, key);
-  });
 };
 
 function getDomain(req) {
@@ -3189,7 +3100,6 @@ exports.setReqCookies = function (data, cookies, curCookies, req) {
 
 function getCookieItem(name, cookie) {
   if (!cookie || typeof cookie != 'object') {
-    cookie = cookie ? escapeValue(cookie) : cookie;
     return name + '=' + (cookie == null ? '' : cookie);
   }
   var attrs = [name + '=' + escapeValue(cookie.value)];
@@ -3303,18 +3213,9 @@ exports.setProxyHost = function (req, options, reserve) {
     opts.port = phost.port;
   }
   opts.headers = opts.headers || {};
-  config.setHeader(opts.headers, 'host', joinIpPort(opts.host, opts.port));
+  common.setRawHeader(opts.headers, 'host', joinIpPort(opts.host, opts.port));
   return opts;
 };
-
-function getMethod(method) {
-  if (typeof method !== 'string') {
-    return 'GET';
-  }
-  return method.trim().toUpperCase() || 'GET';
-}
-
-exports.getMethod = getMethod;
 
 var RESPONSE_FOR_NAME = /^name=(.+)$/;
 exports.setResponseFor = function (rules, headers, req, serverIp, phost) {
@@ -3375,7 +3276,7 @@ function setConfigVarFn(_, name) {
   return config[name.toLowerCase()];
 }
 
-exports.getRemoteRules = function (apo, rulesUrl, root) {
+function getRemoteRules(apo, rulesUrl, root) {
   var headers = config.runtimeHeaders;
   var pluginName;
   if (PLUGIN_RULES_URL_RE.test(rulesUrl)) {
@@ -3390,15 +3291,34 @@ exports.getRemoteRules = function (apo, rulesUrl, root) {
   if (apo) {
     rulesUrl = rulesUrl.replace(CONFIG_VAR_RE, setConfigVarFn);
   }
-  if (root && !pluginName && REL_PATH_RE.test(rulesUrl)) {
-    rulesUrl = join(root, rulesUrl);
+  if (root && !pluginName && REL_PATH_RE.test(rulesUrl) && !(rulesUrl = joinPath(root, rulesUrl))) {
+    return '';
   }
   return httpMgr.add(rulesUrl, headers, pluginName);
+}
+
+exports.getRemoteRules = getRemoteRules;
+
+var MAX_REMOTE_RULES_COUNT = 20;
+var REMOTE_RULES_RE = /^\s*@(`?)(whistle\.[a-z\d_\-]+(?:\/[^\s#]*)?|(?:https?:\/\/|[a-z]:[\\/]|~?\/)[^\s#]+|\$(?:whistle\.)?[a-z\d_-]+[/:][^\s#]+)\s*?\1(?:#.*)?$/gim;
+
+exports.getRemoteRulesResolver = function(inlineValues) {
+  var index = 0;
+  return function(text, file) {
+    return text.replace(REMOTE_RULES_RE, function (_, apo, rulesUrl) {
+      if (index >= MAX_REMOTE_RULES_COUNT) {
+        return '';
+      }
+      ++index;
+      return resolveInlineValues(getRemoteRules(apo, rulesUrl), inlineValues, file);
+    });
+  };
 };
 
 function isCustomParser(req) {
   var enable = req.enable;
-  return enable && (enable.customParser || enable.customFrames);
+  var disable = req.disable;
+  return enable && (enable.customParser || enable.customFrames) && (!disable || (!disable.customParser && !disable.customFrames));
 }
 exports.isCustomParser = isCustomParser;
 
@@ -3469,19 +3389,19 @@ exports.parseRange = function (req, size) {
 };
 
 exports.parseClientInfo = function (req) {
-  var clientInfo = req.headers[config.CLIENT_INFO_HEAD] || '';
-  if (req.headers[config.REQ_FROM_HEADER] === 'W2COMPOSER') {
+  if (req.headers[config.FROM_COM_HEADER] === '1') {
     req.fromComposer = true;
     req._disabledProxyRules = !!req.headers[config.DISABLE_RULES_HEADER];
-    delete req.headers[config.REQ_FROM_HEADER];
+    delete req.headers[config.FROM_COM_HEADER];
     delete req.headers[config.DISABLE_RULES_HEADER];
   }
   var socket = req.socket || '';
   if (socket.fromTunnel) {
     req.fromTunnel = true;
   }
+  var clientInfo = req.headers[clientInfoKey];
   if (clientInfo) {
-    delete req.headers[config.CLIENT_INFO_HEAD];
+    delete req.headers[clientInfoKey];
     clientInfo = String(clientInfo).split(',');
     if (!net.isIP(clientInfo[0]) || !(clientInfo[1] > 0)) {
       return '';
@@ -3489,70 +3409,7 @@ exports.parseClientInfo = function (req) {
     req.fromTunnel = true;
     socket.fromTunnel = true;
   }
-  return clientInfo;
-};
-
-function getCipher(rules) {
-  var cipher = rules && getMatcherValue(rules.cipher);
-  if (!cipher) {
-    return TLSV2_CIPHERS;
-  }
-  cipher = cipher.toUpperCase();
-  return CIPHER_OPTIONS.indexOf(cipher) === -1 ? TLSV2_CIPHERS : cipher;
-}
-
-exports.getCipher = getCipher;
-
-exports.connect = function (options, callback) {
-  var socket, timer, done, retry;
-  var execCallback = function (err) {
-    clearTimeout(timer);
-    timer = null;
-    if (!done) {
-      done = true;
-      err ? callback(err) : callback(null, socket);
-    }
-  };
-  var handleConnect = function () {
-    execCallback();
-  };
-  var handleError = function (err) {
-    if (done) {
-      return;
-    }
-    socket.removeAllListeners();
-    socket.on('error', noop);
-    socket.destroy(err);
-    clearTimeout(timer);
-    if (retry) {
-      return execCallback(err);
-    }
-    retry = true;
-    timer = setTimeout(handleTimeout, 12000);
-    try {
-      if (options.ALPNProtocols && err && isCiphersError(err)) {
-        options.ciphers = getCipher(options._rules);
-      }
-      socket = sockMgr.connect(options, handleConnect);
-    } catch (e) {
-      return execCallback(e);
-    }
-    socket.on('error', handleError);
-    socket.on('close', function (err) {
-      !done && execCallback(err || new Error('closed'));
-    });
-  };
-  var handleTimeout = function () {
-    handleError(TIMEOUT_ERR);
-  };
-  var sockMgr = options.ALPNProtocols ? tls : net;
-  timer = setTimeout(handleTimeout, 6000);
-  try {
-    socket = sockMgr.connect(options, handleConnect);
-  } catch (e) {
-    return execCallback(e);
-  }
-  socket.on('error', handleError);
+  return clientInfo || '';
 };
 
 exports.checkPluginReqOnce = function (req, raw) {
@@ -3560,7 +3417,8 @@ exports.checkPluginReqOnce = function (req, raw) {
   if (raw ? isPluginReq : isPluginReq == 1) {
     delete req.headers[config.PROXY_ID_HEADER];
   }
-  if (isPluginReq == 'internal') {
+  req._isPureInternalReq = isPluginReq == 'internal';
+  if (req._isPureInternalReq || isPluginReq == 'internalx') {
     req._isInternalReq = true;
     delete req.headers[config.PROXY_ID_HEADER];
   }
@@ -3732,12 +3590,6 @@ exports.getStatusCodeFromRule = function (rules, req) {
   return result;
 };
 
-var GZIP_RE = /\bgzip\b/i;
-
-exports.canGzip = function (req) {
-  return GZIP_RE.test(req.headers['accept-encoding']);
-};
-
 function removeBody(req, data, isRes) {
   var rule = req['delete'] || '';
   if (rule.body || rule[isRes ? 'res.body' : 'req.body']) {
@@ -3776,19 +3628,41 @@ function readOneChunk(stream, callback, timeout) {
 
 exports.readOneChunk = readOneChunk;
 
+var AUTH_RE = /^(?:username|password)=/;
+
+function formatAuth(obj) {
+  if (!obj) {
+    return;
+  }
+  var username = obj.username;
+  var password = obj.password;
+  return {
+    username: username == null ? null : String(username),
+    password: password == null ? null : String(password)
+  };
+}
+
 exports.getAuthByRules = function (rules) {
   if (!rules.auth) {
     return;
   }
   var auth = getMatcherValue(rules.auth);
-  if (/[\\\/]/.test(auth)) {
-    return;
+  if (auth[0] === '{' && auth[auth.length - 1] === '}') {
+    return formatAuth(parseRawJson(auth)) || {};
+  }
+  var obj = AUTH_RE.test(auth) && formatAuth(parseQuery(auth, null, null, true));
+  if (obj || SLASH_RE.test(auth)) {
+    return obj;
   }
   var index = auth.indexOf(':');
   return {
     username: index == -1 ? auth : auth.substring(0, index),
     password: index == -1 ? null : auth.substring(index + 1)
   };
+};
+
+exports.lookupType = function (type) {
+  return type === 'sse' ? 'text/event-stream' : mime.lookup(type, 'application/octet-stream');
 };
 
 exports.getAuthBasic = function (auth) {
@@ -3824,7 +3698,7 @@ var F_IP_RE = /\b(?:clientIp|ip|for)\b/i;
 
 exports.handleForwardedProps = function (req) {
   var headers = req.headers;
-  var props = headers['x-whistle-forwarded-props'];
+  var props = headers[FWD_PROPS_HEADER];
   var enableFwdHost = config.enableFwdHost;
   var enableFwdProto = config.enableFwdProto;
   var enableFwdFor = config.keepXFF;
@@ -3833,24 +3707,24 @@ exports.handleForwardedProps = function (req) {
     enableFwdProto = enableFwdProto || F_PROTO_RE.test(props);
     enableFwdFor = enableFwdFor || F_IP_RE.test(props);
     if (config.master && enableFwdFor) {
-      headers['x-whistle-forwarded-props'] = 'ip';
+      headers[FWD_PROPS_HEADER] = 'ip';
     } else {
-      delete headers['x-whistle-forwarded-props'];
+      delete headers[FWD_PROPS_HEADER];
     }
   }
   req.enableXFF = enableFwdFor;
   if (enableFwdHost) {
-    var host = headers[config.FWD_HOST_HEADER];
+    var host = headers[FWD_HOST_HEADER];
     if (host) {
-      delete headers[config.FWD_HOST_HEADER];
-      headers[config.REAL_HOST_HEADER] =
-        headers[config.REAL_HOST_HEADER] || host;
+      delete headers[FWD_HOST_HEADER];
+      headers[REAL_HOST_HEADER] =
+        headers[REAL_HOST_HEADER] || host;
     }
   }
   if (enableFwdProto) {
-    var proto = headers[config.HTTPS_PROTO_HEADER];
+    var proto = headers[HTTPS_PROTO_HEADER];
     if (proto) {
-      delete headers[config.HTTPS_PROTO_HEADER];
+      delete headers[HTTPS_PROTO_HEADER];
       req.isHttps = proto === 'https';
     }
   }
@@ -3887,10 +3761,10 @@ function setTunnelHeaders(headers, remoteData) {
     headers['proxy-authorization'] = remoteData.proxyAuth;
   }
   if (remoteData.tunnelData) {
-    headers[config.TUNNEL_DATA_HEADER] = remoteData.tunnelData;
+    headers[TUNNEL_DATA_HEADER] = remoteData.tunnelData;
   }
   if (remoteData.sniPlugin) {
-    headers[config.SNI_PLUGIN_HEADER] = remoteData.sniPlugin;
+    headers[SNI_PLUGIN_HEADER] = remoteData.sniPlugin;
   }
   var tunnelHeaders = remoteData.headers;
   if (tunnelHeaders) {
@@ -3904,19 +3778,16 @@ function setTunnelHeaders(headers, remoteData) {
 
 exports.setTunnelHeaders = setTunnelHeaders;
 
-var tunnelDataKey = config.TUNNEL_DATA_HEADER;
-var tmplDataKey = config.TEMP_TUNNEL_DATA_HEADER;
-
 exports.addTunnelData = function(socket, headers) {
-  var data = socket[tunnelDataKey];
+  var data = socket[TUNNEL_DATA_HEADER];
   if (!data) {
-    data = headers[tmplDataKey];
+    data = headers[TEMP_TUNNEL_DATA_HEADER];
     if (data) {
-      delete headers[tmplDataKey];
+      delete headers[TEMP_TUNNEL_DATA_HEADER];
       try {
         data = decodeURIComponent(data);
         data = JSON.parse(data);
-        socket[tunnelDataKey] = data;
+        socket[TUNNEL_DATA_HEADER] = data;
       } catch(e) {
         return;
       }
@@ -4082,4 +3953,47 @@ exports.getNewType = function(type, headers) {
     }
   }
   return type;
+};
+
+exports.setRejectUnauthorized = function (req, options) {
+  if (req._isInternalReq && req.disable.rejectUnauthorized) {
+    options.rejectUnauthorized = false;
+  } else {
+    options.rejectUnauthorized = config.rejectUnauthorized;
+  }
+  return options;
+};
+
+exports.notStarted = function (err) {
+  return err && err.code === 'ECONNREFUSED';
+};
+
+exports.getLocalhostIP = function (err, req, domain, curIp) {
+  if (!err || req.rules.host || req.disable.lacalhostCompatible ||
+    err.code !== 'ECONNREFUSED' || domain !== 'localhost') {
+    return;
+  }
+  if (curIp === '::1') {
+    return LOCALHOST;
+  }
+  if (curIp === LOCALHOST) {
+    return '::1';
+  }
+};
+
+function checkHideProp(e, d, name, filterHide) {
+  var hide = 'hide' + name;
+  var show = 'show' + name;
+  return (e[hide] || d[show] || filterHide) && !e[show] && !d[hide];
+}
+
+exports.checkHideProp = checkHideProp;
+
+exports.isHide = function(req) {
+  if (!config.captureData) {
+    return true;
+  }
+  var e = req.enable || '';
+  var d = req.disable || '';
+  return req.fromComposer ? checkHideProp(e, d, 'Composer') : checkHideProp(e, d, '', req._filters && req._filters.hide);
 };

@@ -4,6 +4,7 @@ var tls = require('tls');
 var sockx = require('sockx');
 var util = require('../util');
 var config = require('../config');
+var extend = require('extend');
 var http2 = config.enableH2 ? require('http2') : null;
 
 var SUPPORTED_PROTOS = ['h2', 'http/1.1', 'http/1.0'];
@@ -21,6 +22,9 @@ var CONCURRENT = 3;
 var CLOSED_ERR = new Error('closed');
 var MSM = 1200;
 var PMCS = 3600;
+var RESET_BURST = 100000;
+var RESET_RATE = 33;
+var REQ_OPTS = { endStream: true };
 
 function onClose(stream, callback) {
   stream.on('error', callback);
@@ -116,7 +120,7 @@ function addCert(opts, options, disabled) {
   return disabled ? opts : util.setSecureOptions(opts);
 }
 
-function getProxySocket(options, callback, ciphers, isHttp, disabled) {
+function getProxySocket(options, callback, tlsOpts, isHttp, disabled) {
   var handleConnect = function (err, socket) {
     if (err) {
       return callback(err);
@@ -138,27 +142,30 @@ function getProxySocket(options, callback, ciphers, isHttp, disabled) {
       }
     };
     try {
+      var opts = {
+        servername: options.servername,
+        socket: socket,
+        rejectUnauthorized: config.rejectUnauthorized,
+        ALPNProtocols: SUPPORTED_PROTOS,
+        NPNProtocols: SUPPORTED_PROTOS
+      };
+      if (tlsOpts) {
+        extend(opts, tlsOpts);
+      }
       socket = tls.connect(
         addCert(
-          {
-            servername: options.servername,
-            socket: socket,
-            rejectUnauthorized: config.rejectUnauthorized,
-            ALPNProtocols: SUPPORTED_PROTOS,
-            NPNProtocols: SUPPORTED_PROTOS,
-            ciphers: ciphers
-          },
+          opts,
           options,
           disabled
         ),
         handleCallback
       );
       socket.on('error', function (e) {
-        if (!ciphers && util.isCiphersError(e)) {
+        if (!tlsOpts && util.isCiphersError(e)) {
           return getProxySocket(
             options,
             callback,
-            util.getCipher(options._rules),
+            util.getTlsOptions(options._rules),
             false,
             disabled
           );
@@ -230,15 +237,16 @@ function getClient(req, socket, name, callback) {
   };
   var timer = setTimeout(handleCallback, REQ_TIMEOUT);
   var client = http2.connect(
-    origin, {
+    origin, util.setRejectUnauthorized(req, {
       settings: H2_SETTINGS,
       maxSessionMemory: MSM,
       peerMaxConcurrentStreams: PMCS,
-      rejectUnauthorized: config.rejectUnauthorized,
+      streamResetBurst: RESET_BURST,
+      streamResetRate: RESET_RATE,
       createConnection: function () {
         return socket;
       }
-    }, function() {
+    }), function() {
       handleCallback(null, client);
     });
   clients[name] = client;
@@ -264,16 +272,14 @@ function requestH2(client, req, res, callback) {
   headers[':method'] = options.method;
   headers[':authority'] = req.headers.host;
   try {
-    var h2Session = client.request(headers);
-    if (req.noReqBody) {
-      onClose(h2Session, function() {
-        if (!responsed) {
-          responsed = true;
-          h2Session.destroy();
-          callback();
-        }
-      });
-    }
+    var h2Session = client.request(headers, req.noReqBody ? REQ_OPTS : undefined);
+    onClose(h2Session, function() {
+      if (!responsed) {
+        responsed = true;
+        h2Session.destroy();
+        req.noReqBody && callback();
+      }
+    });
     var additionalHeaders;
     h2Session.once('headers', function(headers) {
       try {
@@ -290,7 +296,7 @@ function requestH2(client, req, res, callback) {
       var statusCode = h2Headers[':status'];
       var svrRes = h2Session;
       if (additionalHeaders) {
-        newHeaders[config.ADDITIONAL_HEAD] = additionalHeaders;
+        newHeaders[util.ADDITIONAL_HEAD] = additionalHeaders;
       }
       svrRes.on('trailers', function (trailers) {
         svrRes.trailers = trailers;
@@ -298,7 +304,7 @@ function requestH2(client, req, res, callback) {
       svrRes.statusCode = statusCode;
       // HTTP2 对响应内容格式要求太严格（NGHTTP2_PROTOCOL_ERROR）
       if (!util.hasBody(svrRes, req)) {
-        h2Session.destroy();
+        h2Session.on('data', util.noop);
         svrRes = util.createTransform();
         svrRes.statusCode = statusCode;
         svrRes.push(null);
@@ -342,6 +348,8 @@ exports.getServer = function (options, listener) {
   if (options.allowHTTP1 && http2) {
     options.maxSessionMemory = MSM;
     options.peerMaxConcurrentStreams = PMCS;
+    options.streamResetBurst = RESET_BURST;
+    options.streamResetRate = RESET_RATE;
     options.settings = H2_SVR_SETTINGS;
     server = http2.createSecureServer(options);
   } else {
@@ -355,6 +363,8 @@ exports.getHttpServer = function (_, listener) {
   var server = http2.createServer({
     maxSessionMemory: MSM,
     peerMaxConcurrentStreams: PMCS,
+    streamResetBurst: RESET_BURST,
+    streamResetRate: RESET_RATE,
     settings: H2_SVR_SETTINGS,
     allowHTTP1: true
   });
@@ -367,10 +377,7 @@ function checkTlsError(err) {
     return true;
   }
   var code = err.code;
-  if (typeof code !== 'string') {
-    return false;
-  }
-  return code.indexOf('ERR_TLS_') === 0 || code.indexOf('ERR_SSL_') === 0;
+  return typeof code === 'string' && (code.indexOf('ERR_TLS_') === 0 || code.indexOf('ERR_SSL_') === 0);
 }
 
 exports.request = function (req, res, callback) {
@@ -420,6 +427,7 @@ exports.request = function (req, res, callback) {
       if (socket) {
         socket.secureConnecting = false; // fix: node bug
       }
+      req._connectTime = Date.now();
       var handleH2 = function (clt) {
         delete pendingList[name];
         delete pendingH2[key];

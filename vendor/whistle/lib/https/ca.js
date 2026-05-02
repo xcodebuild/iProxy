@@ -11,10 +11,10 @@ var createSecureContext =
   require('tls').createSecureContext || crypto.createCredentials;
 var util = require('../util');
 var config = require('../config');
+var common = require('../util/common');
+var rulesUtil = require('../rules/util');
 
 var pki = forge.pki;
-var CUR_VERSION = process.version;
-var requiredVersion = parseInt(CUR_VERSION.slice(1), 10) >= 6;
 var HTTPS_DIR = mkdir(path.join(config.getDataDir(), 'certs'));
 var ROOT_NEW_KEY_FILE = path.join(HTTPS_DIR, 'root_new.key');
 var ROOT_NEW_CRT_FILE = path.join(HTTPS_DIR, 'root_new.crt');
@@ -38,6 +38,7 @@ var customCertCount = 0;
 var cachePairs = new LRU({ max: 5120 });
 var certsCache = new LRU({ max: 256 });
 var remoteCerts = new LRU({ max: 1280 });
+var KEY_SIZE = 2048;
 var ILEGAL_CHAR_RE = /[^a-z\d-]/i;
 // https://cloud.tencent.com/developer/ask/sof/58155
 var RANDOM_SERIAL = '/' + Date.now() + '/' + process.pid + '/' + Math.floor(Math.random() * 100);
@@ -46,13 +47,23 @@ var MIN_DATE = ONE_DAY * 20;
 var CLEAR_CERTS_INTERVAL = ONE_DAY * 20;
 var MAX_INNTERFAL = 16;
 var PORT_RE = /:\d*$/;
+var pureCertFiles = {};
 var customRoot;
 var ROOT_KEY, ROOT_CRT;
 var rootKey, rootCrt;
+var ILLEGAL_PATH_RE = /[/\\]/;
 
 exports.remoteCerts = remoteCerts;
 exports.createSecureContext = createSecureContext;
 exports.CUSTOM_CERTS_DIR = CUSTOM_CERTS_DIR;
+
+function notRootCa(name) {
+  return name !== 'root';
+}
+
+function checkFilename(name) {
+  return name && !ILLEGAL_PATH_RE.test(name) && notRootCa(name);
+}
 
 function resetAllCerts() {
   cachePairs.reset();
@@ -72,7 +83,7 @@ if (timer && typeof timer.unref === 'function') {
   timer.unref();
 }
 
-if (!useNewKey && requiredVersion && !checkCertificate()) {
+if (!useNewKey && !checkCertificate()) {
   try {
     fs.unlinkSync(ROOT_KEY_FILE);
     fs.unlinkSync(ROOT_CRT_FILE);
@@ -96,7 +107,7 @@ function isExpiredCert(crt) {
 function checkCertificate() {
   try {
     var crt = pki.certificateFromPem(fs.readFileSync(ROOT_CRT_FILE));
-    if (crt.publicKey.n.toString(2).length < 2048 || isExpiredCert(crt.validity)) {
+    if (crt.publicKey.n.toString(2).length < KEY_SIZE || isExpiredCert(crt.validity)) {
       return false;
     }
     return /^whistle\.\d+$/.test(getCommonName(crt));
@@ -194,7 +205,28 @@ function createSelfCert(hostname) {
     }
   ]);
   cert.setIssuer(ROOT_CRT.subject.attributes);
+  // Get SKI from ROOT_CRT for authorityKeyIdentifier extension
+  var rootSkiBytes;
+  try {
+    rootSkiBytes = ROOT_CRT.generateSubjectKeyIdentifier().getBytes();
+  } catch(ex) {
+    rootSkiBytes = null;
+  }
   cert.setExtensions([
+    {
+      name: 'basicConstraints',
+      cA: false
+    },
+    {
+      name: 'keyUsage',
+      digitalSignature: true,
+      keyEncipherment: true
+    },
+    {
+      name: 'extKeyUsage',
+      serverAuth: true,
+      clientAuth: true
+    },
     {
       name: 'subjectAltName',
       altNames: [
@@ -208,6 +240,10 @@ function createSelfCert(hostname) {
             value: hostname
           }
       ]
+    },
+    {
+      name: 'authorityKeyIdentifier',
+      keyIdentifier: rootSkiBytes
     }
   ]);
   cert.sign(ROOT_KEY, forge.md.sha256.create());
@@ -253,27 +289,30 @@ function parseAllCustomCerts() {
     var validity = info.validity;
     var altNames = info.altNames;
     var dnsName = [];
+    var disabled = (notRootCa(filename) && rulesUtil.isDisabledCertFile(filename)) || undefined;
     altNames.forEach(function (item) {
       if ((item.type === 2 || item.type === 7) && !pairs[item.value]) {
-        var preCert = customPairs[item.value];
-        if (preCert && preCert.key === cert.key && preCert.cert === cert.cert) {
-          if (preCert.mtime < mtime) {
-            preCert.mtime = mtime;
+        if (!disabled) {
+          var preCert = customPairs[item.value];
+          if (preCert && preCert.key === cert.key && preCert.cert === cert.cert) {
+            if (preCert.mtime < mtime) {
+              preCert.mtime = mtime;
+            }
+            pairs[item.value] = preCert;
+          } else {
+            pairs[item.value] = cert;
           }
-          pairs[item.value] = preCert;
-        } else {
-          pairs[item.value] = cert;
         }
         dnsName.push(item.value);
         certsInfo[item.value] = extend(
-          { filename: filename, type: cert.type, mtime: mtime, domain: item.value },
+          { filename: filename, type: cert.type, mtime: mtime, domain: item.value, disabled: disabled },
           validity
         );
       }
     });
     if (dnsName.length) {
       certFiles[filename] = extend(
-        { mtime: mtime, type: cert.type, dir: cert.dir, dnsName: dnsName.join(', ') },
+        { mtime: mtime, type: cert.type, dir: cert.dir, dnsName: dnsName.join(', '), disabled: disabled },
         validity
       );
     }
@@ -291,6 +330,7 @@ function loadCustomCerts(certDir, isCustom) {
     return;
   }
   var certs = {};
+  pureCertFiles = {};
   try {
     fs.readdirSync(certDir).forEach(function (name) {
       if (!/^(.+)\.(crt|cer|pem|key)$/.test(name)) {
@@ -302,7 +342,7 @@ function loadCustomCerts(certDir, isCustom) {
       var isCert = type !== 'key';
       try {
         var filePath = path.join(certDir, name);
-        var mtime = fs.statSync(filePath).mtime.getTime();
+        var mtime = common.getStatSync(filePath).mtime.getTime();
         if (isCert && cert.type && (cert.mtime == null || cert.mtime >= mtime)) {
           return;
         }
@@ -326,6 +366,12 @@ function loadCustomCerts(certDir, isCustom) {
   Object.keys(certs).filter(function (key) {
     var cert = certs[key];
     if (cert && cert.mtime != null && cert.key && cert.cert) {
+      pureCertFiles[key] = {
+        type: cert.type,
+        name: key,
+        key: cert.key,
+        cert: cert.cert
+      };
       try {
         cert = parseCert(cert);
         if (cert) {
@@ -415,22 +461,11 @@ function createRootCA() {
   }
 }
 
-function getRandom() {
-  var random = Math.floor(Math.random() * 1000);
-  if (random < 10) {
-    return '00' + random;
-  }
-  if (random < 100) {
-    return '0' + random;
-  }
-  return '' + random;
-}
-
 function createCACert(opts) {
   opts = opts || {};
-  var keys = pki.rsa.generateKeyPair(requiredVersion ? 2048 : 1024);
+  var keys = pki.rsa.generateKeyPair(KEY_SIZE);
   var cert = createCert(keys.publicKey);
-  var now = Date.now() + getRandom();
+  var now = Date.now() + common.padLeft(Math.floor(Math.random() * 1000), 3);
   var attrs = [
     {
       name: 'commonName',
@@ -707,6 +742,7 @@ function writeFile(filename, ctn, callback) {
 function removeCertFile(filename, type) {
   removeFile(path.join(CUSTOM_CERTS_DIR, filename + '.key'));
   removeFile(path.join(CUSTOM_CERTS_DIR, filename + type));
+  delete pureCertFiles[filename];
 }
 // 异步写入，出错重试即可
 function writeCertFile(filename, type, cert, mtime) {
@@ -718,12 +754,6 @@ function writeCertFile(filename, type, cert, mtime) {
   writeFile(certFile, cert.cert, function () {
     fs.utimes && fs.utimes(certFile, mtime, mtime, util.noop);
   });
-}
-
-var ILLEGAL_PATH_RE = /[/\\]/;
-
-function checkFilename(name) {
-  return name && !ILLEGAL_PATH_RE.test(name) && name !== 'root';
 }
 
 function getCertType(type) {
@@ -742,6 +772,17 @@ exports.removeCert = function (opts) {
   if (checkFilename(filename) && allCustomCerts[filename]) {
     removeCertFile(filename, type);
     delete allCustomCerts[filename];
+    parseAllCustomCerts();
+  }
+};
+
+exports.setActiveCert = function (opts) {
+  if (!CUSTOM_CERTS_DIR) {
+    return;
+  }
+  var filename = opts.filename;
+  if (notRootCa(filename) && allCustomCerts[filename]) {
+    rulesUtil.setDisabledCertFile(filename, opts.disabled);
     parseAllCustomCerts();
   }
 };
@@ -783,6 +824,12 @@ exports.uploadCerts = function (certs) {
         });
         if (cert) {
           writeCertFile(filename, type, cert.cert, new Date(mtime));
+          pureCertFiles[filename] = {
+            type: type,
+            name: filename,
+            key: keyStr,
+            cert: certStr
+          };
           allCustomCerts[filename] = cert;
           hasChanged = true;
         }
@@ -790,4 +837,8 @@ exports.uploadCerts = function (certs) {
     }
   });
   hasChanged && parseAllCustomCerts();
+};
+
+exports.getPureCertFiles = function () {
+  return pureCertFiles;
 };

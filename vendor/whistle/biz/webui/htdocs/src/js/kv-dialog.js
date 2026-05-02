@@ -1,10 +1,11 @@
-require('./base-css.js');
 require('../css/kv.css');
 var React = require('react');
 var Dialog = require('./dialog');
 var util = require('./util');
 var events = require('./events');
 var win = require('./win');
+var Icon = require('./icon');
+var CloseBtn = require('./close-btn');
 
 var KVDialog = React.createClass({
   getInitialState: function () {
@@ -15,6 +16,7 @@ var KVDialog = React.createClass({
     this.refs.kvDialog.show();
     this._hideDialog = false;
     var history = [];
+    var hideDefaultOption = data && data.hideDefaultOption;
     if (data && Array.isArray(data.list) && typeof data.data === 'object') {
       var count = 0;
       data.list.forEach(function(name) {
@@ -30,7 +32,8 @@ var KVDialog = React.createClass({
     }
     var modal = isValues ? valuesModal : rulesModal;
     this.setState({
-      selectedHistory: history.indexOf(selectedHistory) === -1 ? '' : selectedHistory,
+      hideDefaultOption: hideDefaultOption,
+      selectedHistory: history.indexOf(selectedHistory) === -1 ? (hideDefaultOption ? history[0] : '') : selectedHistory,
       history: history,
       modal: modal,
       list: util.parseImportData(
@@ -54,16 +57,32 @@ var KVDialog = React.createClass({
   viewContent: function (e) {
     util.openEditor(e.target.title);
   },
+
+  export: function () {
+    var data = {};
+    var list = [];
+    this.state.list.forEach(function (item) {
+      if (item.checked) {
+        data[item.name] = item.value;
+        list.push(item.name);
+      }
+    });
+    data[''] = list;
+    util.download(data, (this.isValues ? 'values_' : 'rules_') + util.formatDate() + '.txt');
+  },
   confirm: function () {
     var data = {};
+    var list = [];
     var hasConflict;
     var self = this;
     self.state.list.forEach(function (item) {
       if (item.checked) {
         hasConflict = hasConflict || item.isConflict;
         data[item.name] = item.value;
+        list.push(item.name);
       }
     });
+    data[''] = list;
     var save = function() {
       self.hide();
       return events.trigger(self.isValues ? 'uploadValues' : 'uploadRules', data);
@@ -72,7 +91,7 @@ var KVDialog = React.createClass({
       return save();
     }
     win.confirm(
-      'Conflict with current content, whether to overwrite?',
+      'Content conflict detected. Overwrite existing content?',
       function (sure) {
         if (sure) {
           save();
@@ -105,25 +124,29 @@ var KVDialog = React.createClass({
     var noData = !len;
     var checkedCount = 0;
     var modal = state.modal;
+    var hideDefaultOption = state.hideDefaultOption;
     var checkedAll = !noData && list.every(function (item) {
       return item.checked;
     });
+    var title = self.isValues ? 'Values' : 'Rules';
+
     return (
       <Dialog ref="kvDialog" wstyle="w-kv-dialog">
+        <div className="modal-header">
+          <h4>Select {title}</h4>
+          <CloseBtn onClick={self.hide} />
+        </div>
         <div className="modal-body">
-          <button type="button" className="close" onClick={self.hide}>
-            <span aria-hidden="true">&times;</span>
-          </button>
           {history.length ? <label>
-            {this.isValues ? 'Values' : 'Rules'} History:
+            History:
             <select
               value={selectedHistory}
               onChange={this.selectHistory}
               className="form-control w-history-record-list"
             >
-              <option value="">
+              {hideDefaultOption ? null : <option value="">
                 Select history
-              </option>
+              </option>}
               {
                 history.map(function(item, i) {
                   return (
@@ -143,7 +166,7 @@ var KVDialog = React.createClass({
               </th>
               <th className="w-kv-operation">Content</th>
             </thead>
-            <tbody>
+            <tbody className="w-hover-body">
               {noData ? (
                 <tr>
                   <td colSpan="3" className="w-empty">
@@ -164,9 +187,9 @@ var KVDialog = React.createClass({
                     var oldItem = modal && modal.get(item.name);
                     curValue = oldItem && oldItem.value;
                     if (curValue) {
-                      curValue = '<<<<<<<<<< <<<<<<<<<< <<<<<<<<<< OLD <<<<<<<<<< <<<<<<<<<< <<<<<<<<<<\n\n' +
-                      curValue + '\n\n========== ========== ========== BOUNDARY ========== ========== ==========\n\n' +
-                      value + '\n\n>>>>>>>>>> >>>>>>>>>> >>>>>>>>>> NEW >>>>>>>>>> >>>>>>>>>> >>>>>>>>>>';
+                      curValue = '<<<<<<<<<<< <<<<<<<<<<< <<<<<<<<<<< OLD <<<<<<<<<<< <<<<<<<<<<< <<<<<<<<<<<\n\n' +
+                      curValue + '\n\n=========== ========== ========== BOUNDARY ========== ========== ==========\n\n' +
+                      value + '\n\n>>>>>>>>>>> >>>>>>>>>>> >>>>>>>>>>> NEW >>>>>>>>>>> >>>>>>>>>>> >>>>>>>>>>>';
                     }
                   }
 
@@ -179,7 +202,7 @@ var KVDialog = React.createClass({
                         self.checkItem(e, item);
                       }} /></th>
                       <td title={item.name} className="w-kv-name">
-                        {isGroup ? <span className="glyphicon glyphicon-triangle-right w-list-group-icon" /> : null}{item.name}
+                        {isGroup ? <Icon name="triangle-right" className="w-list-group-icon" /> : null}{item.name}
                         {showConflict ? <strong onClick={self.viewContent} title={curValue}>[Conflict]</strong> : null}
                       </td>
                       <td className="w-kv-operation">
@@ -207,7 +230,15 @@ var KVDialog = React.createClass({
             className="btn btn-default"
             data-dismiss="modal"
           >
-            Close
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-default"
+            disabled={!checkedCount}
+            onClick={this.export}
+          >
+            Export Selected
           </button>
           <button
             type="button"
@@ -215,7 +246,7 @@ var KVDialog = React.createClass({
             disabled={!checkedCount}
             onClick={this.confirm}
           >
-            Add to {this.isValues ? 'Values' : 'Rules'} {len ? ' (' + checkedCount + ' / ' + len + ')' : null}
+            Add To {title} {len ? ' (' + checkedCount + ' / ' + len + ')' : null}
           </button>
         </div>
       </Dialog>

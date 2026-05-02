@@ -1,7 +1,7 @@
-require('./base-css.js');
 require('../css/btn-group.css');
 var React = require('react');
 var util = require('./util');
+var Icon = require('./icon');
 
 var BtnGroup = React.createClass({
   handleClick: function (btn) {
@@ -33,7 +33,7 @@ var BtnGroup = React.createClass({
     var tabs = self.props.tabs;
     var isSmall = self.props.type === 's';
     var list = tabs || self.props.btns;
-    var disabled = util.getBoolean(self.props.disabled);
+    var disabled = util.getBool(self.props.disabled);
 
     return (
       <div
@@ -46,11 +46,7 @@ var BtnGroup = React.createClass({
       >
         {list.map(function (btn) {
           btn.disabled = disabled;
-          var icon = btn.icon ? (
-            <span className={'glyphicon glyphicon-' + btn.icon}></span>
-          ) : (
-            ''
-          );
+          var icon = btn.icon ? <Icon name={btn.icon} /> : '';
           var clazz = btn.className ? ' ' + btn.className : '';
           btn.key = btn.key || util.getKey();
 
@@ -62,6 +58,7 @@ var BtnGroup = React.createClass({
               onDoubleClick={self.onDoubleClick}
               key={btn.key}
               type="button"
+              data-name={btn.name}
               style={{ display: btn.hide ? 'none' : undefined }}
               title={btn.title}
               className={

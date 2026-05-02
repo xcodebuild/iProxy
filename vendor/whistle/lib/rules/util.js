@@ -5,53 +5,26 @@ var Storage = require('./storage');
 var httpMgr = require('../util/http-mgr');
 
 var INTERVAL = 1000 * 60 * 60 * 2;
-var MAX_URL_LEN = 10 * 1024;
-var MAX_HEADERS_LEN = 128 * 1024;
-var MAX_BODY_LEN = 260 * 1024;
-var MAX_BASE64_LEN = 360 * 1024;
-var MAX_METHOD_LEN = 64;
-var MAX_HISTORY_LEN = 64;
-var history = [];
 var rulesStorage = new Storage(
   config.rulesDir,
   { Default: true },
   config.disableWebUI
 );
 var valuesStorage = new Storage(config.valuesDir, null, config.disableWebUI);
-var propertiesStorage = new Storage(
-  config.propertiesDir,
-  null,
-  config.disableWebUI
-);
+var propertiesStorage = new Storage(config.propertiesDir, { composerHistory: true }, config.disableWebUI);
 var LINE_END_RE = /\n|\r\n|\r/g;
-var MAX_REMOTE_RULES_COUNT = 16;
-var REMOTE_RULES_RE =
-  /^\s*@(`?)(whistle\.[a-z\d_\-]+(?:\/[^\s#]*)?|(?:https?:\/\/|[a-z]:[\\/]|~?\/)[^\s#]+|\$(?:whistle\.)?[a-z\d_-]+[/:][^\s#]+)\s*?\1(?:#.*)?$/gim;
-var MAX_COUNT_BY_IMPORT = 60;
-var MAX_FILENAME_LEN = 60;
-var inlineValues, proxy, pluginMgr;
-var accountRules;
-var defaultAccountRules;
-var CONTROL_RE =
-  /[\u001e\u001f\u200e\u200f\u200d\u200c\u202a\u202d\u202e\u202c\u206e\u206f\u206b\u206a\u206d\u206c]+/g;
-var MULTI_LINE_VALUE_RE =
-  /^[^\n\r\S]*(```+)[^\n\r\S]*(\S+)[^\n\r\S]*[\r\n]([\s\S]+?)[\r\n][^\n\r\S]*\1\s*$/gm;
+var SPACE_RE = /\s/;
+var MAX_COUNT_BY_IMPORT = 100;
+var inlineValues = {};
+var proxy, pluginMgr;
+var serviceRules;
+var mockRules;
 var dnsOrder = propertiesStorage.getProperty('dnsOrder');
 
 config.ipv6Only = config.ipv6Only || !!propertiesStorage.getProperty('ipv6Only');
 if (!config.dnsOrder && !config.setDefaultResultOrder(dnsOrder)) {
   config.dnsOrder = config.defaultDnsOrder;
 }
-
-try {
-  history = JSON.parse(propertiesStorage.readFile('composerHistory'));
-  if (Array.isArray(history)) {
-    history = history.filter(checkHistory);
-    history = history.slice(0, MAX_HISTORY_LEN);
-  } else {
-    history = [];
-  }
-} catch (e) {}
 
 function limitValueLen(name, len) {
   var value = propertiesStorage.getProperty(name);
@@ -65,111 +38,78 @@ function limitValueLen(name, len) {
 limitValueLen('Custom1', 16);
 limitValueLen('Custom2', 16);
 
-function checkHistory(data) {
-  if (
-    typeof data.url === 'string' &&
-    typeof data.method === 'string' &&
-    typeof data.headers === 'string'
-  ) {
-    if (!data.body) {
-      data.body = '';
-      return true;
-    }
-    return typeof data.body === 'string';
-  }
-}
-
-function getShadowRules(shadowRules, rulesText) {
-  if (rulesText) {
-    shadowRules = shadowRules ? rulesText + '\n' + shadowRules : rulesText;
-  }
-  return shadowRules;
-}
-
 /**
  * rules
  */
 
-function resolveInlineValues(str) {
-  str = str && str.replace(CONTROL_RE, '').trim();
-  if (!str || str.indexOf('```') === -1) {
-    return str;
-  }
-  return str.replace(MULTI_LINE_VALUE_RE, function (_, __, key, value) {
-    inlineValues = inlineValues || {};
-    if (!inlineValues[key]) {
-      inlineValues[key] = value;
-    }
-    return '';
-  });
+function handleInlineValues(text, file) {
+  return util.resolveInlineValues(text, inlineValues, file);
 }
 
-function reverseRules(text, orig) {
+function reverseRules(text, file) {
   if (!text) {
     return '';
   }
-  text = resolveInlineValues(text);
+  text = handleInlineValues(text, file);
   text = text.split(LINE_END_RE).reverse();
-  return orig ? text : text.join('\n');
+  return text.join('\n');
 }
 
-httpMgr.addChangeListener(function() {
-  var disableRules =
+if (config.networkMode && !config.shadowRulesMode) {
+  exports.parse = util.noop;
+} else {
+  httpMgr.addChangeListener(function() {
+    var disableRules =
     !config.notAllowedDisableRules &&
     propertiesStorage.getProperty('disabledAllRules');
-  var shadowRules =
+    var shadowRules =
     disableRules && config.allowDisableShadowRules ? null : config.shadowRules;
-  var value = [];
-  shadowRules = getShadowRules(shadowRules, defaultAccountRules);
-  shadowRules = getShadowRules(shadowRules, accountRules);
-  if (!disableRules && !config.multiEnv) {
-    getAllRulesFile().forEach(function (file) {
-      if (file.selected && !util.isGroup(file.name)) {
-        value.push(file.data);
-      }
-    });
-  }
-  var backRulesFirst =
+    var backRulesFirst =
     !config.disabledBackOption &&
     propertiesStorage.getProperty('backRulesFirst') === true;
-  var defaultRules =
-    disableRules || defaultRulesIsDisabled() ? null : getDefaultRules();
-  if (defaultRules) {
-    if (backRulesFirst) {
-      value.unshift(defaultRules);
-    } else {
-      value.push(defaultRules);
-    }
-  }
-
-  if (backRulesFirst) {
-    value = reverseRules(value.join('\n'), true);
-  }
-  value = value && value.join('\r\n');
-  if (shadowRules) {
-    if (backRulesFirst) {
-      value = reverseRules(shadowRules) + '\n' + value;
-    } else {
-      value += '\n' + shadowRules;
-    }
-  }
-  var rulesText = value;
-  if (rulesText) {
-    var index = 0;
-    rulesText = rulesText.replace(REMOTE_RULES_RE, function (_, apo, rulesUrl) {
-      if (index >= MAX_REMOTE_RULES_COUNT) {
-        return '';
+    disableRules = disableRules || config.pluginsMode || config.shadowRulesMode;
+    var defaultRules = disableRules || defaultRulesIsDisabled() ? null : getDefaultRules();
+    var rulesList = [];
+    var resolveRemoteRules = util.getRemoteRulesResolver(inlineValues);
+    var addRules = function(text, name, type) {
+      if (text) {
+        var file = (type || 'File: ') + name;
+        if (backRulesFirst && !type) {
+          text = resolveRemoteRules(reverseRules(text, file), file);
+          rulesList.unshift({
+            resolved: true,
+            file: file,
+            text: text
+          });
+        } else {
+          text = resolveRemoteRules(handleInlineValues(text, file), file);
+          rulesList.push({
+            resolved: true,
+            file: file,
+            text: text
+          });
+        }
       }
-      ++index;
-      var remoteRules = util.getRemoteRules(apo, rulesUrl);
-      return backRulesFirst ? reverseRules(remoteRules) : remoteRules;
-    });
-  }
-  rules._rawRulesText = rulesText;
-  pluginMgr.emit('updateRules', true);
-  rules.parse(rulesText, null, inlineValues);
-  inlineValues = null;
-});
+    };
+    if (!disableRules && !config.multiEnv) {
+      getAllRulesFile().forEach(function (file) {
+        if (file.selected && !util.isGroup(file.name)) {
+          addRules(file.data, file.name);
+        }
+      });
+    }
+    addRules(defaultRules, 'Default');
+    addRules(mockRules, '', 'Mock Rules');
+    addRules(serviceRules, '', 'Service Rules');
+    addRules(shadowRules, '', 'Shadow Rules');
+    rules._rawRulesText = rulesList.map(function(item) {
+      return item.text;
+    }).join('\r\n');
+    pluginMgr.emit('updateRules', true);
+    rules.parse(rulesList, null, inlineValues);
+    inlineValues = {};
+  });
+}
 
 function parseRules() {
   return httpMgr.triggerChange();
@@ -336,8 +276,38 @@ function moveRulesTo(fromName, toName, clientId, group, toTop) {
 }
 
 exports.rules = {
+  getConfig: function() {
+    var list = [
+      {
+        name: 'Default',
+        selected: !defaultRulesIsDisabled()
+      }
+    ];
+    var selectedList = getSelectedRulesList();
+    rulesStorage.getFileList().forEach(function (file) {
+      if (!util.isGroup(file.name)) {
+        list.push({ name: file.name, selected: selectedList.indexOf(file.name) !== -1 });
+      }
+    });
+    return {
+      pluginsDisabled: propertiesStorage.getProperty('disabledAllPlugins'),
+      disabled: !config.notAllowedDisableRules && propertiesStorage.getProperty('disabledAllRules'),
+      list: list
+    };
+  },
+  disableAllRules: function(disabled) {
+    propertiesStorage.setProperty('disabledAllRules', disabled);
+    parseRules();
+    proxy.emit('rulesDataChange', 'disabledAllRules', disabled);
+  },
   getRawRulesText: function() {
     return rules._rawRulesText || '';
+  },
+  getEnabledRules: function() {
+    return rules.getEnabledRules();
+  },
+  getMFlag: function() {
+    return rules.getMFlag();
   },
   moveGroupToTop: function(groupName, clientId) {
     var result = rulesStorage.moveGroupToTop(groupName);
@@ -378,7 +348,9 @@ exports.rules = {
     first && moveRulesTo(name, first.name, clientId, null, true);
   },
   moveToGroup: function(name, groupName, isTop) {
-    return rulesStorage.moveToGroup(name, groupName, isTop);
+    if (rulesStorage.moveToGroup(name, groupName, isTop)) {
+      proxy.emit('rulesDataChange', 'moveToGroup', name, groupName, isTop);
+    }
   },
   get: function (file) {
     return rulesStorage.readFile(file);
@@ -451,7 +423,6 @@ exports.values = {
   exists: function(name) {
     return valuesStorage.existsFile(name);
   },
-  LIMIMT_FILES_COUNT: MAX_FILENAME_LEN,
   moveTo: function (fromName, toName, clientId, group, toTop) {
     if (valuesStorage.moveTo(fromName, toName, group, toTop)) {
       config.setModified(clientId);
@@ -460,7 +431,9 @@ exports.values = {
     }
   },
   moveToGroup: function(name, groupName, isTop) {
-    return valuesStorage.moveToGroup(name, groupName, isTop);
+    if (valuesStorage.moveToGroup(name, groupName, isTop)) {
+      proxy.emit('valuesDataChange', 'moveToGroup', name, groupName, isTop);
+    }
   },
   getFirstGroup: function() {
     return getFirstGroup(valuesStorage);
@@ -494,10 +467,15 @@ exports.values = {
 };
 
 setTimeout(function getWhistleVersion() {
-  util.getLatestVersion(config.registry, function (ver) {
+  util.getLatestVersion('https://registry.npmjs.org/whistle', function (ver) {
     ver && propertiesStorage.writeFile('latestVersion', ver);
     setTimeout(getWhistleVersion, INTERVAL);
   });
+  if (config.checkUpdateClient) {
+    util.getLatestVersion('https://raw.githubusercontent.com/avwo/whistle-client/main/package.json', function (ver) {
+      ver && propertiesStorage.writeFile('latestClientVersion', ver);
+    }, 'version' );
+  }
 }, 1000); //等待package的信息配置更新完成
 
 function setEnableCapture(enable) {
@@ -509,16 +487,35 @@ if (config.persistentCapture && config.isEnableCapture) {
   setEnableCapture(true);
 }
 
-/**
- * properties
- */
-var composerTimer;
-function saveComposerHistory() {
-  composerTimer = null;
-  try {
-    propertiesStorage.writeFile('composerHistory', JSON.stringify(history));
-  } catch (e) {}
-}
+exports.setDisabledCertFile = function(filename, disabled) {
+  var len = util.isString(filename) ? filename.length : 0;
+  if (!len || len > 100) {
+    return;
+  }
+  var list = propertiesStorage.getProperty('disabledCertFiles');
+  if (!Array.isArray(list)) {
+    list = [];
+  }
+  var index = list.indexOf(filename);
+  if (disabled) {
+    if (index !== -1) {
+      list.splice(index, 1);
+    }
+    list.push(filename);
+    if (list.length > 256) {
+      list = list.slice(-256);
+    }
+    propertiesStorage.setProperty('disabledCertFiles', list);
+  } else if (index !== -1) {
+    list.splice(index, 1);
+    propertiesStorage.setProperty('disabledCertFiles', list);
+  }
+};
+
+exports.isDisabledCertFile = function(filename) {
+  var list = propertiesStorage.getProperty('disabledCertFiles');
+  return Array.isArray(list) && list.indexOf(filename) !== -1;
+};
 
 exports.properties = {
   setIPv6Only: function(checked) {
@@ -533,12 +530,12 @@ exports.properties = {
       propertiesStorage.setProperty('dnsOrder', order);
     }
   },
-  getLatestVersion: function () {
-    var version = propertiesStorage.readFile('latestVersion');
+  getLatestVersion: function (name) {
+    var version = propertiesStorage.readFile(name || 'latestVersion');
     return typeof version === 'string' && version.length < 60 ? version : '';
   },
   isEnableCapture: function () {
-    if (config.multiEnv) {
+    if (config.multiEnv || config.notAllowedEnableHTTPS) {
       return false;
     }
     if (config.isEnableCapture != null) {
@@ -567,63 +564,6 @@ exports.properties = {
   },
   get: function (name) {
     return propertiesStorage.getProperty(name);
-  },
-  getHistory: function () {
-    return history;
-  },
-  addHistory: function (data) {
-    if (!data.needResponse || !checkHistory(data)) {
-      return;
-    }
-    var url = data.url;
-    var method = data.method;
-    var headers = data.headers;
-    var body = data.body;
-    var base64 = data.base64;
-    if (body || !base64 || typeof base64 !== 'string' || base64.length > MAX_BASE64_LEN) {
-      base64 = undefined;
-    }
-    var result = {
-      date: Date.now(),
-      useH2: data.useH2,
-      url: url.length > MAX_URL_LEN ? url.substring(0, MAX_URL_LEN) : url,
-      method:
-        method.length > MAX_METHOD_LEN
-          ? method.substring(0, MAX_METHOD_LEN)
-          : method,
-      headers:
-        headers.length > MAX_HEADERS_LEN
-          ? headers.substring(0, MAX_HEADERS_LEN)
-          : headers,
-      body: body.length > MAX_BODY_LEN ? body.substring(0, MAX_BODY_LEN) : body,
-      isHexText: !!data.isHexText,
-      base64: base64,
-      enableProxyRules: !!data.enableProxyRules
-    };
-    for (var i = 0, len = history.length; i < len; i++) {
-      var item = history[i];
-      if (
-        item.url === result.url &&
-        item.method === result.method &&
-        item.headers === result.headers &&
-        item.body === result.body &&
-        item.base64 === result.base64 &&
-        !item.useH2 !== result.useH2 &&
-        !item.enableProxyRules !== result.enableProxyRules
-      ) {
-        history.splice(i, 1);
-        break;
-      }
-    }
-    history.unshift(result);
-    var overflow = history.length - MAX_HISTORY_LEN;
-    if (overflow > 0) {
-      history.splice(MAX_HISTORY_LEN, overflow);
-    }
-    if (!composerTimer) {
-      composerTimer = setTimeout(saveComposerHistory, 2000);
-    }
-    proxy.emit('composerDataChange', history);
   }
 };
 
@@ -634,6 +574,29 @@ function getRules(rules) {
   if (typeof rules === 'string') {
     return rules;
   }
+}
+
+function getKeys(obj) {
+  var list = obj[''];
+  var keys = Object.keys(obj);
+  list = list && (Array.isArray(list) ? list : Array.isArray(list.list) ? list.list : null);
+  if (!list) {
+    return keys;
+  }
+  delete obj[''];
+  var result = [];
+  var count = 0;
+  list = list.concat(keys);
+  for (var i = 0, len = list.length; i < len; i++) {
+    var name = list[i];
+    if (util.isString(name) && (result.indexOf(name) === -1)) {
+      if (++count > MAX_COUNT_BY_IMPORT) {
+        return result;
+      }
+      result.push(name);
+    }
+  }
+  return result;
 }
 
 exports.addRules = function (rules, replace, clientId) {
@@ -647,8 +610,7 @@ exports.addRules = function (rules, replace, clientId) {
       hasChanged = setDefaultRules(getRules(rules));
     }
   } else {
-    var keys = Object.keys(rules).slice(keys, MAX_COUNT_BY_IMPORT);
-    keys.forEach(function (name) {
+    getKeys(rules).forEach(function (name) {
       var item = name ? rules[name] : null;
       if (Array.isArray(item) || typeof item === 'string') {
         item = { rules: item };
@@ -702,11 +664,10 @@ exports.addValues = function (values, replace, clientId) {
   }
   replace = replace !== false;
   var hasChanged;
-  var keys = Object.keys(values).slice(0, MAX_COUNT_BY_IMPORT);
-  keys.forEach(function (name) {
+  getKeys(values).forEach(function (name) {
     var isGroup = name[0] === '\r';
     name = name.trim();
-    if (!name || /\s/.test(name)) {
+    if (!name || SPACE_RE.test(name)) {
       return;
     }
     if (isGroup) {
@@ -720,7 +681,7 @@ exports.addValues = function (values, replace, clientId) {
       return;
     }
     if (typeof value !== 'string') {
-      value = JSON.stringify(value, null, '  ');
+      value = JSON.stringify(value, null, '  ') || '';
     }
     if (addValuesFile(name, value)) {
       hasChanged = true;
@@ -736,21 +697,16 @@ exports.setup = function (p) {
   proxy = p;
 };
 
-exports.setAccountRules = function(rulesText) {
+exports.setServiceRules = function(rulesText) {
   if (typeof rulesText === 'string') {
-    accountRules = rulesText;
-    exports.hasAccountRules = rulesText.trim();
+    serviceRules = rulesText;
     parseRules();
   }
 };
 
-exports.getAccountRules = function() {
-  return accountRules;
-};
-
-exports.setDefaultAccountRules = function(rulesText) {
+exports.setMockRules = function(rulesText) {
   if (typeof rulesText === 'string') {
-    defaultAccountRules = rulesText;
+    mockRules = rulesText;
     parseRules();
   }
 };

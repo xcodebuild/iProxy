@@ -1,4 +1,3 @@
-require('./base-css.js');
 require('../css/req-data.css');
 require('react-virtualized/styles.css');
 
@@ -15,27 +14,26 @@ var events = require('./events');
 var iframes = require('./iframes');
 var dataCenter = require('./data-center');
 var storage = require('./storage');
+var message = require('./message');
+var Icon = require('./icon');
+var BackToBottomBtn = require('./back-to-bottom-btn');
 
+var findDOMNode = ReactDOM.findDOMNode;
 var TREE_ROW_HEIGHT = 24;
 var ROW_STYLE = { outline: 'none' };
 var columnState = {};
 var columnKeys = {};
 var CMD_RE = /^:dump\s+(\d{1,15})\s*$/;
 var BODY_FILTER = /(^\s*|\s+)(content|c|b|body):/i;
-var NOT_BOLD_RULES = {
-  plugin: 1,
-  pac: 1,
-  reqWrite: 1,
-  resWrite: 1,
-  reqWriteRaw: 1,
-  resWriteRaw: 1,
-  responseFor: 1,
-  style: 1,
-  G: 1,
-  ignore: 1
-};
-var HINTS = ['d:<domain keyword or regexp>', 'm:<method keyword or regexp>',
-  's:<status code keyword or regexp>', 'h:<headers keyword or regexp>', 'b:<body keyword or regexp>'];
+var MAX_LEN = 64;
+var HINTS = [
+  '<keyword or regex for URL>',
+  'd:<keyword or regex for domain>',
+  'm:<keyword or regex for HTTP method>',
+  's:<keyword or regex for HTTP status code>',
+  'h:<keyword or regex for request or response headers>',
+  'b:<keyword or regex for request or response body>'
+];
 var contextMenuList = [
   {
     name: 'Open',
@@ -60,7 +58,7 @@ var contextMenuList = [
       { name: 'Path' },
       { name: 'URL' },
       { name: 'Full URL' },
-      { name: 'As CURL' },
+      { name: 'As cURL' },
       { name: 'Client IP' },
       { name: 'Server IP' },
       { name: 'Cookie' }
@@ -70,21 +68,21 @@ var contextMenuList = [
     name: 'Remove',
     list: [
       { name: 'All' },
-      { name: 'This' },
+      { name: 'One' },
       { name: 'Others' },
       { name: 'Selected' },
       { name: 'Unselected' },
       { name: 'Unmarked' },
-      { name: 'All Such Host', action: 'removeAllSuchHost' },
-      { name: 'All Such URL', action: 'removeAllSuchURL' }
+      { name: 'All Matching Hosts', action: 'removeAllSuchHost' },
+      { name: 'All Matching URLs', action: 'removeAllSuchURL' }
     ]
   },
   {
-    name: 'Filter',
+    name: 'Settings',
     list: [
       { name: 'Edit Settings' },
-      { name: 'Exclude All Such Host', action: 'excludeHost' },
-      { name: 'Exclude All Such URL', action: 'excludeUrl' }
+      { name: 'Exclude All Matching Hosts', action: 'excludeHost' },
+      { name: 'Exclude All Matching URLs', action: 'excludeUrl' }
     ]
   },
   {
@@ -104,17 +102,22 @@ var contextMenuList = [
       { name: 'Expand' },
       { name: 'Collapse' },
       { name: 'Expand All' },
-      { name: 'Collapse All' }
+      { name: 'Collapse All' },
+      { name: 'List View', action: 'toggleView' }
     ]
   },
   { name: 'Mock' },
   {
-    name: 'Import',
+    name: 'Service',
+    hide: true,
     list: [
-      { name: 'Local' },
-      { name: 'Remote' }
+      { name: 'Create API Test',  action: 'createApiTest' },
+      { name: 'Copy As Script',  action: 'copyAsScript' },
+      { name: 'Share Via URL', action: 'Export' }
     ]
   },
+  { name: 'Save' },
+  { name: 'Import' },
   { name: 'Export' },
   {
     name: 'Others',
@@ -123,6 +126,10 @@ var contextMenuList = [
   },
   { name: 'Help', sep: true }
 ];
+
+var getCellText = function (target) {
+  return ((target.attr('data-custom') ? target.attr('title') : target.text()) || '').trim();
+};
 
 var getFocusItemList = function (curItem) {
   if (!curItem || curItem.selected) {
@@ -138,20 +145,11 @@ var Spinner = React.createClass({
     if (!desc && order != 'asc') {
       order = null;
     }
+    order = order ? ' spinner-' + order : '';
     return (
       <div className="w-spinner">
-        <span
-          className={
-            'glyphicon glyphicon-triangle-top' +
-            (order ? ' spinner-' + order : '')
-          }
-        ></span>
-        <span
-          className={
-            'glyphicon glyphicon-triangle-bottom' +
-            (order ? ' spinner-' + order : '')
-          }
-        ></span>
+        <Icon name="triangle-top" className={order} />
+        <Icon name="triangle-bottom" className={order} />
       </div>
     );
   }
@@ -172,7 +170,7 @@ function getRuleStyle(data) {
   if (rule && (rule.isLoc || rule.isSpec)) {
     return ' w-has-local';
   }
-  return hasRules(rules) ? ' w-has-rules' : '';
+  return data[dataCenter.HAS_RULES_KEY] ? ' w-has-rules' : '';
 }
 
 function getClassName(data) {
@@ -193,21 +191,6 @@ function isVisible(item) {
 function isVisibleInTree(item) {
   var parent = item.parent;
   return !parent || (parent.expand && parent.pExpand);
-}
-
-function hasRules(rules) {
-  var keys = Object.keys(rules);
-  if (keys && keys.length) {
-    for (var i = 0, len = keys.length; i < len; i++) {
-      var rule = rules[keys[i]];
-      var enable = rule && rule.list && rule.list.length === 1 && rule.list[0].matcher;
-      if (rule && !NOT_BOLD_RULES[keys[i]] && enable !== 'enable://capture' &&  enable !== 'enable://intercept') {
-        return true;
-      }
-    }
-  }
-
-  return false;
 }
 
 function getStatusClass(data) {
@@ -275,28 +258,65 @@ function getType(className) {
   return '';
 }
 
+var END_RE = /:\/(.+)\/([miud]{0,4})$/;
+
+function getValue(item, key) {
+  var index = key.indexOf(':/');
+  var hasRegex;
+  var regex;
+  var decode;
+  if (index !== -1 && END_RE.test(key)) {
+    var pattern = RegExp.$1;
+    var flags = RegExp.$2 || '';
+    hasRegex = true;
+    if (flags.indexOf('d') !== -1) {
+      decode = true;
+      flags = flags.split('d').join('');
+    }
+    try {
+      regex = new RegExp(pattern, flags);
+    } catch (e) {}
+    key = key.substring(0, index);
+  }
+  var value;
+  if (key === 'req.body') {
+    value = util.isText(item.req.headers) ? util.getBody(item.req, true) : '';
+  } else if (key === 'res.body') {
+    value = util.isText(item.res.headers) ? util.getBody(item.res) : '';
+  } else {
+    value = util.getValue(item, key);
+  }
+  if (!value || !hasRegex) {
+    return value;
+  }
+  if (!regex || !regex.test(value)) {
+    return '';
+  }
+  value = RegExp.$1;
+  if (value && decode) {
+    try {
+      value = decodeURIComponent(value);
+    } catch (e) {}
+  }
+  return value;
+}
+
 function getIcon(data, className) {
   if (className.indexOf('danger') !== -1) {
-    return <span className="icon-leaf glyphicon glyphicon-remove-circle" />;
+    return <Icon name="remove-circle" className="icon-leaf" />;
   }
   if (className.indexOf('w-forbidden') !== -1) {
-    return <span className="icon-leaf glyphicon glyphicon-ban-circle" />;
+    return <Icon name="ban-circle" className="icon-leaf" />;
   }
   if (data && !data.endTime && !data.lost) {
-    return <span className="icon-leaf glyphicon glyphicon-hourglass" />;
+    return <Icon name="hourglass" className="icon-leaf" />;
   }
   var type = getType(className);
   var status = data.res && data.res.statusCode;
   if (type !== 'ERROR' && status != 101) {
     status = null;
   }
-  return (
-    <span
-      className={status || type ? 'w-type-icon' : 'glyphicon glyphicon-file'}
-    >
-      {status || type || null}
-    </span>
-  );
+  return status || type ? <span className="w-type-icon">{status || type }</span> : <Icon name="file" />;
 }
 
 function removeHighlight(elem) {
@@ -315,31 +335,35 @@ var Row = React.createClass({
 
     return (
       <table className="table w-req-table" key={p.key} style={p.style} data-id={item.id}>
-        <tbody>
+        <tbody className="w-hover-body">
           <tr
             tabIndex="-1"
             draggable={draggable}
             data-id={item.id}
-            className={getClassName(item)}
+            className={getClassName(item) + (item.highlight ? ' w-highlight' : '')}
             style={ROW_STYLE}
           >
             <th className="order" scope="row" style={style}>
               {order}
-              {item.fc ? <span className="glyphicon glyphicon-send" /> : null}
+              {item.importedData ? <Icon name="import" /> : null}
+              {item.fc && !item.importedData ? <Icon name="send" /> : null}
             </th>
             {columnList.map(function (col) {
               var name = col.name;
               var value;
               var url;
+              var isCustom;
               if (name === 'custom1') {
                 var key1 = dataCenter.custom1Key;
                 if (util.notEStr(key1)) {
-                  item.custom1 = util.getValue(item, key1);
+                  isCustom = true;
+                  item.custom1 = getValue(item, key1);
                 }
               } else if (name === 'custom2') {
                 var key2 = dataCenter.custom2Key;
                 if (util.notEStr(key2)) {
-                  item.custom2 = util.getValue(item, key2);
+                  isCustom = true;
+                  item.custom2 = getValue(item, key2);
                 }
               } else if (name === 'path') {
                 value = item.shortPath;
@@ -353,14 +377,20 @@ var Row = React.createClass({
                 }
               }
               var colStyle = getColStyle(col, style);
+              var icon = col.iconKey && util.getProperty(item, col.iconKey);
+              var iconElem = typeof col.getIcon === 'function' ? col.getIcon(item) : undefined;
+
               return (
                 <td
                   key={name}
                   className={col.className}
                   style={colStyle}
+                  data-custom={isCustom ? 1 : null}
                   title={col.showTitle ? (url || value) : undefined}
                 >
-                  {value}
+                  {iconElem}
+                  {icon ? <img className="w-cell-img" src={icon} /> : null}
+                  {isCustom && value && value.length > 1690 ? value.substring(0, 1680) + '...' : value}
                 </td>
               );
             })}
@@ -378,7 +408,8 @@ var ReqData = React.createClass({
     return {
       draggable: true,
       columns: settings.getSelectedColumns(),
-      dragger: dragger
+      dragger: dragger,
+      sessionsName: ''
     };
   },
   componentDidUpdate: function () {
@@ -498,6 +529,10 @@ var ReqData = React.createClass({
       }, 800);
     }
   },
+  getActivedList: function (item) {
+    var modal = this.props.modal;
+    return getFocusItemList(item) || (modal && modal.getSelectedList());
+  },
   componentDidMount: function () {
     var self = this;
     var timer;
@@ -521,6 +556,21 @@ var ReqData = React.createClass({
     events.on('focusNetworkFilterInput', function() {
       self.refs.filterInput.focus();
     });
+    events.on('saveSessions', function (_, item) {
+      var list = self.getActivedList(item);
+      var len = list && list.length;
+      if (!len) {
+        return;
+      }
+      self._sessionsList = list;
+      self._pendingSave = false;
+      $(findDOMNode(self.refs.saveSessions)).modal('show');
+      setTimeout(function () {
+        var input = findDOMNode(self.refs.sessionsName);
+        input.focus();
+        input.select();
+      }, 500);
+    });
     events.on('replayTreeView', function (_, dataId, count) {
       var item = self.props.modal.getTreeNode(dataId);
       var parent = item && item.parent;
@@ -538,8 +588,8 @@ var ReqData = React.createClass({
       timer && clearTimeout(timer);
       timer = setTimeout(update, 60);
     };
-    self.container = $(ReactDOM.findDOMNode(self.refs.container));
-    self.content = ReactDOM.findDOMNode(self.refs.content);
+    self.container = $(findDOMNode(self.refs.container));
+    self.content = findDOMNode(self.refs.content);
     var clickedCount = 0;
     self.$content = $(self.content)
       .on('dblclick', 'tr', function (e) {
@@ -573,10 +623,18 @@ var ReqData = React.createClass({
         var item;
         if (e.keyCode == 38) {
           //up
-          item = modal.prev();
+          if (e.ctrlKey || e.metaKey) {
+            item = modal.start();
+          } else {
+            item = modal.prev();
+          }
         } else if (e.keyCode == 40) {
           //down
-          item = modal.next();
+          if (e.ctrlKey || e.metaKey) {
+            item = modal.end();
+          } else {
+            item = modal.next();
+          }
         }
 
         if (item) {
@@ -631,11 +689,10 @@ var ReqData = React.createClass({
     };
     importRemoteUrl();
     $(window).on('hashchange', importRemoteUrl);
-    var backBtn = $(ReactDOM.findDOMNode(self.refs.backBtn));
     var hideBackBtn = function() {
       if (self.isShownBtn) {
         self.isShownBtn = false;
-        backBtn.hide();
+        self.refs.backBtn.hide();
       }
     };
     self.hideBackBtn = hideBackBtn;
@@ -644,18 +701,25 @@ var ReqData = React.createClass({
       if (show) {
         if (!self.isShownBtn) {
           self.isShownBtn = true;
-          backBtn.show();
+          self.refs.backBtn.show();
         }
       } else {
         hideBackBtn();
       }
+    });
+    events.on('checkViewInspectors', function(_, reqId) {
+      self._curComposerReqId = reqId && { reqId: reqId };
+      reqId && self.props.modal.getItem(reqId) && self.showViewInspectorsBtn(true);
+    });
+    events.on('setActiveSession', function(_, reqId) {
+      var item = self.props.modal.getItem(reqId);
+      item && self.triggerActiveItem(item);
     });
   },
   onDragStart: function (e) {
     var target = $(e.target).closest('.w-req-data-item');
     var dataId = target.attr('data-id');
     if (dataId) {
-      util.showIFrameMask(true);
       e.dataTransfer.setData('reqDataId', dataId);
     }
   },
@@ -748,6 +812,7 @@ var ReqData = React.createClass({
         }
       });
       this.updateFilter(filterList.join('\n'));
+      events.trigger('shakeSettings');
     }
     events.trigger('updateGlobal');
   },
@@ -776,6 +841,7 @@ var ReqData = React.createClass({
         }
       });
       this.updateFilter(filterList.join('\n'));
+      events.trigger('shakeSettings');
     }
     events.trigger('updateGlobal');
   },
@@ -831,7 +897,7 @@ var ReqData = React.createClass({
       break;
     case 'Mark':
     case 'Unmark':
-      var list = getFocusItemList(item) || (modal && modal.getSelectedList());
+      var list = this.getActivedList(item);
       if (list) {
         var isMark = action === 'Mark';
         list.forEach(function (item) {
@@ -855,14 +921,18 @@ var ReqData = React.createClass({
         events.trigger('exportSessions', item);
       }
       break;
+    case 'createApiTest':
+      return util.showService('createApiTest');
+    case 'copyAsScript':
+      return util.showService('copyAsScript');
+    case 'Save':
+      events.trigger('saveSessions', [item]);
+      break;
     case 'Abort':
       events.trigger('abortRequest', item);
       break;
-    case 'Local':
-      events.trigger('importSessions');
-      break;
-    case 'Remote':
-      events.trigger('importSessions', {shiftKey: true});
+    case 'Import':
+      events.trigger('showImportDialog');
       break;
     case 'Edit Settings':
       events.trigger('filterSessions', e);
@@ -879,7 +949,7 @@ var ReqData = React.createClass({
     case 'excludeUrl':
       curUrl && self.removeAllSuchURL(item || curUrl);
       break;
-    case 'This':
+    case 'One':
       if (treeId) {
         self.removeTreeNode(treeId);
       } else {
@@ -906,7 +976,7 @@ var ReqData = React.createClass({
       events.trigger('removeUnmarked');
       break;
     case 'Help':
-      window.open('https://avwo.github.io/whistle/webui/network.html');
+      window.open(util.getDocUrl('gui/network.html'));
       break;
     case 'Plugins':
       iframes.fork(action, {
@@ -952,18 +1022,37 @@ var ReqData = React.createClass({
     var target = $(e.target);
     var nodeName =  target.prop('nodeName');
     var el = target.closest('.w-req-data-item');
+    e.preventDefault();
     if (!el.length) {
       el = target.closest('.w-req-table');
     }
-    var dataId = el.attr('data-id');
-    var treeId = el.attr('data-tree');
     var modal = this.props.modal;
+    var dataId = el.attr('data-id');
+    clearTimeout(this._delayCtxTimer);
+    if (!modal.isTreeView && !dataId) {
+      var con = this.container.find('.ReactVirtualized__Grid:first');
+      if (con.length && document.elementFromPoint && con[0].offsetHeight < con[0].scrollHeight) {
+        var self = this;
+        var pageX = e.pageX;
+        var pageY = e.pageY;
+        this._delayCtxTimer = setTimeout(function () {
+          target = $(document.elementFromPoint(pageX, pageY)).closest('.w-req-data-item')[0];
+          target && self.onContextMenu({
+            target: target,
+            pageX: pageX,
+            pageY: pageY,
+            preventDefault: util.noop
+          });
+        }, 300);
+        return;
+      }
+    }
+    var treeId = el.attr('data-tree');
     var item = modal.getItem(dataId);
     var disabled = !item;
-    var cellText = item && (nodeName === 'TD' || nodeName === 'TH') && (target.text() || '').trim();
+    var cellText = item && (nodeName === 'TD' || nodeName === 'TH') && getCellText(target);
     var treeNodeData = modal.isTreeView && modal.getTreeNode(treeId);
     this.treeTarget = null;
-    e.preventDefault();
     this.currentFocusItem = item;
     var clickBlank = disabled && !treeNodeData;
     var list0 = contextMenuList[0].list;
@@ -1017,7 +1106,7 @@ var ReqData = React.createClass({
         menu.copyText = util.getUrl((item && item.url) || treeUrl);
         menu.disabled = isTreeNode;
         break;
-      case 'As CURL':
+      case 'As cURL':
         menu.copyText = util.asCURL(item);
         break;
       case 'Client IP':
@@ -1125,28 +1214,35 @@ var ReqData = React.createClass({
       treeList[3].disabled = !hasData;
     }
     var mockItem = contextMenuList[6];
+    var serviceItem = contextMenuList[7];
+    var pluginItem = contextMenuList[11];
+    serviceItem.list.forEach(function (menu, i) {
+      menu.disabled = disabled && (i < serviceItem.list.length - 1 || !treeNodeData);
+    });
     mockItem.disabled = disabled;
     mockItem.hide = dataCenter.hideMockMenu;
+    contextMenuList[10].disabled = clickBlank && !selectedCount;
     contextMenuList[8].disabled = clickBlank && !selectedCount;
-    var pluginItem = contextMenuList[9];
+    serviceItem.disabled = clickBlank;
+    serviceItem.hide = !dataCenter.whistleId;
     util.addPluginMenus(
       pluginItem,
       dataCenter.getNetworkMenus(),
-      treeItem.hide ? 8 : 9,
+      (treeItem.hide ? 9 : 10) + (serviceItem.hide ? 0 : 1) - (mockItem.hide ? 1 : 0),
       disabled,
       treeId,
       item && item.url
     );
-    var height = (treeItem.hide ? 310 : 340) - (pluginItem.hide ? 30 : 0) - (mockItem.hide ? 30 : 0);
+    var height = (treeItem.hide ? 370 : 400) - (serviceItem.hide ? 30 : 0) - (pluginItem.hide ? 30 : 0) - (mockItem.hide ? 30 : 0);
     pluginItem.maxHeight = height;
     var data = util.getMenuPosition(e, 110, height);
     data.list = contextMenuList;
     data.className = data.marginRight < 360 ? 'w-ctx-menu-left' : '';
-    data.className += pluginItem.hide ? '' : ' w-ctx-menu-others';
     this.refs.contextMenu.show(data);
   },
   updateList: function () {
     this.refs.content.refs.list.forceUpdateGrid();
+    events.trigger('checkAtBottom');
   },
   onFilterChange: function (keyword) {
     var self = this;
@@ -1158,6 +1254,32 @@ var ReqData = React.createClass({
       self.setState({ filterText: keyword }, self.updateList);
       events.trigger('networkStateChange');
     }, 600);
+  },
+  onFilterTypeChange: function (type) {
+    var self = this;
+    var baseDom = self.container;
+    var atBottom;
+    if (baseDom) {
+      baseDom = baseDom.find('.ReactVirtualized__Grid:first');
+      var body = baseDom.find('.ReactVirtualized__Grid__innerScrollContainer')[0];
+      if (body) {
+        var height = baseDom[0].offsetHeight + 5;
+        var ctnHeight = body.offsetHeight;
+        atBottom = ctnHeight <= height || baseDom[0].scrollTop + height >= ctnHeight;
+      } else {
+        atBottom = true;
+      }
+    }
+    self.props.modal.setFilterType(type);
+    self.setState({ filterType: type }, function() {
+      self.updateList();
+      if (atBottom) {
+        self.autoRefresh();
+        self._scrollTimer = setTimeout(self.autoRefresh, 30);
+      } else {
+        clearTimeout(self._scrollTimer);
+      }
+    });
   },
   onFilterKeyDown: function (e) {
     if (e.keyCode !== 13 || !CMD_RE.test(e.target.value)) {
@@ -1216,21 +1338,24 @@ var ReqData = React.createClass({
     if (!e.metaKey && !e.ctrlKey) {
       return;
     }
-    if (e.keyCode === 82) {
+    if (e.keyCode === 13) {
+      if (!util.hasShortcut( e.shiftKey ? 'replaySelectedRequestsTimes' : 'replaySelectedRequests')) {
+        return;
+      }
       events.trigger('replaySessions', [null, e.shiftKey]);
     } else if (e.keyCode === 65) {
+      if (!util.hasShortcut('abortRequest')) {
+        return;
+      }
       e.preventDefault();
       events.trigger('abortRequest');
-    } else if (e.keyCode === 69) {
-      e.preventDefault();
-      events.trigger('composer');
     }
   },
   renderColumn: function (col) {
     var name = col.name;
     var style = getColStyle(col);
     if (columnState[name]) {
-      style.color = '#337ab7';
+      style.color = 'var(--c-link)';
     }
     var title;
     if (name === 'custom1' || name === 'custom2') {
@@ -1310,6 +1435,35 @@ var ReqData = React.createClass({
       this.setState({});
     }
   },
+  saveSessions: function (e) {
+    var self = this;
+    if (self._pendingSave || (e && e.type !== 'click' && e.keyCode !== 13)) {
+      return;
+    }
+    var list = self._sessionsList;
+    self._pendingSave = true;
+    dataCenter.saveSessions(JSON.stringify({
+      filename: self.state.sessionsName.trim(),
+      sessions: list
+    }), function (data, xhr) {
+      self._pendingSave = false;
+      if (!data) {
+        return util.showSystemError(xhr);
+      }
+      if (data.em) {
+        return message.error(data.em);
+      }
+      $(findDOMNode(self.refs.saveSessions)).modal('hide');
+      self._sessionsList = null;
+      self.setState({ sessionsName: '' });
+      events.trigger('shakeSavedTab');
+      events.trigger('savedSessionsChanged');
+      message.success('Sessions saved successfully');
+    });
+  },
+  preventBlur: function (e) {
+    e.target.nodeName != 'INPUT' && e.preventDefault();
+  },
   renderTreeNode: function (item, options) {
     var draggable = this.state.draggable;
     var style = options.style;
@@ -1321,9 +1475,7 @@ var ReqData = React.createClass({
       <tr
         key={leaf ? leaf.id : item.path}
         style={style}
-        className={`w-req-data-item tree-node ${
-          leaf ? 'tree-leaf' : ''
-        } ${className}`}
+        className={'w-req-data-item tree-node' + (leaf ? ' tree-leaf' : '') + (className ? ' ' + className : '')}
         data-id={leaf && leaf.id}
         data-tree={item.path}
         draggable={leaf && draggable}
@@ -1333,13 +1485,7 @@ var ReqData = React.createClass({
       >
         {leaf ? (
           getIcon(leaf, className)
-        ) : (
-          <span
-            className={`icon-fold glyphicon glyphicon-triangle-${
-              item.expand ? 'bottom' : 'right'
-            }`}
-          ></span>
-        )}
+        ) : <Icon name={'triangle-' + (item.expand ? 'bottom' : 'right')} className="icon-fold" />}
         {value.length > 320 ? value.substring(0, 320) + '...' : value}
       </tr>
     );
@@ -1352,6 +1498,16 @@ var ReqData = React.createClass({
     return modal.isTreeView
       ? modal.getTree().list.filter(isVisibleInTree)
       : modal.getList().filter(isVisible);
+  },
+  filterSessionsName: function (e) {
+    this.setState({ sessionsName: util.formatFilename(e.target.value) });
+  },
+  showViewInspectorsBtn: function(visible) {
+    var composerReqId = this._curComposerReqId;
+    if (composerReqId && composerReqId.visible !== visible) {
+      events.trigger('showViewInspectorsBtn', visible);
+      composerReqId.visible = visible;
+    }
   },
   render: function () {
     var self = this;
@@ -1366,14 +1522,18 @@ var ReqData = React.createClass({
     var filterText = (state.filterText || '').trim();
     var record = state.record;
     var notQuery = storage.get('urlType') === '-';
+    var composerReqId = self._curComposerReqId;
+    var len = list.length;
+    var hasChanged = !len;
     self.startIndex = null;
     self.endIndex = null;
     self.visibleList = list;
+    hasChanged && self.showViewInspectorsBtn(false);
 
     return (
-      <div className="fill w-req-data-con orient-vertical-box">
+      <div className={'fill w-req-data-con v-box' + (self.props.hide ? ' hide' : '')}>
         <div
-          className="w-req-data-content fill orient-vertical-box"
+          className="w-req-data-ctn fill v-box"
           style={colStyle}
         >
           {record ? (
@@ -1401,8 +1561,8 @@ var ReqData = React.createClass({
             onKeyDown={self.onReplay}
             style={{
               background:
-                dataCenter.hashFilterObj || filterText
-                  ? 'lightyellow'
+                dataCenter.hashFilterObj || filterText || state.filterType
+                  ? 'var(--b-filtered)'
                   : undefined
             }}
             className={
@@ -1418,10 +1578,14 @@ var ReqData = React.createClass({
                     rowHeight={isTreeView ? TREE_ROW_HEIGHT : 28}
                     width={size.width}
                     height={size.height}
-                    rowCount={list.length}
+                    rowCount={len}
                     rowRenderer={function (options) {
                       var index = options.index;
                       var item = list[index];
+                      if (composerReqId && item.id === composerReqId.reqId) {
+                        hasChanged = true;
+                        self.showViewInspectorsBtn(true);
+                      }
                       if (isTreeView) {
                         if (self.startIndex == null) {
                           self.startIndex = index;
@@ -1430,6 +1594,7 @@ var ReqData = React.createClass({
                         return self.renderTreeNode(item, options);
                       }
                       var order = hasKeyword ? index + 1 : item.order;
+                      !hasChanged && index === len - 1 && self.showViewInspectorsBtn(false);
                       return (
                         <Row
                           style={options.style}
@@ -1447,22 +1612,59 @@ var ReqData = React.createClass({
               }}
             </RV.AutoSizer>
           </div>
-          <div className="w-back-to-the-bottom" ref="backBtn" onClick={this.autoRefresh}>
-            <span className="glyphicon glyphicon-arrow-down" />
-            Back to the bottom
-          </div>
         </div>
+        <BackToBottomBtn ref="backBtn" hide={isTreeView} onClick={this.autoRefresh} />
         <FilterInput
           ref="filterInput"
           onKeyDown={this.onFilterKeyDown}
           onChange={this.onFilterChange}
           wStyle={colStyle}
           addonHints={HINTS}
+          onFilterTypeChange={this.onFilterTypeChange}
           hintKey="networkHintList"
         />
         <ContextMenu onClick={this.onClickContextMenu} ref="contextMenu" />
         <ContextMenu onClick={this.onClickHeadMenu} ref="headContextMenu" />
         <QRCodeDialog ref="qrcodeDialog" />
+        <div ref="saveSessions" className="modal fade w-choose-filte-type">
+          <div className="modal-dialog">
+            <div className="modal-content">
+              <div className="modal-body">
+                <label className="w-choose-filte-type-label w-save-sessions-label">
+                  Save as:
+                  <input
+                    ref="sessionsName"
+                    onChange={this.filterSessionsName}
+                    onKeyDown={this.saveSessions}
+                    placeholder="Enter filename (optional)"
+                    className="form-control"
+                    maxLength={MAX_LEN}
+                    value={state.sessionsName || ''}
+                  />
+                </label>
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-default"
+                  data-dismiss="modal"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onKeyDown={this.saveSessions}
+                  tabIndex="0"
+                  onMouseDown={this.preventBlur}
+                  className="btn btn-primary"
+                  onClick={this.saveSessions}
+                >
+                  Save
+                </button>
+                </div>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }

@@ -1,3 +1,7 @@
+.w-kv-dialog {
+  z-index: calc(var(--z-modal) + 1);
+}
+
 .w-kv-dialog .modal-dialog {
   width: 720px;
 }
@@ -20,7 +24,7 @@
   margin-top: 3px;
 }
 .w-kv-name strong {
-  color: #f66;
+  color: var(--c-risk);
   margin-left: 5px;
   cursor: pointer;
 }
@@ -31,7 +35,7 @@
 
 .w-kv-check-all {
   float: left;
-  margin: 0 0 0 9px;
+  margin: 5px 0 0 9px;
   display: flex;
   align-items: center;
 }
