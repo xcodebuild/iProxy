@@ -331,7 +331,23 @@ async function initCopyFiles() {
         }
 
         const versionFile = path.join(IPROXY_FILES_DIR, 'version');
-        if (fs.existsSync(versionFile) && fs.readFileSync(versionFile, 'utf-8') === version && !electronIsDev) {
+        const whistleBundle = path.join(
+            IPROXY_FILES_DIR,
+            'node',
+            'node_modules',
+            'whistle',
+            'biz',
+            'webui',
+            'htdocs',
+            'js',
+            'index.js',
+        );
+        if (
+            fs.existsSync(versionFile) &&
+            fs.readFileSync(versionFile, 'utf-8') === version &&
+            fs.existsSync(whistleBundle) &&
+            !electronIsDev
+        ) {
             updateSplashProgress(100, 'Files already up to date');
         } else {
             console.log('copy files');

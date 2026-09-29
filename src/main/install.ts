@@ -119,19 +119,16 @@ Application will quit
     treeKill(process.pid);
 }
 
-export async function installCertAndHelper() {
-    console.log('Install cert');
-    const certs = (await generateCert()) as {
-        key: string;
-        cert: string;
-    };
+export async function installCertAndHelper(installCert = true) {
+    const dir = installCert ? (await tempdir()).replace('ADMINI~1', 'Administrator') : '';
 
-    const dir = (await tempdir()).replace('ADMINI~1', 'Administrator');
-
-    // 写入证书
-    await fs.mkdirp(dir);
-    await fs.writeFileAsync(path.join(dir, CERT_KEY_FILE_NAME), certs.key, 'utf-8');
-    await fs.writeFileAsync(path.join(dir, CERT_FILE_NAME), certs.cert, 'utf-8');
+    if (installCert) {
+        console.log('Install cert');
+        const certs = (await generateCert()) as { key: string; cert: string };
+        await fs.mkdirp(dir);
+        await fs.writeFileAsync(path.join(dir, CERT_KEY_FILE_NAME), certs.key, 'utf-8');
+        await fs.writeFileAsync(path.join(dir, CERT_FILE_NAME), certs.cert, 'utf-8');
+    }
 
     const formatPath = (path: string) => '"' + path + '"';
 
@@ -141,11 +138,14 @@ export async function installCertAndHelper() {
         if (SYSTEM_IS_MACOS) {
             // macOS big sur do not allow trust cert in any auto way
             // show box to guide user run command
+            fs.removeSync(INSTALL_DONE_FILE);
             const showGuide = () => {
-                const cmd = `echo "Please input local login password 请输入本地登录密码" && sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "${path.join(
-                    dir,
-                    CERT_FILE_NAME,
-                )}" && sudo cp ${formatPath(PROXY_CONF_HELPER_FILE_PATH)} ${formatPath(
+                const trustCertCommand = installCert
+                    ? `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${formatPath(
+                          path.join(dir, CERT_FILE_NAME),
+                      )} && `
+                    : '';
+                const cmd = `echo "Please input local login password 请输入本地登录密码" && ${trustCertCommand}sudo cp ${formatPath(PROXY_CONF_HELPER_FILE_PATH)} ${formatPath(
                     PROXY_CONF_HELPER_PATH,
                 )} && sudo chown root:admin ${formatPath(PROXY_CONF_HELPER_PATH)} && sudo chmod a+rx+s ${formatPath(
                     PROXY_CONF_HELPER_PATH,
@@ -155,8 +155,8 @@ export async function installCertAndHelper() {
 
                 dialog.showMessageBoxSync({
                     type: 'info',
-                    message: `Paste command to your Terminal and run to install cert and helper
-                    （命令已复制到剪贴板）粘贴命令到终端并运行以安装并信任证书
+                    message: `Paste command to your Terminal and run to install ${installCert ? 'the certificate and helper' : 'the proxy helper'}
+                    （命令已复制到剪贴板）粘贴命令到终端并运行以安装${installCert ? '并信任证书及代理辅助程序' : '代理辅助程序'}
                     `,
                 });
             };
@@ -227,8 +227,10 @@ export async function installCertAndHelper() {
     }
     console.log('after install');
     // 信任完成，把证书目录拷贝过去
-    await fs.copyAsync(dir, IPROXY_CERT_DIR_PATH);
-    console.log('copy cert done');
+    if (installCert) {
+        await fs.copyAsync(dir, IPROXY_CERT_DIR_PATH);
+        console.log('copy cert done');
+    }
 }
 
 async function checkCertInstall() {
@@ -258,14 +260,25 @@ async function checkHelperInstall() {
         // 权限不对
         return false;
     }
-    return true;
+    // An older install may still contain the Intel helper on Apple Silicon.
+    // Compare the installed binary with the one packaged for this architecture.
+    try {
+        const [installed, packaged] = await Promise.all([
+            fs.readFileAsync(PROXY_CONF_HELPER_PATH),
+            fs.readFileAsync(PROXY_CONF_HELPER_FILE_PATH),
+        ]);
+        return installed.equals(packaged);
+    } catch (e) {
+        return false;
+    }
 }
 
 // 检查安装状态，如果没安装就安装一下
 export default async function checkInstallStatus() {
-    if ((await checkCertInstall()) && (await checkHelperInstall())) {
+    const certInstalled = await checkCertInstall();
+    if (certInstalled && (await checkHelperInstall())) {
         // pass
     } else {
-        await installCertAndHelper();
+        await installCertAndHelper(!certInstalled);
     }
 }
