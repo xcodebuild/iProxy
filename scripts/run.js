@@ -167,6 +167,16 @@ function updateNodeModules() {
 
     fs.rmSync(path.join(nodeDir, 'modules'), { recursive: true, force: true });
     fs.renameSync(path.join(nodeDir, 'node_modules'), path.join(nodeDir, 'modules'));
+    // Yarn's local package install can omit Whistle's generated web UI bundle.
+    // Whistle reads this file during startup, so a missing bundle prevents the proxy from listening.
+    const webUiBundle = path.join('biz', 'webui', 'htdocs', 'js', 'index.js');
+    const bundleSource = path.join(root, 'vendor', 'whistle', webUiBundle);
+    const bundleDest = path.join(nodeDir, 'modules', 'whistle', webUiBundle);
+    if (!fs.existsSync(bundleSource)) {
+        throw new Error(`Whistle web UI bundle is missing: ${bundleSource}`);
+    }
+    fs.mkdirSync(path.dirname(bundleDest), { recursive: true });
+    fs.copyFileSync(bundleSource, bundleDest);
     updateZip();
 }
 

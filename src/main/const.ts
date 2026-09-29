@@ -27,7 +27,10 @@ export const SYSTEM_IS_LINUX = systemTypelinux === 'Linux';
 export const IPROXY_UPDATE_DIR = path.join(IPROXY_HOME_PATH, './update');
 export const IPROXY_UPDATE_CONFIG = path.join(IPROXY_UPDATE_DIR, './config.json');
 export const IPROXY_FILES_DIR = path.join(IPROXY_HOME_PATH, './files');
-export const PROXY_CONF_HELPER_FILE_PATH = path.join(IPROXY_FILES_DIR, './proxy_conf_helper');
+export const PROXY_CONF_HELPER_FILE_PATH = path.join(
+    IPROXY_FILES_DIR,
+    os.arch() === 'arm64' && SYSTEM_IS_MACOS ? 'proxy_conf_helper_arm64' : 'proxy_conf_helper',
+);
 export const PROXY_CONF_HELPER_PATH = path.join(IPROXY_HOME_PATH, './proxy_conf_helper');
 export const PROXY_REFRESH_WINDOWS_HELPER_PATH = path.join(IPROXY_FILES_DIR, './win_proxy_helper');
 
